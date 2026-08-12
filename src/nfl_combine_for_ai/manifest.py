@@ -200,15 +200,58 @@ def _goz1_header_fail(
     )
 
 
-def sniff_goz1_header(path: Path) -> Goz1HeaderInfo:
-    """
-    Read the GOZ1 file header (magic, version, tensor_count, meta_count).
+def _validate_goz1_header_fields(
+    path_s: str,
+    *,
+    file_size: int,
+    magic_u32: int,
+    version: int,
+    tensor_count: int,
+    meta_count: int,
+) -> Goz1HeaderInfo:
+    """Validate unpacked GOZ1 header fields (fail-closed)."""
+    common = dict(
+        version=version,
+        tensor_count=tensor_count,
+        meta_count=meta_count,
+        file_size=file_size,
+    )
+    if magic_u32 != GOZ1_MAGIC:
+        return _goz1_header_fail(
+            path_s,
+            error=f"bad GOZ1 magic 0x{magic_u32:08x} (expected GOZ1)",
+            **common,
+        )
+    if version not in GOZ1_SUPPORTED_VERSIONS:
+        return _goz1_header_fail(
+            path_s,
+            error=(
+                f"unsupported GOZ1 version {version} "
+                f"(supported: {sorted(GOZ1_SUPPORTED_VERSIONS)})"
+            ),
+            **common,
+        )
+    if (tensor_count > 0 or meta_count > 0) and file_size <= 24:
+        return _goz1_header_fail(
+            path_s,
+            error=(
+                "GOZ1 pack truncated: header declares "
+                f"tensor_count={tensor_count} meta_count={meta_count} "
+                f"but file is only {file_size} bytes"
+            ),
+            **common,
+        )
+    return Goz1HeaderInfo(
+        path=path_s,
+        valid=True,
+        error=None,
+        layout_plausible=True,
+        **common,
+    )
 
-    Does not parse tensor tables or payloads. Fail-closed on bad magic/version.
-    When counts are nonzero, also requires the file to be larger than the
-    24-byte header so header-only truncated packs are not treated as runnable.
-    Format SoT: rmems/grok-ozempic/docs/goz1-format.md
-    """
+
+def sniff_goz1_header(path: Path) -> Goz1HeaderInfo:
+    """Sniff GOZ1 magic/version/counts; reject truncated packs. SoT: grok-ozempic goz1-format."""
     path = Path(path)
     path_s = str(path)
     try:
@@ -217,61 +260,20 @@ def sniff_goz1_header(path: Path) -> Goz1HeaderInfo:
             header = handle.read(24)
     except OSError as exc:
         return _goz1_header_fail(path_s, error=f"cannot read GOZ1 file: {exc}")
-
     if len(header) < 24:
         return _goz1_header_fail(
             path_s,
             error=f"GOZ1 header too short ({len(header)} bytes; need 24)",
             file_size=file_size,
         )
-
     magic_u32, version, tensor_count, meta_count = struct.unpack("<IIQQ", header)
-    if magic_u32 != GOZ1_MAGIC:
-        return _goz1_header_fail(
-            path_s,
-            version=version,
-            tensor_count=tensor_count,
-            meta_count=meta_count,
-            file_size=file_size,
-            error=f"bad GOZ1 magic 0x{magic_u32:08x} (expected GOZ1)",
-        )
-    if version not in GOZ1_SUPPORTED_VERSIONS:
-        return _goz1_header_fail(
-            path_s,
-            version=version,
-            tensor_count=tensor_count,
-            meta_count=meta_count,
-            file_size=file_size,
-            error=(
-                f"unsupported GOZ1 version {version} "
-                f"(supported: {sorted(GOZ1_SUPPORTED_VERSIONS)})"
-            ),
-        )
-
-    # Header parse OK. Reject truncated packs that claim tables but stop at header.
-    if (tensor_count > 0 or meta_count > 0) and file_size <= 24:
-        return _goz1_header_fail(
-            path_s,
-            version=version,
-            tensor_count=tensor_count,
-            meta_count=meta_count,
-            file_size=file_size,
-            error=(
-                "GOZ1 pack truncated: header declares "
-                f"tensor_count={tensor_count} meta_count={meta_count} "
-                f"but file is only {file_size} bytes"
-            ),
-        )
-
-    return Goz1HeaderInfo(
+    return _validate_goz1_header_fields(
+        path_s,
+        file_size=file_size,
+        magic_u32=magic_u32,
         version=version,
         tensor_count=tensor_count,
         meta_count=meta_count,
-        path=path_s,
-        valid=True,
-        error=None,
-        layout_plausible=True,
-        file_size=file_size,
     )
 
 

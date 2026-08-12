@@ -4,6 +4,8 @@
 ---
 exclude_paths:
   - "tests/**"
+  - "tests/**/*"
+  - "**/tests/**"
   - "**/__pycache__/**"
   - ".venv/**"
   - "reports/**"
@@ -11,6 +13,8 @@ engines:
   complexity:
     exclude_paths:
       - "tests/**"
+      - "tests/**/*"
   duplication:
     exclude_paths:
       - "tests/**"
+      - "tests/**/*"

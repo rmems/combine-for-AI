@@ -122,6 +122,59 @@ def _select_goz1_generated(
     )
 
 
+def _missing_path_goz1_failure(
+    artifact: GeneratedArtifact,
+    resolved: Path | None,
+    src: str,
+) -> ArtifactSelection:
+    return _goz1_failed_selection(
+        source_format=src,
+        artifact_path=str(resolved) if resolved else artifact.path,
+        failure_reason=(
+            "GOZ1 generated artifact path does not exist or is not a file: "
+            f"{artifact.path!r}"
+        ),
+        quantization_name=_quantization_for_goz1(artifact) or "saaq",
+    )
+
+
+def _success_generated_selection(
+    artifact: GeneratedArtifact, resolved: Path, src: str
+) -> ArtifactSelection:
+    return ArtifactSelection(
+        status="success",
+        source_format=src,
+        runtime_format=f"generated_{artifact.format.value}",
+        quantization_name=_quantization_for_generated(artifact.format, artifact),
+        generated_format=artifact.format.value,
+        artifact_path=str(resolved),
+    )
+
+
+def _scan_generated_format(
+    fmt: ArtifactFormat,
+    generated: list[GeneratedArtifact],
+    base_path: Path,
+    src: str,
+) -> tuple[ArtifactSelection | None, ArtifactSelection | None]:
+    """Return (runnable_selection, goz1_missing_failure) for one preferred format."""
+    goz1_failure: ArtifactSelection | None = None
+    for artifact in generated:
+        if artifact.status not in (ArtifactStatus.SUCCESS, ArtifactStatus.PARTIAL):
+            continue
+        if artifact.format != fmt:
+            continue
+        resolved = _resolve_path(base_path, artifact.path)
+        if not resolved or not resolved.exists() or not resolved.is_file():
+            if fmt == ArtifactFormat.GOZ1:
+                goz1_failure = _missing_path_goz1_failure(artifact, resolved, src)
+            continue
+        if fmt == ArtifactFormat.GOZ1:
+            return _select_goz1_generated(artifact, resolved, src), None
+        return _success_generated_selection(artifact, resolved, src), None
+    return None, goz1_failure
+
+
 def _runnable_generated_artifact(
     base_path: Path,
     generated: list[GeneratedArtifact],
@@ -132,52 +185,17 @@ def _runnable_generated_artifact(
         ArtifactFormat.GPTQ,
     ),
 ) -> ArtifactSelection | None:
-    """Prefer GOZ1, then AWQ/GPTQ, when status is success/partial and path exists.
-
-    A claimed GOZ1 success/partial pack fails closed: missing path, bad header,
-    truncated layout, or unsupported quantization_method never falls through to
-    AWQ/GPTQ or HF. AWQ/GPTQ still skip missing paths so planned quants can fall
-    back to source formats when no GOZ1 was claimed.
-    """
-    goz1_failure: ArtifactSelection | None = None
+    """Prefer GOZ1, then AWQ/GPTQ. Claimed GOZ1 fails closed (no AWQ/HF fallback)."""
     src = source_format.value if source_format else "unknown"
-
     for fmt in preferred_formats:
-        for artifact in generated:
-            if artifact.status not in (ArtifactStatus.SUCCESS, ArtifactStatus.PARTIAL):
-                continue
-            if artifact.format != fmt:
-                continue
-            resolved = _resolve_path(base_path, artifact.path)
-            if not resolved or not resolved.exists() or not resolved.is_file():
-                if fmt == ArtifactFormat.GOZ1:
-                    goz1_failure = _goz1_failed_selection(
-                        source_format=src,
-                        artifact_path=str(resolved) if resolved else artifact.path,
-                        failure_reason=(
-                            "GOZ1 generated artifact path does not exist or is not a file: "
-                            f"{artifact.path!r}"
-                        ),
-                        quantization_name=_quantization_for_goz1(artifact) or "saaq",
-                    )
-                continue
-            if fmt == ArtifactFormat.GOZ1:
-                return _select_goz1_generated(artifact, resolved, src)
-
-            return ArtifactSelection(
-                status="success",
-                source_format=src,
-                runtime_format=f"generated_{artifact.format.value}",
-                quantization_name=_quantization_for_generated(artifact.format, artifact),
-                generated_format=artifact.format.value,
-                artifact_path=str(resolved),
-            )
-
-        # After scanning all GOZ1 entries, do not fall through to AWQ/GPTQ.
+        selection, goz1_failure = _scan_generated_format(
+            fmt, generated, base_path, src
+        )
+        if selection is not None:
+            return selection
         if fmt == ArtifactFormat.GOZ1 and goz1_failure is not None:
             return goz1_failure
-
-    return goz1_failure
+    return None
 
 
 def select_artifact_for_smoke(manifest: ModelManifest, base_path: Path) -> ArtifactSelection:
