@@ -17,6 +17,16 @@ class MetricsSummary:
     vram_gb: float
     routing_entropy: float
     spike_density: float | None = None
+    # MoE / SNN fields (nullable — import from grok-ozempic experiments when present)
+    route_top1_agreement: float | None = None
+    route_top2_agreement: float | None = None
+    block_output_cosine: float | None = None
+    resid_in_drift: float | None = None
+    block_index: int | None = None
+    expert_load_js: float | None = None
+    scale_source: str | None = None
+    goz1_version: int | None = None
+    sparsity: float | None = None
 
 
 class MetricsAccumulator:
@@ -60,6 +70,15 @@ class MetricsAccumulator:
             vram_gb=vram_gb,
             routing_entropy=routing_entropy,
             spike_density=None,
+            route_top1_agreement=None,
+            route_top2_agreement=None,
+            block_output_cosine=None,
+            resid_in_drift=None,
+            block_index=None,
+            expert_load_js=None,
+            scale_source=None,
+            goz1_version=None,
+            sparsity=None,
         )
 
     @property

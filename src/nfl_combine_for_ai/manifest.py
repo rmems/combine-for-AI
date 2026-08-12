@@ -1,11 +1,18 @@
 from __future__ import annotations
 
 import json
+import struct
 from enum import Enum
 from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, Field, ValidationError
+
+
+# Little-endian ASCII "GOZ1" — format SoT: rmems/grok-ozempic/docs/goz1-format.md
+GOZ1_MAGIC = int.from_bytes(b"GOZ1", "little")
+GOZ1_SUPPORTED_VERSIONS = frozenset({1, 2, 3})
+GOZ1_ROW_SENTINEL = 0x5CA1E021
 
 
 class ArtifactFormat(str, Enum):
@@ -17,6 +24,7 @@ class ArtifactFormat(str, Enum):
     PYTORCH = "pytorch"
     ONNX = "onnx"
     MYELIN = "myelin"
+    GOZ1 = "goz1"
 
 
 class ArtifactStatus(str, Enum):
@@ -25,6 +33,15 @@ class ArtifactStatus(str, Enum):
     PARTIAL = "partial"
     PLANNED = "planned"
     SKIPPED = "skipped"
+
+
+class ScaleSource(str, Enum):
+    """How ternary reconstruction scales were obtained."""
+
+    PACK_V2 = "pack_v2"
+    PACK_V3 = "pack_v3"
+    LEGACY_ORACLE = "legacy_oracle"
+    UNKNOWN = "unknown"
 
 
 class SourceArtifact(BaseModel):
@@ -39,6 +56,19 @@ class SourceArtifact(BaseModel):
     notes: str | None = None
 
 
+class Goz1Metadata(BaseModel):
+    """Optional GOZ1 pack metadata carried on generated artifacts or standalone fields."""
+
+    container_version: int | None = None
+    packing_scheme: str | None = None
+    gif_threshold: float | None = None
+    preserved_tensor_count: int | None = None
+    ternary_tensor_count: int | None = None
+    tensor_count: int | None = None
+    scale_source: ScaleSource | None = None
+    notes: str | None = None
+
+
 class GeneratedArtifact(BaseModel):
     format: ArtifactFormat
     status: ArtifactStatus
@@ -50,6 +80,7 @@ class GeneratedArtifact(BaseModel):
     group_size: int | None = None
     backend_compatibility: list[str] | None = None
     notes: str | None = None
+    goz1: Goz1Metadata | None = None
 
 
 class BackendCompatibility(BaseModel):
@@ -57,17 +88,24 @@ class BackendCompatibility(BaseModel):
     awq: bool = False
     gptq: bool = False
     myelin_accelerator: bool = False
+    goz1: bool = False
 
 
 class SAAQMetadata(BaseModel):
     routing_entropy: float | None = None
     spike_density: float | None = None
     experiment_id: str | None = None
+    route_top1_agreement: float | None = None
+    route_top2_agreement: float | None = None
+    block_output_cosine: float | None = None
+    resid_in_drift: float | None = None
 
 
 class BenchmarkLinkage(BaseModel):
     nfl_combine_run_id: str | None = None
     nfl_combine_config_path: str | None = None
+    grok_ozempic_report_path: str | None = None
+    grok_ozempic_experiment_id: str | None = None
 
 
 class ModelManifest(BaseModel):
@@ -81,21 +119,50 @@ class ModelManifest(BaseModel):
     benchmark_linkage: BenchmarkLinkage | None = None
 
 
+class Goz1HeaderInfo(BaseModel):
+    """Lightweight header sniff result (no payload parse)."""
+
+    magic: str = "GOZ1"
+    version: int
+    tensor_count: int
+    meta_count: int
+    path: str
+    valid: bool = True
+    error: str | None = None
+
+
+def _parse_raw(content: str, path: Path | None = None) -> Any:
+    """Parse JSON or YAML. Prefer YAML for .yml/.yaml; otherwise try JSON then YAML."""
+    suffix = path.suffix.lower() if path is not None else ""
+    if suffix in {".yaml", ".yml"}:
+        import yaml
+
+        return yaml.safe_load(content)
+
+    try:
+        return json.loads(content)
+    except json.JSONDecodeError:
+        import yaml
+
+        return yaml.safe_load(content)
+
+
 def load_manifest(path: Path) -> ModelManifest:
-    """Load and validate a model manifest from a JSON file."""
+    """Load and validate a model manifest from a JSON or YAML file."""
     with path.open("r", encoding="utf-8") as handle:
-        raw = json.load(handle)
+        content = handle.read()
+    raw = _parse_raw(content, path)
     return ModelManifest.model_validate(raw)
 
 
 def load_manifest_from_string(text: str) -> ModelManifest:
-    """Load and validate a model manifest from a JSON string."""
-    raw = json.loads(text)
+    """Load and validate a model manifest from a JSON (or YAML) string."""
+    raw = _parse_raw(text)
     return ModelManifest.model_validate(raw)
 
 
 def dispatch_artifact(manifest: ModelManifest) -> str:
-    """Return a dispatch tag based on the source artifact format."""
+    """Return a dispatch tag based on generated artifacts, then source format."""
     for gen in manifest.generated_artifacts:
         if gen.status in (ArtifactStatus.SUCCESS, ArtifactStatus.PARTIAL, ArtifactStatus.PLANNED):
             return f"generated_{gen.format.value}"
@@ -104,20 +171,117 @@ def dispatch_artifact(manifest: ModelManifest) -> str:
         return "gguf"
     if source_format in (ArtifactFormat.SAFETENSORS, ArtifactFormat.HF):
         return "safetensors_hf"
+    if source_format == ArtifactFormat.GOZ1:
+        return "goz1"
     return "unknown"
 
 
+def sniff_goz1_header(path: Path) -> Goz1HeaderInfo:
+    """
+    Read only the GOZ1 file header (magic, version, tensor_count, meta_count).
+
+    Does not parse the tensor table or payloads. Fail-closed on bad magic/version.
+    Format SoT: rmems/grok-ozempic/docs/goz1-format.md
+    """
+    path = Path(path)
+    try:
+        with path.open("rb") as handle:
+            header = handle.read(24)
+    except OSError as exc:
+        return Goz1HeaderInfo(
+            version=0,
+            tensor_count=0,
+            meta_count=0,
+            path=str(path),
+            valid=False,
+            error=f"cannot read GOZ1 file: {exc}",
+        )
+
+    if len(header) < 24:
+        return Goz1HeaderInfo(
+            version=0,
+            tensor_count=0,
+            meta_count=0,
+            path=str(path),
+            valid=False,
+            error=f"GOZ1 header too short ({len(header)} bytes; need 24)",
+        )
+
+    magic_u32, version, tensor_count, meta_count = struct.unpack("<IIQQ", header)
+    if magic_u32 != GOZ1_MAGIC:
+        return Goz1HeaderInfo(
+            version=version,
+            tensor_count=tensor_count,
+            meta_count=meta_count,
+            path=str(path),
+            valid=False,
+            error=f"bad GOZ1 magic 0x{magic_u32:08x} (expected GOZ1)",
+        )
+    if version not in GOZ1_SUPPORTED_VERSIONS:
+        return Goz1HeaderInfo(
+            version=version,
+            tensor_count=tensor_count,
+            meta_count=meta_count,
+            path=str(path),
+            valid=False,
+            error=f"unsupported GOZ1 version {version} (supported: {sorted(GOZ1_SUPPORTED_VERSIONS)})",
+        )
+
+    return Goz1HeaderInfo(
+        version=version,
+        tensor_count=tensor_count,
+        meta_count=meta_count,
+        path=str(path),
+        valid=True,
+        error=None,
+    )
+
+
+def write_minimal_goz1_fixture(
+    path: Path,
+    *,
+    version: int = 3,
+    tensor_count: int = 0,
+    meta_count: int = 0,
+) -> Path:
+    """Write a header-only GOZ1 file for tests (no tensor table / payloads)."""
+    if version not in GOZ1_SUPPORTED_VERSIONS:
+        raise ValueError(f"unsupported fixture version {version}")
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("wb") as handle:
+        handle.write(struct.pack("<IIQQ", GOZ1_MAGIC, version, tensor_count, meta_count))
+    return path
+
+
+def default_scale_source_for_version(version: int) -> ScaleSource:
+    if version >= 3:
+        return ScaleSource.PACK_V3
+    if version == 2:
+        return ScaleSource.PACK_V2
+    return ScaleSource.LEGACY_ORACLE
+
+
 __all__ = [
+    "GOZ1_MAGIC",
+    "GOZ1_SUPPORTED_VERSIONS",
+    "GOZ1_ROW_SENTINEL",
     "ArtifactFormat",
     "ArtifactStatus",
+    "ScaleSource",
     "SourceArtifact",
+    "Goz1Metadata",
     "GeneratedArtifact",
     "BackendCompatibility",
     "SAAQMetadata",
     "BenchmarkLinkage",
     "ModelManifest",
+    "Goz1HeaderInfo",
     "load_manifest",
     "load_manifest_from_string",
     "dispatch_artifact",
+    "sniff_goz1_header",
+    "write_minimal_goz1_fixture",
+    "default_scale_source_for_version",
     "ValidationError",
 ]

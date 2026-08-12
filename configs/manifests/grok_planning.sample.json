@@ -11,23 +11,38 @@
       "num_experts": 8,
       "top_k": 2
     },
-    "notes": "Future planning: Grok-1 MoE source checkpoint"
+    "notes": "Planning manifest: Grok-1 MoE source → GOZ1 (grok-ozempic) + optional myelin kernels"
   },
   "generated_artifacts": [
+    {
+      "format": "goz1",
+      "status": "planned",
+      "quantization_method": "saaq",
+      "bits": 2,
+      "backend_compatibility": ["grok-ozempic", "myelin-accelerator"],
+      "notes": "Primary quant target: GOZ1 v3 from rmems/grok-ozempic",
+      "goz1": {
+        "container_version": 3,
+        "packing_scheme": "ternary_snn_v3",
+        "gif_threshold": 0.05,
+        "scale_source": "pack_v3"
+      }
+    },
     {
       "format": "myelin",
       "status": "planned",
       "quantization_method": "saaq",
-      "bits": 3,
+      "bits": 2,
       "backend_compatibility": ["myelin-accelerator"],
-      "notes": "SAAQ conversion target for myelin-accelerator"
+      "notes": "Optional CUDA GEMV/GEMM path for GOZ1 payloads"
     }
   ],
   "backend_compatibility": {
     "gguf": false,
     "awq": false,
     "gptq": false,
-    "myelin_accelerator": true
+    "myelin_accelerator": true,
+    "goz1": true
   },
   "saaq_metadata": {
     "experiment_id": "saaq-grok-001",

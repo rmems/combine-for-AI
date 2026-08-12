@@ -146,4 +146,13 @@ def default_dataset_registry() -> DatasetRegistry:
     registry = DatasetRegistry()
     registry.register("jsonl", JsonlDatasetLoader())
     registry.register("hf", HuggingFaceDatasetLoader())
+    
+    # Try to register LAMBADA loader if available
+    try:
+        from benchmarks.lambada.loader import LAMBADALoader
+        registry.register("lambada", LAMBADALoader())
+    except ImportError:
+        # LAMBADA loader not available
+        pass
+    
     return registry

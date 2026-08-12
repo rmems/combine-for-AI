@@ -1,138 +1,117 @@
 # Architecture
 
-## Manifest Ingestion
+## Ecosystem boundaries
 
-`NFL-combine-for-AI` consumes model manifests produced by `magere-brug`.
+```text
+xai-dissect ──manifests──► grok-ozempic ──GOZ1 packs──► combine-for-AI (eval/report)
+                                 │                            ▲
+                                 ▼                            │
+                          myelin-accelerator            magere-brug handoff
+                          (CUDA kernels)                corinth-canal telemetry
+```
 
-### Manifest format (JSON)
+| Component | Responsibility |
+|-----------|----------------|
+| Manifest ingestion | Validate magere-style handoff JSON/YAML; dispatch by artifact format |
+| GOZ1 header sniff | Magic/version/tensor_count only — no dequant (format SoT in grok-ozempic) |
+| Benchmark runner | Mock (CI) + future import adapters for grok-ozempic experiment JSON |
+| Telemetry | Local GPU snapshot + optional corinth/myelin overlay |
+| Reports | JSON/CSV (+ markdown generators); MoE/SNN fields nullable |
+
+**combine-for-AI does not** pack GOZ1 files, run Grok-1 residual experiments, or own CUDA kernels.
+
+## Manifest ingestion
+
+### Manifest format (JSON or YAML)
 
 - `manifest_version`: fixed `"1.0.0"`
-- `model_name`: display name of the model
-- `model_family`: optional family tag (e.g. `llama2`, `llama3`, `grok`)
-- `source_artifact`: describes the original/local artifact
-  - `format`: `gguf`, `safetensors`, `hf`, `pytorch`, `onnx`, `myelin`
-  - `path`: local filesystem path
-  - `hf_repo_id` / `hf_revision`: HuggingFace source
-  - `url`: generic remote URL
-  - `checksum_sha256`: optional integrity hash
-  - `parameter_count`: optional parameter count
-  - `moe_layout`: optional MoE metadata dict
-- `generated_artifacts`: list of conversion/quantization results
-  - `format`: target format
+- `model_name`: display name
+- `model_family`: optional (e.g. `grok`)
+- `source_artifact`:
+  - `format`: `gguf`, `safetensors`, `hf`, `pytorch`, `onnx`, `myelin`, **`goz1`**
+  - `path`, `hf_repo_id` / `hf_revision`, `url`, `checksum_sha256`, `parameter_count`, `moe_layout`
+- `generated_artifacts[]`:
+  - `format` includes **`goz1`**, `awq`, `gptq`, `myelin`, …
   - `status`: `success`, `failed`, `partial`, `planned`, `skipped`
-  - `path`, `checksum_sha256`, `quantization_method`, `calibration_dataset`, `bits`, `group_size`
-  - `backend_compatibility`: list of backends (e.g. `["llama.cpp", "vllm", "myelin-accelerator"]`)
-- `backend_compatibility`: boolean flags for `gguf`, `awq`, `gptq`, `myelin_accelerator`
-- `saaq_metadata`: optional experiment metadata for SAAQ/routing research
-  - `routing_entropy`, `spike_density`, `experiment_id`
-- `benchmark_linkage`: optional link to an `NFL-combine-for-AI` run
-  - `nfl_combine_run_id`, `nfl_combine_config_path`
+  - optional nested **`goz1`**: `container_version`, `packing_scheme`, `gif_threshold`, tensor counts, `scale_source`
+- `backend_compatibility`: flags including `goz1`, `myelin_accelerator`, …
+- `saaq_metadata`: routing / route-agreement fields for SAAQ research
+- `benchmark_linkage`: combine run id + optional `grok_ozempic_report_path`
+
+### GOZ1 notes
+
+- Format SoT: `rmems/grok-ozempic/docs/goz1-format.md`
+- Supported header versions: **1, 2, 3** (v3 current write path)
+- `scale_source`: `pack_v3` | `pack_v2` | `legacy_oracle` | `unknown`
+- `sniff_goz1_header(path)` validates magic `GOZ1` and version only
 
 ### Dispatch logic
 
-`dispatch_artifact(manifest)` returns a routing tag used by the benchmark harness:
+`dispatch_artifact(manifest)`:
 
-1. If a `generated_artifact` exists with status `success`, `partial`, or `planned`, tag is `generated_<format>`.
-2. Otherwise, tag by source format: `gguf` or `safetensors_hf`.
-3. Fallback: `unknown`.
-
-### Validation
-
-`load_manifest(path)` and `load_manifest_from_string(text)` use Pydantic to validate schema. Invalid manifests raise `pydantic.ValidationError` with a clear message.
+1. First generated artifact with status `success` | `partial` | `planned` → `generated_<format>` (e.g. `generated_goz1`)
+2. Else source `gguf` → `gguf`
+3. Else source `safetensors` / `hf` → `safetensors_hf`
+4. Else source `goz1` → `goz1`
+5. Else `unknown`
 
 ### Example manifests
 
-Committed examples live in `configs/manifests/`:
-- `gguf.sample.json` — local GGUF artifact
-- `safetensors_hf.sample.json` — HF checkout with planned AWQ/GPTQ
-- `grok_planning.sample.json` — future MoE + SAAQ planning
+- `configs/manifests/goz1.sample.json` — GOZ1 success artifact + nested metadata
+- `configs/manifests/grok_planning.sample.json` — planned GOZ1 + myelin
+- `configs/manifests/gguf.sample.json` / `safetensors_hf.sample.json`
+- YAML samples for human-edited configs (`gguf.sample.yaml`)
 
-## Telemetry and Hardware Metrics
+## Artifact smoke
 
-The benchmark harness collects cross-platform hardware telemetry at the start of every run.
+Entrypoints:
 
-### `benchmarks/telemetry.py`
+- `scripts/run_smoke_benchmark.sh <manifest> [args…]`
+- `scripts/run_artifact_smoke.py --manifest <path>`
 
-- `SystemSnapshot` — CPU counts, memory, GPU names/driver, platform, Python version
-- `GPUMetrics` — per-GPU utilization, memory, temperature, power, clocks (via `pynvml`, optional)
-- `RoutingMetrics` — neuromorphic/SAAQ fields: `routing_entropy`, `spike_density`, `latent_stability`, `dv_dt_reductions`, `event_rate`
-- `TelemetrySnapshot` — combines system, GPU, and routing metrics into one artifact
+Selection priority for **existing** generated artifacts: **GOZ1 → AWQ → GPTQ**, then source GGUF / HF / GOZ1.
 
-All GPU collection is done through `pynvml` / `nvidia-ml-py`. No CUDA kernels live in this repo.
+GOZ1 success path uses quantization profile **`saaq`** and attaches header fields to the report row.
 
-### Upstream artifact compatibility
+## Metrics
 
-- `CorinthCanalArtifact` — consumes SAAQ / telemetry JSON files from `corinth-canal`
-- `MyelinAcceleratorArtifact` — consumes benchmark JSON files from `myelin-accelerator`
-- `merge_upstream_artifacts(base, corinth=..., myelin=...)` — overlays upstream metrics onto the local telemetry snapshot
+### LLM baseline
 
-A benchmark config may reference upstream artifacts:
+`accuracy`, `perplexity`, `throughput`, `latency_ms`, `vram_gb`, `routing_entropy`, `spike_density`
 
-```json
-{
-  "telemetry": {
-    "corinth_canal_path": "configs/telemetry/corinth.json",
-    "myelin_accelerator_path": "configs/telemetry/myelin.json"
-  }
-}
-```
+### MoE / SNN (nullable)
 
-### Report output
+| Field | Meaning |
+|-------|---------|
+| `route_top1_agreement` | Router top-1 match vs FP ref |
+| `route_top2_agreement` | Router top-2 match vs FP ref |
+| `block_output_cosine` | Block output cosine vs FP ref |
+| `resid_in_drift` | Residual-input drift (multi-block coupling) |
+| `block_index` | Block id in a chain |
+| `expert_load_js` | Expert-load JS divergence (secondary) |
+| `scale_source` | How ternary α was obtained |
+| `goz1_version` | Container version |
+| `sparsity` | Ternary zero fraction when known |
 
-Telemetry fields are flattened with a `telemetry_` prefix in both JSON and CSV reports:
-- `telemetry_sys_cpu_count_logical`, `telemetry_sys_memory_total_gb`, etc.
-- `telemetry_routing_entropy`, `telemetry_spike_density`, etc.
-- `telemetry_kernel_occupancy`, `telemetry_vram_bandwidth_gbps`
+Science note (from grok-ozempic #61/#64/#68): expert-only ternary is routing-safe **within** a block; multi-block residual drift can collapse later routing. Cosine-only gates are insufficient.
 
-A dedicated `reports/telemetry/<run_id>.telemetry.json` file is also emitted per run.
+## Telemetry
 
-## Artifact Smoke Run
+See `benchmarks/telemetry.py`: `SystemSnapshot`, `GPUMetrics` (optional `pynvml`), `RoutingMetrics`, upstream merge for corinth-canal / myelin-accelerator.
 
-Issue #3 adds a single-command manifest-driven smoke benchmark path for Vultr sprint validation.
+## Quantization registry
 
-### Entrypoints
+Supported profiles today: `fp16`, `awq`, `gptq`, `gguf`, **`ternary`**, **`saaq`** (GOZ1 path).
 
-- Shell wrapper: `scripts/run_smoke_benchmark.sh <manifest-path> [extra args...]`
-- Python CLI: `scripts/run_artifact_smoke.py --manifest <path>`
+`saaq` is for evaluation/import of Spiking Adaptive Activity Quantization artifacts — kernels live upstream.
 
-Example:
+## CI
 
-```bash
-./scripts/run_smoke_benchmark.sh \
-  configs/manifests/safetensors_hf.sample.json \
-  --output-dir /tmp/artifact-smoke
-```
+- `ci.yml` — pytest + smoke help
+- `manifest-ingestion.yml` — example manifests + dispatch
+- `mini-eval-smoke.yml` — tiny mock benchmark
+- `benchmark-smoke.yml` — manual small benchmark
 
-### Dispatch rules
+## Tracking
 
-- Prefer generated `AWQ` / `GPTQ` artifacts only when status is `success` or `partial` and the local artifact path exists.
-- Otherwise run `GGUF` sources when the local path exists.
-- Otherwise run `HF` / `Safetensors` sources when a local path exists or `hf_repo_id` is present.
-- Unsupported or missing artifacts produce a structured failure report instead of crashing without output.
-
-### Outputs
-
-- JSON: `reports/json/<run_id>.artifact-smoke.json`
-- CSV: `reports/csv/<run_id>.artifact-smoke.csv`
-
-Each smoke report includes:
-
-- `model_id`
-- `source_format`
-- `runtime_format`
-- `generated_format`
-- `quantization`
-- `gpu`
-- `cuda`
-- `throughput_tps`
-- `peak_vram_gb`
-- `perplexity`
-- `failure_reason` when the smoke run cannot execute
-
-## CI / Actions
-
-See `.github/workflows/`:
-- `ci.yml` — pytest + smoke benchmark help on every PR/push
-- `manifest-ingestion.yml` — validates example manifests and dispatch logic on PRs
-- `mini-eval-smoke.yml` — runs tiny fake benchmark with dummy data on PRs
-- `benchmark-smoke.yml` — manual-only workflow to run a small benchmark and upload artifacts
+Epic: GitHub **#20** — GOZ1 / MoE-SNN evaluation readiness for grok-ozempic.
