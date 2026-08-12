@@ -151,6 +151,31 @@ def _success_generated_selection(
     )
 
 
+def _is_claimable_generated(artifact: GeneratedArtifact, fmt: ArtifactFormat) -> bool:
+    return (
+        artifact.status in (ArtifactStatus.SUCCESS, ArtifactStatus.PARTIAL)
+        and artifact.format == fmt
+    )
+
+
+def _resolved_file(base_path: Path, raw_path: str | None) -> Path | None:
+    resolved = _resolve_path(base_path, raw_path)
+    if resolved and resolved.exists() and resolved.is_file():
+        return resolved
+    return None
+
+
+def _materialize_generated(
+    fmt: ArtifactFormat,
+    artifact: GeneratedArtifact,
+    resolved: Path,
+    src: str,
+) -> ArtifactSelection:
+    if fmt == ArtifactFormat.GOZ1:
+        return _select_goz1_generated(artifact, resolved, src)
+    return _success_generated_selection(artifact, resolved, src)
+
+
 def _scan_generated_format(
     fmt: ArtifactFormat,
     generated: list[GeneratedArtifact],
@@ -160,18 +185,16 @@ def _scan_generated_format(
     """Return (runnable_selection, goz1_missing_failure) for one preferred format."""
     goz1_failure: ArtifactSelection | None = None
     for artifact in generated:
-        if artifact.status not in (ArtifactStatus.SUCCESS, ArtifactStatus.PARTIAL):
+        if not _is_claimable_generated(artifact, fmt):
             continue
-        if artifact.format != fmt:
-            continue
-        resolved = _resolve_path(base_path, artifact.path)
-        if not resolved or not resolved.exists() or not resolved.is_file():
+        resolved = _resolved_file(base_path, artifact.path)
+        if resolved is None:
             if fmt == ArtifactFormat.GOZ1:
-                goz1_failure = _missing_path_goz1_failure(artifact, resolved, src)
+                goz1_failure = _missing_path_goz1_failure(
+                    artifact, _resolve_path(base_path, artifact.path), src
+                )
             continue
-        if fmt == ArtifactFormat.GOZ1:
-            return _select_goz1_generated(artifact, resolved, src), None
-        return _success_generated_selection(artifact, resolved, src), None
+        return _materialize_generated(fmt, artifact, resolved, src), None
     return None, goz1_failure
 
 
