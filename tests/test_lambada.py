@@ -143,6 +143,16 @@ def test_lambada_rejects_negative_max_samples() -> None:
         loader.load(DatasetSpec(name="bad", max_samples=-1))
 
 
+def test_lambada_rejects_negative_constructor_sample_size() -> None:
+    with pytest.raises(ValueError, match="non-negative"):
+        LAMBADALoader(sample_size=-1)
+
+
+def test_calculate_perplexity_rejects_negative_token_counts() -> None:
+    with pytest.raises(ValueError, match="non-negative"):
+        calculate_perplexity([-1.0], [-1, 2])
+
+
 def test_lambada_max_samples_zero() -> None:
     loader = LAMBADALoader(sample_size=50)
     dataset = loader.load(DatasetSpec(name="empty", max_samples=0))

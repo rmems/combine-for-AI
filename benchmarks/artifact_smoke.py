@@ -69,6 +69,59 @@ def _quantization_for_generated(
     return fmt.value
 
 
+def _goz1_failed_selection(
+    *,
+    source_format: str,
+    artifact_path: str | None,
+    failure_reason: str,
+    quantization_name: str | None = "saaq",
+) -> ArtifactSelection:
+    return ArtifactSelection(
+        status="failed",
+        source_format=source_format,
+        runtime_format="generated_goz1",
+        quantization_name=quantization_name,
+        generated_format="goz1",
+        artifact_path=artifact_path,
+        failure_reason=failure_reason,
+    )
+
+
+def _select_goz1_generated(
+    artifact: GeneratedArtifact,
+    resolved: Path,
+    source_format: str,
+) -> ArtifactSelection:
+    """Validate one GOZ1 generated artifact path and return success or failure."""
+    quant = _quantization_for_goz1(artifact)
+    if quant is None:
+        return _goz1_failed_selection(
+            source_format=source_format,
+            artifact_path=str(resolved),
+            failure_reason=(
+                "unsupported GOZ1 quantization_method: "
+                f"{artifact.quantization_method!r}"
+            ),
+            quantization_name=None,
+        )
+    header = sniff_goz1_header(resolved)
+    if not header.valid:
+        return _goz1_failed_selection(
+            source_format=source_format,
+            artifact_path=str(resolved),
+            failure_reason=header.error or "invalid GOZ1 header",
+            quantization_name=quant,
+        )
+    return ArtifactSelection(
+        status="success",
+        source_format=source_format,
+        runtime_format="generated_goz1",
+        quantization_name=quant,
+        generated_format="goz1",
+        artifact_path=str(resolved),
+    )
+
+
 def _runnable_generated_artifact(
     base_path: Path,
     generated: list[GeneratedArtifact],
@@ -87,6 +140,7 @@ def _runnable_generated_artifact(
     back to source formats when no GOZ1 was claimed.
     """
     goz1_failure: ArtifactSelection | None = None
+    src = source_format.value if source_format else "unknown"
 
     for fmt in preferred_formats:
         for artifact in generated:
@@ -97,57 +151,22 @@ def _runnable_generated_artifact(
             resolved = _resolve_path(base_path, artifact.path)
             if not resolved or not resolved.exists() or not resolved.is_file():
                 if fmt == ArtifactFormat.GOZ1:
-                    goz1_failure = ArtifactSelection(
-                        status="failed",
-                        source_format=source_format.value if source_format else "unknown",
-                        runtime_format="generated_goz1",
-                        quantization_name=_quantization_for_goz1(artifact) or "saaq",
-                        generated_format="goz1",
+                    goz1_failure = _goz1_failed_selection(
+                        source_format=src,
                         artifact_path=str(resolved) if resolved else artifact.path,
                         failure_reason=(
                             "GOZ1 generated artifact path does not exist or is not a file: "
                             f"{artifact.path!r}"
                         ),
+                        quantization_name=_quantization_for_goz1(artifact) or "saaq",
                     )
                 continue
             if fmt == ArtifactFormat.GOZ1:
-                header = sniff_goz1_header(resolved)
-                quant = _quantization_for_goz1(artifact)
-                if quant is None:
-                    return ArtifactSelection(
-                        status="failed",
-                        source_format=source_format.value if source_format else "unknown",
-                        runtime_format="generated_goz1",
-                        quantization_name=None,
-                        generated_format="goz1",
-                        artifact_path=str(resolved),
-                        failure_reason=(
-                            "unsupported GOZ1 quantization_method: "
-                            f"{artifact.quantization_method!r}"
-                        ),
-                    )
-                if not header.valid:
-                    return ArtifactSelection(
-                        status="failed",
-                        source_format=source_format.value if source_format else "unknown",
-                        runtime_format="generated_goz1",
-                        quantization_name=quant,
-                        generated_format="goz1",
-                        artifact_path=str(resolved),
-                        failure_reason=header.error or "invalid GOZ1 header",
-                    )
-                return ArtifactSelection(
-                    status="success",
-                    source_format=source_format.value if source_format else "unknown",
-                    runtime_format="generated_goz1",
-                    quantization_name=quant,
-                    generated_format="goz1",
-                    artifact_path=str(resolved),
-                )
+                return _select_goz1_generated(artifact, resolved, src)
 
             return ArtifactSelection(
                 status="success",
-                source_format=source_format.value if source_format else "unknown",
+                source_format=src,
                 runtime_format=f"generated_{artifact.format.value}",
                 quantization_name=_quantization_for_generated(artifact.format, artifact),
                 generated_format=artifact.format.value,

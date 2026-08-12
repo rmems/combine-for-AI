@@ -179,6 +179,27 @@ def dispatch_artifact(manifest: ModelManifest) -> str:
     return "unknown"
 
 
+def _goz1_header_fail(
+    path: str,
+    *,
+    error: str,
+    version: int = 0,
+    tensor_count: int = 0,
+    meta_count: int = 0,
+    file_size: int | None = None,
+) -> Goz1HeaderInfo:
+    return Goz1HeaderInfo(
+        version=version,
+        tensor_count=tensor_count,
+        meta_count=meta_count,
+        path=path,
+        valid=False,
+        error=error,
+        layout_plausible=False,
+        file_size=file_size,
+    )
+
+
 def sniff_goz1_header(path: Path) -> Goz1HeaderInfo:
     """
     Read the GOZ1 file header (magic, version, tensor_count, meta_count).
@@ -189,77 +210,67 @@ def sniff_goz1_header(path: Path) -> Goz1HeaderInfo:
     Format SoT: rmems/grok-ozempic/docs/goz1-format.md
     """
     path = Path(path)
+    path_s = str(path)
     try:
         file_size = path.stat().st_size
         with path.open("rb") as handle:
             header = handle.read(24)
     except OSError as exc:
-        return Goz1HeaderInfo(
-            version=0,
-            tensor_count=0,
-            meta_count=0,
-            path=str(path),
-            valid=False,
-            error=f"cannot read GOZ1 file: {exc}",
-            layout_plausible=False,
-            file_size=None,
-        )
+        return _goz1_header_fail(path_s, error=f"cannot read GOZ1 file: {exc}")
 
     if len(header) < 24:
-        return Goz1HeaderInfo(
-            version=0,
-            tensor_count=0,
-            meta_count=0,
-            path=str(path),
-            valid=False,
+        return _goz1_header_fail(
+            path_s,
             error=f"GOZ1 header too short ({len(header)} bytes; need 24)",
-            layout_plausible=False,
             file_size=file_size,
         )
 
     magic_u32, version, tensor_count, meta_count = struct.unpack("<IIQQ", header)
     if magic_u32 != GOZ1_MAGIC:
-        return Goz1HeaderInfo(
+        return _goz1_header_fail(
+            path_s,
             version=version,
             tensor_count=tensor_count,
             meta_count=meta_count,
-            path=str(path),
-            valid=False,
-            error=f"bad GOZ1 magic 0x{magic_u32:08x} (expected GOZ1)",
-            layout_plausible=False,
             file_size=file_size,
+            error=f"bad GOZ1 magic 0x{magic_u32:08x} (expected GOZ1)",
         )
     if version not in GOZ1_SUPPORTED_VERSIONS:
-        return Goz1HeaderInfo(
+        return _goz1_header_fail(
+            path_s,
             version=version,
             tensor_count=tensor_count,
             meta_count=meta_count,
-            path=str(path),
-            valid=False,
-            error=f"unsupported GOZ1 version {version} (supported: {sorted(GOZ1_SUPPORTED_VERSIONS)})",
-            layout_plausible=False,
             file_size=file_size,
+            error=(
+                f"unsupported GOZ1 version {version} "
+                f"(supported: {sorted(GOZ1_SUPPORTED_VERSIONS)})"
+            ),
         )
 
     # Header parse OK. Reject truncated packs that claim tables but stop at header.
-    layout_plausible = True
-    error: str | None = None
     if (tensor_count > 0 or meta_count > 0) and file_size <= 24:
-        layout_plausible = False
-        error = (
-            "GOZ1 pack truncated: header declares "
-            f"tensor_count={tensor_count} meta_count={meta_count} "
-            f"but file is only {file_size} bytes"
+        return _goz1_header_fail(
+            path_s,
+            version=version,
+            tensor_count=tensor_count,
+            meta_count=meta_count,
+            file_size=file_size,
+            error=(
+                "GOZ1 pack truncated: header declares "
+                f"tensor_count={tensor_count} meta_count={meta_count} "
+                f"but file is only {file_size} bytes"
+            ),
         )
 
     return Goz1HeaderInfo(
         version=version,
         tensor_count=tensor_count,
         meta_count=meta_count,
-        path=str(path),
-        valid=layout_plausible,
-        error=error,
-        layout_plausible=layout_plausible,
+        path=path_s,
+        valid=True,
+        error=None,
+        layout_plausible=True,
         file_size=file_size,
     )
 
