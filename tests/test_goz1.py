@@ -138,6 +138,74 @@ def test_select_artifact_goz1_missing_path_fails_closed() -> None:
     assert "does not exist" in selection.failure_reason
 
 
+def test_select_artifact_goz1_missing_does_not_fall_through_to_awq() -> None:
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmp = Path(tmpdir)
+        awq = tmp / "model-awq"
+        awq.write_text("ok", encoding="utf-8")
+        manifest = load_manifest_from_string(
+            json.dumps(
+                {
+                    "model_name": "goz1-before-awq",
+                    "source_artifact": {"format": "safetensors", "hf_repo_id": "x/y"},
+                    "generated_artifacts": [
+                        {
+                            "format": "goz1",
+                            "status": "success",
+                            "path": str(tmp / "missing.goz1"),
+                        },
+                        {"format": "awq", "status": "success", "path": str(awq)},
+                    ],
+                }
+            )
+        )
+        selection = select_artifact_for_smoke(manifest, tmp)
+        assert selection.status == "failed"
+        assert selection.generated_format == "goz1"
+        assert selection.runtime_format == "generated_goz1"
+
+
+def test_select_artifact_goz1_ternary_method() -> None:
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmp = Path(tmpdir)
+        pack = write_minimal_goz1_fixture(tmp / "t.goz1", version=3, tensor_count=2)
+        manifest = load_manifest_from_string(
+            json.dumps(
+                {
+                    "model_name": "ternary-goz1",
+                    "source_artifact": {"format": "safetensors"},
+                    "generated_artifacts": [
+                        {
+                            "format": "goz1",
+                            "status": "success",
+                            "path": str(pack),
+                            "quantization_method": "ternary_snn",
+                        }
+                    ],
+                }
+            )
+        )
+        selection = select_artifact_for_smoke(manifest, tmp)
+        assert selection.status == "success"
+        assert selection.quantization_name == "ternary"
+
+
+def test_sniff_truncated_nonzero_counts_invalid() -> None:
+    with tempfile.TemporaryDirectory() as tmpdir:
+        path = write_minimal_goz1_fixture(
+            Path(tmpdir) / "trunc.goz1",
+            version=3,
+            tensor_count=4,
+            meta_count=1,
+            pad_body=False,
+        )
+        header = sniff_goz1_header(path)
+        assert not header.valid
+        assert not header.layout_plausible
+        assert header.error is not None
+        assert "truncated" in header.error.lower()
+
+
 def test_select_artifact_prefers_goz1_over_awq() -> None:
     with tempfile.TemporaryDirectory() as tmpdir:
         tmp = Path(tmpdir)

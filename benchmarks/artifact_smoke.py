@@ -42,9 +42,30 @@ def _resolve_path(base_path: Path, raw_path: str | None) -> Path | None:
     return (base_path / path).resolve()
 
 
-def _quantization_for_generated(fmt: ArtifactFormat) -> str:
-    if fmt == ArtifactFormat.GOZ1:
+_SUPPORTED_SMOKE_QUANTS = frozenset({"fp16", "awq", "gptq", "gguf", "ternary", "saaq"})
+
+
+def _quantization_for_goz1(artifact: GeneratedArtifact | None) -> str | None:
+    """Map GOZ1 manifest quantization metadata to a registry profile name.
+
+    Returns None when the declared method is present but not supported.
+    """
+    method = (artifact.quantization_method if artifact else None) or ""
+    method = method.strip().lower()
+    if method in ("", "saaq", "saaq_v1", "saaq1", "saaq_1_5", "saaq1.5"):
         return "saaq"
+    if method in ("ternary", "ternary_snn", "trit"):
+        return "ternary"
+    if method in _SUPPORTED_SMOKE_QUANTS:
+        return method
+    return None
+
+
+def _quantization_for_generated(
+    fmt: ArtifactFormat, artifact: GeneratedArtifact | None = None
+) -> str | None:
+    if fmt == ArtifactFormat.GOZ1:
+        return _quantization_for_goz1(artifact)
     return fmt.value
 
 
@@ -60,11 +81,12 @@ def _runnable_generated_artifact(
 ) -> ArtifactSelection | None:
     """Prefer GOZ1, then AWQ/GPTQ, when status is success/partial and path exists.
 
-    GOZ1 with status success/partial but a missing/invalid pack fails closed
-    (does not silently fall through to HF). AWQ/GPTQ still skip missing paths
-    so planned or not-yet-materialized quants can fall back to source formats.
+    A claimed GOZ1 success/partial pack fails closed: missing path, bad header,
+    truncated layout, or unsupported quantization_method never falls through to
+    AWQ/GPTQ or HF. AWQ/GPTQ still skip missing paths so planned quants can fall
+    back to source formats when no GOZ1 was claimed.
     """
-    goz1_missing: ArtifactSelection | None = None
+    goz1_failure: ArtifactSelection | None = None
 
     for fmt in preferred_formats:
         for artifact in generated:
@@ -75,11 +97,11 @@ def _runnable_generated_artifact(
             resolved = _resolve_path(base_path, artifact.path)
             if not resolved or not resolved.exists() or not resolved.is_file():
                 if fmt == ArtifactFormat.GOZ1:
-                    goz1_missing = ArtifactSelection(
+                    goz1_failure = ArtifactSelection(
                         status="failed",
                         source_format=source_format.value if source_format else "unknown",
                         runtime_format="generated_goz1",
-                        quantization_name="saaq",
+                        quantization_name=_quantization_for_goz1(artifact) or "saaq",
                         generated_format="goz1",
                         artifact_path=str(resolved) if resolved else artifact.path,
                         failure_reason=(
@@ -90,27 +112,53 @@ def _runnable_generated_artifact(
                 continue
             if fmt == ArtifactFormat.GOZ1:
                 header = sniff_goz1_header(resolved)
+                quant = _quantization_for_goz1(artifact)
+                if quant is None:
+                    return ArtifactSelection(
+                        status="failed",
+                        source_format=source_format.value if source_format else "unknown",
+                        runtime_format="generated_goz1",
+                        quantization_name=None,
+                        generated_format="goz1",
+                        artifact_path=str(resolved),
+                        failure_reason=(
+                            "unsupported GOZ1 quantization_method: "
+                            f"{artifact.quantization_method!r}"
+                        ),
+                    )
                 if not header.valid:
                     return ArtifactSelection(
                         status="failed",
                         source_format=source_format.value if source_format else "unknown",
                         runtime_format="generated_goz1",
-                        quantization_name="saaq",
+                        quantization_name=quant,
                         generated_format="goz1",
                         artifact_path=str(resolved),
                         failure_reason=header.error or "invalid GOZ1 header",
                     )
+                return ArtifactSelection(
+                    status="success",
+                    source_format=source_format.value if source_format else "unknown",
+                    runtime_format="generated_goz1",
+                    quantization_name=quant,
+                    generated_format="goz1",
+                    artifact_path=str(resolved),
+                )
+
             return ArtifactSelection(
                 status="success",
                 source_format=source_format.value if source_format else "unknown",
                 runtime_format=f"generated_{artifact.format.value}",
-                quantization_name=_quantization_for_generated(artifact.format),
+                quantization_name=_quantization_for_generated(artifact.format, artifact),
                 generated_format=artifact.format.value,
                 artifact_path=str(resolved),
             )
 
-    # Prefer an explicit GOZ1 path failure over HF fallback when a pack was claimed.
-    return goz1_missing
+        # After scanning all GOZ1 entries, do not fall through to AWQ/GPTQ.
+        if fmt == ArtifactFormat.GOZ1 and goz1_failure is not None:
+            return goz1_failure
+
+    return goz1_failure
 
 
 def select_artifact_for_smoke(manifest: ModelManifest, base_path: Path) -> ArtifactSelection:

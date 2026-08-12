@@ -89,8 +89,15 @@ class LAMBADALoader:
         self.seed = seed
 
     def load(self, spec: DatasetSpec) -> LoadedDataset:
+        if spec.max_samples is None:
+            sample_size = self.sample_size
+        else:
+            sample_size = spec.max_samples
+            if sample_size < 0:
+                raise ValueError("max_samples must be non-negative")
+
         records = load_lambada_sample(
-            sample_size=spec.max_samples or self.sample_size,
+            sample_size=sample_size,
             seed=self.seed,
         )
 
@@ -108,57 +115,29 @@ class LAMBADALoader:
 def calculate_cloze_accuracy(
     predictions: list[str], references: list[str]
 ) -> float:
-    """
-    Calculate cloze accuracy for LAMBADA dataset.
-    
-    Args:
-        predictions: List of predicted completion words
-        references: List of ground truth completion words
-    
-    Returns:
-        Accuracy as float between 0 and 1
-    """
-    if not predictions or not references:
-        return 0.0
-    
+    """Calculate cloze accuracy; empty+empty is 0.0, length mismatch raises."""
     if len(predictions) != len(references):
-        raise ValueError(
-            f"Predictions ({len(predictions)}) and references "
-            f"({len(references)}) must have same length"
-        )
-    
+        raise ValueError("predictions and references must have the same length")
+    if not predictions:
+        return 0.0
+
     correct = sum(1 for pred, ref in zip(predictions, references) if pred == ref)
     return correct / len(predictions)
 
 
 def calculate_perplexity(
-    log_probabilities: list[float], 
-    token_counts: list[int]
+    log_probabilities: list[float],
+    token_counts: list[int],
 ) -> float:
-    """
-    Calculate perplexity from token-level log probabilities.
-    
-    Args:
-        log_probabilities: List of log probabilities for each token
-        token_counts: List of token counts for each example
-    
-    Returns:
-        Perplexity score (lower is better)
-    """
-    if not log_probabilities:
-        return float("inf")
-    
-    if len(log_probabilities) != sum(token_counts):
+    """Calculate perplexity from token log-probs; validate counts before fallback."""
+    total_tokens = sum(token_counts)
+    if len(log_probabilities) != total_tokens:
         raise ValueError(
             f"Log probabilities ({len(log_probabilities)}) must match "
-            f"total tokens ({sum(token_counts)})"
+            f"total tokens ({total_tokens})"
         )
-    
-    total_log_prob = sum(log_probabilities)
-    total_tokens = sum(token_counts)
-    
     if total_tokens == 0:
         return float("inf")
-    
-    avg_log_prob = total_log_prob / total_tokens
+
+    avg_log_prob = sum(log_probabilities) / total_tokens
     return float(2 ** (-avg_log_prob))

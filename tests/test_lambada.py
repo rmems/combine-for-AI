@@ -85,8 +85,13 @@ def test_calculate_cloze_accuracy_mismatch() -> None:
     predictions = ["store", "chair"]
     references = ["store"]
     
-    with pytest.raises(ValueError, match="must have same length"):
+    with pytest.raises(ValueError, match="same length"):
         calculate_cloze_accuracy(predictions, references)
+
+
+def test_calculate_cloze_accuracy_one_sided_empty() -> None:
+    with pytest.raises(ValueError, match="same length"):
+        calculate_cloze_accuracy([], ["store"])
 
 
 def test_calculate_perplexity() -> None:
@@ -125,17 +130,23 @@ def test_calculate_perplexity_mismatch() -> None:
 def test_lambada_in_registry() -> None:
     """Test that LAMBADA loader is registered by default."""
     registry = default_dataset_registry()
-    
-    # Should have at least jsonl and hf
+
     assert "jsonl" in registry.available_sources()
     assert "hf" in registry.available_sources()
-    
-    # Check if lambada is registered (it should be if import works)
-    sources = list(registry.available_sources())
-    if "lambada" in sources:
-        # Try to use it
-        loader = registry.loader_for("lambada")
-        assert isinstance(loader, LAMBADALoader)
+    assert "lambada" in registry.available_sources()
+    assert isinstance(registry.loader_for("lambada"), LAMBADALoader)
+
+
+def test_lambada_rejects_negative_max_samples() -> None:
+    loader = LAMBADALoader()
+    with pytest.raises(ValueError, match="non-negative"):
+        loader.load(DatasetSpec(name="bad", max_samples=-1))
+
+
+def test_lambada_max_samples_zero() -> None:
+    loader = LAMBADALoader(sample_size=50)
+    dataset = loader.load(DatasetSpec(name="empty", max_samples=0))
+    assert dataset.records == []
 
 
 def test_dataset_record_cloze_format() -> None:

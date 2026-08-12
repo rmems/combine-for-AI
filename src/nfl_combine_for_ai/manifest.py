@@ -120,7 +120,7 @@ class ModelManifest(BaseModel):
 
 
 class Goz1HeaderInfo(BaseModel):
-    """Lightweight header sniff result (no payload parse)."""
+    """Lightweight header sniff result (no full table/payload parse)."""
 
     magic: str = "GOZ1"
     version: int
@@ -129,6 +129,9 @@ class Goz1HeaderInfo(BaseModel):
     path: str
     valid: bool = True
     error: str | None = None
+    # False when counts declare tables but the file is only a header (truncated pack).
+    layout_plausible: bool = True
+    file_size: int | None = None
 
 
 def _parse_raw(content: str, path: Path | None = None) -> Any:
@@ -178,13 +181,16 @@ def dispatch_artifact(manifest: ModelManifest) -> str:
 
 def sniff_goz1_header(path: Path) -> Goz1HeaderInfo:
     """
-    Read only the GOZ1 file header (magic, version, tensor_count, meta_count).
+    Read the GOZ1 file header (magic, version, tensor_count, meta_count).
 
-    Does not parse the tensor table or payloads. Fail-closed on bad magic/version.
+    Does not parse tensor tables or payloads. Fail-closed on bad magic/version.
+    When counts are nonzero, also requires the file to be larger than the
+    24-byte header so header-only truncated packs are not treated as runnable.
     Format SoT: rmems/grok-ozempic/docs/goz1-format.md
     """
     path = Path(path)
     try:
+        file_size = path.stat().st_size
         with path.open("rb") as handle:
             header = handle.read(24)
     except OSError as exc:
@@ -195,6 +201,8 @@ def sniff_goz1_header(path: Path) -> Goz1HeaderInfo:
             path=str(path),
             valid=False,
             error=f"cannot read GOZ1 file: {exc}",
+            layout_plausible=False,
+            file_size=None,
         )
 
     if len(header) < 24:
@@ -205,6 +213,8 @@ def sniff_goz1_header(path: Path) -> Goz1HeaderInfo:
             path=str(path),
             valid=False,
             error=f"GOZ1 header too short ({len(header)} bytes; need 24)",
+            layout_plausible=False,
+            file_size=file_size,
         )
 
     magic_u32, version, tensor_count, meta_count = struct.unpack("<IIQQ", header)
@@ -216,6 +226,8 @@ def sniff_goz1_header(path: Path) -> Goz1HeaderInfo:
             path=str(path),
             valid=False,
             error=f"bad GOZ1 magic 0x{magic_u32:08x} (expected GOZ1)",
+            layout_plausible=False,
+            file_size=file_size,
         )
     if version not in GOZ1_SUPPORTED_VERSIONS:
         return Goz1HeaderInfo(
@@ -225,6 +237,19 @@ def sniff_goz1_header(path: Path) -> Goz1HeaderInfo:
             path=str(path),
             valid=False,
             error=f"unsupported GOZ1 version {version} (supported: {sorted(GOZ1_SUPPORTED_VERSIONS)})",
+            layout_plausible=False,
+            file_size=file_size,
+        )
+
+    # Header parse OK. Reject truncated packs that claim tables but stop at header.
+    layout_plausible = True
+    error: str | None = None
+    if (tensor_count > 0 or meta_count > 0) and file_size <= 24:
+        layout_plausible = False
+        error = (
+            "GOZ1 pack truncated: header declares "
+            f"tensor_count={tensor_count} meta_count={meta_count} "
+            f"but file is only {file_size} bytes"
         )
 
     return Goz1HeaderInfo(
@@ -232,8 +257,10 @@ def sniff_goz1_header(path: Path) -> Goz1HeaderInfo:
         tensor_count=tensor_count,
         meta_count=meta_count,
         path=str(path),
-        valid=True,
-        error=None,
+        valid=layout_plausible,
+        error=error,
+        layout_plausible=layout_plausible,
+        file_size=file_size,
     )
 
 
@@ -243,14 +270,22 @@ def write_minimal_goz1_fixture(
     version: int = 3,
     tensor_count: int = 0,
     meta_count: int = 0,
+    pad_body: bool = True,
 ) -> Path:
-    """Write a header-only GOZ1 file for tests (no tensor table / payloads)."""
+    """Write a minimal GOZ1 test file.
+
+    When ``pad_body`` is True and counts are nonzero, append a single padding
+    byte so the pack is not rejected as header-only truncated. Real tensor
+    tables are not written — this is only for header/selection unit tests.
+    """
     if version not in GOZ1_SUPPORTED_VERSIONS:
         raise ValueError(f"unsupported fixture version {version}")
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("wb") as handle:
         handle.write(struct.pack("<IIQQ", GOZ1_MAGIC, version, tensor_count, meta_count))
+        if pad_body and (tensor_count > 0 or meta_count > 0):
+            handle.write(b"\x00")
     return path
 
 

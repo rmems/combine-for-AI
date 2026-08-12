@@ -5,6 +5,8 @@ from pathlib import Path
 
 import pytest
 
+from pydantic import ValidationError
+
 from nfl_combine_for_ai.manifest import (
     ArtifactFormat,
     ArtifactStatus,
@@ -137,8 +139,7 @@ source_artifact:
         tmp_path = Path(tmp.name)
     
     try:
-        # This should raise validation errors
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             load_manifest(tmp_path)
     finally:
         tmp_path.unlink()
