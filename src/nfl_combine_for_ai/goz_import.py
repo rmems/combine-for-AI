@@ -240,19 +240,24 @@ def _goz1_version_from_pack(pack: dict[str, Any] | None) -> int | None:
     return None
 
 
+def _sparsity_values(scales: dict[str, Any]) -> list[float]:
+    vals: list[float] = []
+    for entry in scales.values():
+        if not isinstance(entry, dict):
+            continue
+        s = _as_float(entry.get("sparsity"))
+        if s is not None:
+            vals.append(s)
+    return vals
+
+
 def _mean_sparsity(pack: dict[str, Any] | None) -> float | None:
     if not pack:
         return None
     scales = pack.get("ternary_scales")
     if not isinstance(scales, dict) or not scales:
         return None
-    vals = [
-        s
-        for entry in scales.values()
-        if isinstance(entry, dict)
-        for s in [_as_float(entry.get("sparsity"))]
-        if s is not None
-    ]
+    vals = _sparsity_values(scales)
     return sum(vals) / len(vals) if vals else None
 
 
@@ -274,26 +279,45 @@ def _first_present_float(metrics: dict[str, Any], *keys: str) -> float | None:
     return None
 
 
+@dataclass(frozen=True)
+class _PackFields:
+    scale_source: str | None
+    goz1_version: int | None
+    sparsity: float | None
+    pack_name: str | None
+
+
+@dataclass(frozen=True)
+class _ImportCtx:
+    source_path: str
+    tokens: int | None
+    seed: int | None
+    decision: dict[str, Any] | None
+    provenance: dict[str, Any]
+
+
+def _pack_fields(pack: dict[str, Any] | None) -> _PackFields:
+    name = pack.get("pack") if isinstance(pack, dict) else None
+    return _PackFields(
+        scale_source=_scale_source_from_pack(pack),
+        goz1_version=_goz1_version_from_pack(pack),
+        sparsity=_mean_sparsity(pack),
+        pack_name=str(name) if name else None,
+    )
+
+
 def _row_from_arm_metrics(
-    *,
-    source_path: str,
+    ctx: _ImportCtx,
+    pack: _PackFields,
     arm: str,
     block: int | None,
     metrics: dict[str, Any],
-    tokens: int | None,
-    seed: int | None,
-    scale_source: str | None,
-    goz1_version: int | None,
-    sparsity: float | None,
-    pack_name: str | None,
-    decision: dict[str, Any] | None,
-    provenance: dict[str, Any],
 ) -> ImportedExperimentRow:
     label = metrics.get("label")
     return ImportedExperimentRow(
         schema=SCHEMA_MULTIBLOCK_V1,
         experiment_kind=GozExperimentKind.MULTIBLOCK.value,
-        source_path=source_path,
+        source_path=ctx.source_path,
         model_family="grok-1",
         arm=arm,
         block_index=block,
@@ -304,22 +328,22 @@ def _row_from_arm_metrics(
         block_output_cosine=_as_float(metrics.get("block_output_cosine")),
         resid_in_drift=_as_float(metrics.get("residual_drift_relative_norm")),
         expert_load_js=_as_float(metrics.get("expert_load_js_bits")),
-        scale_source=scale_source,
-        goz1_version=goz1_version,
-        sparsity=sparsity,
-        tokens=tokens,
-        seed=seed,
+        scale_source=pack.scale_source,
+        goz1_version=pack.goz1_version,
+        sparsity=pack.sparsity,
+        tokens=ctx.tokens,
+        seed=ctx.seed,
         label=str(label) if label is not None else arm,
         seconds=_as_float(metrics.get("seconds")),
-        pack_basename=str(pack_name) if pack_name else None,
+        pack_basename=pack.pack_name,
         extra={
             "moe_output_cosine": metrics.get("moe_output_cosine"),
             "residual_stream_cosine": metrics.get("residual_stream_cosine"),
             "block_output_drift_relative_norm": metrics.get(
                 "block_output_drift_relative_norm"
             ),
-            "decision": (decision or {}).get("decision") if decision else None,
-            "experiment_id": provenance.get("issue"),
+            "decision": (ctx.decision or {}).get("decision") if ctx.decision else None,
+            "experiment_id": ctx.provenance.get("issue"),
         },
     )
 
@@ -328,38 +352,28 @@ def _rows_for_block_entry(
     entry: dict[str, Any],
     *,
     chain: dict[str, Any],
-    source_path: str,
+    ctx: _ImportCtx,
     arms: tuple[str, ...],
-    tokens: int | None,
-    seed: int | None,
-    decision: dict[str, Any] | None,
-    provenance: dict[str, Any],
 ) -> list[ImportedExperimentRow]:
     block = _as_int(entry.get("block"))
     pack = _pack_for_block(chain, block) if block is not None else None
-    pack_name = pack.get("pack") if isinstance(pack, dict) else None
+    fields = _pack_fields(pack)
     rows: list[ImportedExperimentRow] = []
     for arm in arms:
         metrics = entry.get(arm)
-        if not isinstance(metrics, dict):
-            continue
-        rows.append(
-            _row_from_arm_metrics(
-                source_path=source_path,
-                arm=arm,
-                block=block,
-                metrics=metrics,
-                tokens=tokens,
-                seed=seed,
-                scale_source=_scale_source_from_pack(pack),
-                goz1_version=_goz1_version_from_pack(pack),
-                sparsity=_mean_sparsity(pack),
-                pack_name=str(pack_name) if pack_name else None,
-                decision=decision,
-                provenance=provenance,
-            )
-        )
+        if isinstance(metrics, dict):
+            rows.append(_row_from_arm_metrics(ctx, fields, arm, block, metrics))
     return rows
+
+
+def _require_multiblock_chain(raw: dict[str, Any]) -> dict[str, Any]:
+    chain = raw.get("chain")
+    if not isinstance(chain, dict):
+        raise GozImportError("multiblock metrics missing chain object")
+    per_block = chain.get("per_block")
+    if not isinstance(per_block, list) or not per_block:
+        raise GozImportError("multiblock metrics missing chain.per_block")
+    return chain
 
 
 def import_multiblock_metrics(
@@ -368,32 +382,20 @@ def import_multiblock_metrics(
     source_path: str,
     arms: tuple[str, ...] = ("expert_only", "fp16_control"),
 ) -> GozImportResult:
-    chain = raw.get("chain")
-    if not isinstance(chain, dict):
-        raise GozImportError("multiblock metrics missing chain object")
-    per_block = chain.get("per_block")
-    if not isinstance(per_block, list) or not per_block:
-        raise GozImportError("multiblock metrics missing chain.per_block")
-
+    chain = _require_multiblock_chain(raw)
     provenance = raw.get("provenance") if isinstance(raw.get("provenance"), dict) else {}
     decision = raw.get("decision") if isinstance(raw.get("decision"), dict) else None
-    tokens = _as_int(chain.get("tokens"))
-    seed = _as_int(chain.get("token_seed"))
+    ctx = _ImportCtx(
+        source_path=source_path,
+        tokens=_as_int(chain.get("tokens")),
+        seed=_as_int(chain.get("token_seed")),
+        decision=decision,
+        provenance=provenance,
+    )
     rows: list[ImportedExperimentRow] = []
-    for entry in per_block:
+    for entry in chain["per_block"]:
         if isinstance(entry, dict):
-            rows.extend(
-                _rows_for_block_entry(
-                    entry,
-                    chain=chain,
-                    source_path=source_path,
-                    arms=arms,
-                    tokens=tokens,
-                    seed=seed,
-                    decision=decision,
-                    provenance=provenance,
-                )
-            )
+            rows.extend(_rows_for_block_entry(entry, chain=chain, ctx=ctx, arms=arms))
     if not rows:
         raise GozImportError(
             f"no rows imported from multiblock metrics (arms={list(arms)})"
@@ -423,26 +425,24 @@ def _summary_status_map(summary: list[Any]) -> dict[str, Any]:
     }
 
 
-def import_route_preservation(
-    raw: dict[str, Any],
-    *,
-    source_path: str,
-) -> GozImportResult:
-    pilot = raw.get("pilot")
-    summary = raw.get("summary")
-    if not isinstance(pilot, dict) or not isinstance(summary, list):
-        raise GozImportError("route-preservation report missing pilot/summary")
+def _pilot_pack_version(pilot: dict[str, Any]) -> int | None:
+    pack_meta = pilot.get("pack_metadata")
+    if not isinstance(pack_meta, dict):
+        return None
+    return _as_int(pack_meta.get("oz.quantization_version"))
 
+
+def _route_row(
+    raw: dict[str, Any],
+    pilot: dict[str, Any],
+    summary: list[Any],
+    source_path: str,
+) -> ImportedExperimentRow:
     observed = _summary_map(summary)
-    pack_meta = (
-        pilot.get("pack_metadata")
-        if isinstance(pilot.get("pack_metadata"), dict)
-        else {}
-    )
-    goz1_version = _as_int(pack_meta.get("oz.quantization_version"))
+    goz1_version = _pilot_pack_version(pilot)
     mode = str(pilot.get("mode") or "unknown")
     pack_basename = pilot.get("pack_basename")
-    row = ImportedExperimentRow(
+    return ImportedExperimentRow(
         schema=SCHEMA_ROUTE_PRESERVATION_V1,
         experiment_kind=GozExperimentKind.ROUTE_PRESERVATION.value,
         source_path=source_path,
@@ -469,10 +469,22 @@ def import_route_preservation(
             "summary_status": _summary_status_map(summary),
         },
     )
+
+
+def import_route_preservation(
+    raw: dict[str, Any],
+    *,
+    source_path: str,
+) -> GozImportResult:
+    pilot = raw.get("pilot")
+    summary = raw.get("summary")
+    if not isinstance(pilot, dict) or not isinstance(summary, list):
+        raise GozImportError("route-preservation report missing pilot/summary")
+    row = _route_row(raw, pilot, summary, source_path)
     provenance = {
         "produced_by": raw.get("produced_by"),
         "model_family": raw.get("model_family"),
-        "experiment_id": f"route-preservation-block{pilot.get('block')}-{mode}",
+        "experiment_id": f"route-preservation-block{pilot.get('block')}-{row.arm}",
     }
     return GozImportResult(
         kind=GozExperimentKind.ROUTE_PRESERVATION,
@@ -499,6 +511,33 @@ def import_goz_experiment(
     return import_route_preservation(raw, source_path=source)
 
 
+def _validate_formats(formats: list[str]) -> None:
+    unknown = [f for f in formats if f not in _SUPPORTED_REPORT_FORMATS]
+    if unknown:
+        raise GozImportError(
+            f"unsupported report formats: {unknown}; "
+            f"allowed={sorted(_SUPPORTED_REPORT_FORMATS)}"
+        )
+
+
+def _write_json_report(output_dir: Path, rid: str, payload: dict[str, Any]) -> Path:
+    from benchmarks.reporting import write_json
+
+    jpath = output_dir / "json" / f"{rid}.goz-import.json"
+    write_json(jpath, payload)
+    return jpath
+
+
+def _write_csv_report(output_dir: Path, rid: str, rows: list[dict[str, Any]]) -> Path:
+    from benchmarks.reporting import write_csv
+
+    if not rows:
+        raise GozImportError("no result rows to write")
+    cpath = output_dir / "csv" / f"{rid}.goz-import.csv"
+    write_csv(cpath, rows)
+    return cpath
+
+
 def write_import_reports(
     result: GozImportResult,
     output_dir: Path,
@@ -507,29 +546,16 @@ def write_import_reports(
     run_id: str | None = None,
 ) -> dict[str, Path]:
     """Write JSON/CSV reports under output_dir; return written paths."""
-    from benchmarks.reporting import write_csv, write_json
-
     formats = formats or ["json", "csv"]
-    unknown = [f for f in formats if f not in _SUPPORTED_REPORT_FORMATS]
-    if unknown:
-        raise GozImportError(
-            f"unsupported report formats: {unknown}; allowed={sorted(_SUPPORTED_REPORT_FORMATS)}"
-        )
+    _validate_formats(formats)
     payload = result.to_payload(run_id=run_id)
     rid = payload["run"]["run_id"]
     output_dir = Path(output_dir)
     written: dict[str, Path] = {}
     if "json" in formats:
-        jpath = output_dir / "json" / f"{rid}.goz-import.json"
-        write_json(jpath, payload)
-        written["json"] = jpath
+        written["json"] = _write_json_report(output_dir, rid, payload)
     if "csv" in formats:
-        rows = payload["results"]
-        if not rows:
-            raise GozImportError("no result rows to write")
-        cpath = output_dir / "csv" / f"{rid}.goz-import.csv"
-        write_csv(cpath, rows)
-        written["csv"] = cpath
+        written["csv"] = _write_csv_report(output_dir, rid, payload["results"])
     if not written:
         raise GozImportError("no report formats selected")
     return written
