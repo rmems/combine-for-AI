@@ -1,0 +1,52 @@
+{
+  "model_family": "grok-1",
+  "produced_by": "fixture route-preservation",
+  "certification": {
+    "certified": true,
+    "basis": "fixture"
+  },
+  "pilot": {
+    "block": 0,
+    "mode": "attention_only",
+    "tokens": 256,
+    "seed": 20260805,
+    "pack_basename": "block_000-attention_only.goz1",
+    "ternary_scale": "least-squares optimal alpha; GOZ1 v1 stores no scale",
+    "pack_metadata": {
+      "oz.gif_threshold": "0.05",
+      "oz.quantization_version": 1
+    }
+  },
+  "summary": [
+    {
+      "name": "router_top1_agreement",
+      "scope": "router_behavior",
+      "status": "fail",
+      "observed": 0.6396484375
+    },
+    {
+      "name": "router_top2_set_agreement",
+      "scope": "router_behavior",
+      "status": "fail",
+      "observed": 0.421142578125
+    },
+    {
+      "name": "block_output_cosine",
+      "scope": "block_behavior",
+      "status": "fail",
+      "observed": 0.8492034016757434
+    },
+    {
+      "name": "residual_stream_drift",
+      "scope": "block_behavior",
+      "status": "measured",
+      "observed": 0.5341102824225851
+    },
+    {
+      "name": "expert_load_js_divergence",
+      "scope": "router_behavior",
+      "status": "measured",
+      "observed": 0.11021330045422195
+    }
+  ]
+}
