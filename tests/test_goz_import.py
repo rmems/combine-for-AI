@@ -35,7 +35,7 @@ def test_import_multiblock_rows() -> None:
     result = import_goz_experiment(path)
     assert result.kind is GozExperimentKind.MULTIBLOCK
     assert result.schema == SCHEMA_MULTIBLOCK_V1
-    # 2 blocks × 2 arms
+    # 2 blocks x 2 arms
     assert len(result.rows) == 4
 
     b0_expert = next(
@@ -58,6 +58,67 @@ def test_import_multiblock_rows() -> None:
     )
     assert b1_expert.route_top1_agreement == pytest.approx(0.887695)
     assert b1_expert.resid_in_drift == pytest.approx(0.277)
+
+
+def test_import_multiblock_expert_only_four_blocks() -> None:
+    """Compatibility fixture shaped like #68 expert-only chain (4 blocks)."""
+    path = FIXTURES / "goz_multiblock_expert_only_4block.sample.json"
+    result = import_goz_experiment(path, arms=("expert_only",))
+    assert len(result.rows) == 4
+    by_block = {r.block_index: r for r in result.rows}
+    assert by_block[0].route_top1_agreement == pytest.approx(1.0)
+    assert by_block[0].resid_in_drift == pytest.approx(0.0)
+    assert by_block[3].route_top1_agreement == pytest.approx(0.52832)
+    assert by_block[3].resid_in_drift == pytest.approx(0.498)
+    assert by_block[3].block_output_cosine == pytest.approx(0.839144)
+    assert result.decision is not None
+    assert result.decision.get("decision") == 3
+
+
+def test_preserve_zero_top2_agreement() -> None:
+    raw = {
+        "chain": {
+            "tokens": 8,
+            "token_seed": 1,
+            "per_block": [
+                {
+                    "block": 0,
+                    "expert_only": {
+                        "router_top1_agreement": 0.5,
+                        "router_top2_set_agreement": 0.0,
+                        "router_topk_set_agreement": 0.9,
+                        "block_output_cosine": 0.8,
+                        "residual_drift_relative_norm": 0.1,
+                    },
+                }
+            ],
+        }
+    }
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "z.json"
+        path.write_text(json.dumps(raw), encoding="utf-8")
+        row = import_goz_experiment(path, arms=("expert_only",)).rows[0]
+        assert row.route_top2_agreement == pytest.approx(0.0)
+
+
+def test_reject_unsupported_schema_version() -> None:
+    raw = {
+        "combine_import_schema": "v99",
+        "chain": {"per_block": [{"block": 0, "expert_only": {}}]},
+    }
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "bad-ver.json"
+        path.write_text(json.dumps(raw), encoding="utf-8")
+        with pytest.raises(GozImportError, match="unsupported combine_import_schema"):
+            import_goz_experiment(path)
+
+
+def test_reject_unsupported_report_format() -> None:
+    path = FIXTURES / "goz_route_preservation.sample.json"
+    result = import_goz_experiment(path)
+    with tempfile.TemporaryDirectory() as tmp:
+        with pytest.raises(GozImportError, match="unsupported report formats"):
+            write_import_reports(result, Path(tmp), formats=["xml"])
 
 
 def test_import_multiblock_arm_filter() -> None:

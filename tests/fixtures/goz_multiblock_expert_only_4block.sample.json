@@ -1,0 +1,93 @@
+{
+  "provenance": {
+    "issue": "GH #68 / Linear RM-255",
+    "agent": "fixture-4block",
+    "scale_policy": "GOZ1 v3 pack-only"
+  },
+  "chain": {
+    "blocks": [0, 1, 2, 3],
+    "tokens": 2048,
+    "token_seed": 20260806,
+    "top_k": 2,
+    "per_block": [
+      {
+        "block": 0,
+        "expert_only": {
+          "label": "goz1_expert_ternary_only",
+          "block_output_cosine": 0.963572,
+          "residual_drift_relative_norm": 0.0,
+          "router_top1_agreement": 1.0,
+          "router_top2_set_agreement": 1.0,
+          "expert_load_js_bits": 0.0
+        }
+      },
+      {
+        "block": 1,
+        "expert_only": {
+          "label": "goz1_expert_ternary_only",
+          "block_output_cosine": 0.945765,
+          "residual_drift_relative_norm": 0.277,
+          "router_top1_agreement": 0.887695,
+          "router_top2_set_agreement": 0.680664,
+          "expert_load_js_bits": 0.01
+        }
+      },
+      {
+        "block": 2,
+        "expert_only": {
+          "label": "goz1_expert_ternary_only",
+          "block_output_cosine": 0.884956,
+          "residual_drift_relative_norm": 0.342,
+          "router_top1_agreement": 0.666504,
+          "router_top2_set_agreement": 0.548828,
+          "expert_load_js_bits": 0.02
+        }
+      },
+      {
+        "block": 3,
+        "expert_only": {
+          "label": "goz1_expert_ternary_only",
+          "block_output_cosine": 0.839144,
+          "residual_drift_relative_norm": 0.498,
+          "router_top1_agreement": 0.52832,
+          "router_top2_set_agreement": 0.289551,
+          "expert_load_js_bits": 0.024
+        }
+      }
+    ],
+    "pack_provenance": [
+      {
+        "block": 0,
+        "pack": "block_000.goz1",
+        "container_versions": [3],
+        "scale_sources": {"t": "pack_v2"},
+        "pack_metadata": {"oz.quantization_version": 3}
+      },
+      {
+        "block": 1,
+        "pack": "block_001.goz1",
+        "container_versions": [3],
+        "scale_sources": {"t": "pack_v2"},
+        "pack_metadata": {"oz.quantization_version": 3}
+      },
+      {
+        "block": 2,
+        "pack": "block_002.goz1",
+        "container_versions": [3],
+        "scale_sources": {"t": "pack_v2"},
+        "pack_metadata": {"oz.quantization_version": 3}
+      },
+      {
+        "block": 3,
+        "pack": "block_003.goz1",
+        "container_versions": [3],
+        "scale_sources": {"t": "pack_v2"},
+        "pack_metadata": {"oz.quantization_version": 3}
+      }
+    ]
+  },
+  "decision": {
+    "decision": 3,
+    "decision_text": "fixture option 3"
+  }
+}
