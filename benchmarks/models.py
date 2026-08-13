@@ -108,22 +108,26 @@ def default_quantization_registry() -> QuantizationRegistry:
             precision="int2",
             format="ternary",
             bits=2,
-            supported=False,
-            speed_tps=0.0,
-            vram_gb=0.0,
-            notes="Hook for future ternary evaluation support.",
+            supported=True,
+            speed_tps=900.0,
+            vram_gb=6.0,
+            notes="Ternary {-1,0,+1} weights (GOZ1 ternary payload without full SAAQ metadata).",
         )
     )
     registry.register(
         QuantizationProfile(
             name="saaq",
-            precision="int3",
-            format="saaq",
-            bits=3,
-            supported=False,
-            speed_tps=0.0,
-            vram_gb=0.0,
-            notes="Hook for future SAAQ evaluation support.",
+            precision="int2",
+            format="goz1",
+            bits=2,
+            supported=True,
+            speed_tps=950.0,
+            vram_gb=5.5,
+            notes=(
+                "SAAQ (Spiking Adaptive Activity Quantization) path for GOZ1 packs: "
+                "ternary_snn experts + preserve routers/norms; metrics often imported "
+                "from grok-ozempic experiments rather than full in-process inference."
+            ),
         )
     )
     return registry
@@ -186,6 +190,8 @@ class MockModelAdapter:
             "awq": 0.84,
             "gptq": 0.83,
             "gguf": 0.82,
+            "ternary": 0.78,
+            "saaq": 0.79,
         }
         return rates.get(self._profile.name, 0.8)
 

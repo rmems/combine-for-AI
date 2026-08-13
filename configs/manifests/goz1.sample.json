@@ -1,0 +1,58 @@
+{
+  "manifest_version": "1.0.0",
+  "model_name": "grok-1-goz1-sample",
+  "model_family": "grok",
+  "source_artifact": {
+    "format": "safetensors",
+    "hf_repo_id": "xai-org/grok-1",
+    "hf_revision": "main",
+    "parameter_count": 314000000000,
+    "moe_layout": {
+      "num_experts": 8,
+      "top_k": 2
+    },
+    "notes": "Official Grok-1 source; GOZ1 pack produced by rmems/grok-ozempic"
+  },
+  "generated_artifacts": [
+    {
+      "format": "goz1",
+      "status": "success",
+      "path": "artifacts/sample.goz1",
+      "quantization_method": "saaq",
+      "bits": 2,
+      "backend_compatibility": ["myelin-accelerator", "grok-ozempic"],
+      "notes": "Schema example of a successful GOZ1 pack. Path is illustrative — smoke fails closed until a real .goz1 file is present.",
+      "goz1": {
+        "container_version": 3,
+        "packing_scheme": "ternary_snn_v3",
+        "gif_threshold": 0.05,
+        "preserved_tensor_count": 322,
+        "ternary_tensor_count": 448,
+        "tensor_count": 770,
+        "scale_source": "pack_v3"
+      }
+    }
+  ],
+  "backend_compatibility": {
+    "gguf": false,
+    "awq": false,
+    "gptq": false,
+    "myelin_accelerator": true,
+    "goz1": true
+  },
+  "saaq_metadata": {
+    "experiment_id": "saaq-goz1-sample",
+    "routing_entropy": null,
+    "spike_density": null,
+    "route_top1_agreement": null,
+    "route_top2_agreement": null,
+    "block_output_cosine": null,
+    "resid_in_drift": null
+  },
+  "benchmark_linkage": {
+    "nfl_combine_run_id": null,
+    "nfl_combine_config_path": "configs/benchmark.sample.json",
+    "grok_ozempic_report_path": null,
+    "grok_ozempic_experiment_id": null
+  }
+}

@@ -1,0 +1,20 @@
+# Codacy quality gate on this org is issueThreshold=0.
+# Test asserts trip Bandit B101 ("use of assert") as High Security — exclude tests.
+# See agoge-forger for the same pattern.
+---
+exclude_paths:
+  - "tests/**"
+  - "tests/**/*"
+  - "**/tests/**"
+  - "**/__pycache__/**"
+  - ".venv/**"
+  - "reports/**"
+engines:
+  complexity:
+    exclude_paths:
+      - "tests/**"
+      - "tests/**/*"
+  duplication:
+    exclude_paths:
+      - "tests/**"
+      - "tests/**/*"

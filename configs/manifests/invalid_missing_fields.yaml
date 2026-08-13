@@ -1,0 +1,20 @@
+# Invalid manifest - missing required fields
+# This demonstrates validation errors
+
+# Missing model_name (required)
+manifest_version: "1.0.0"
+# model_name: "Missing Model"  # COMMENTED OUT TO SHOW ERROR
+
+source_artifact:
+  format: "gguf"
+  # Missing path (required for GGUF)
+  # path: "models/missing.gguf"
+  parameter_count: 7000000000
+
+# generated_artifacts missing (defaults to empty list)
+
+backend_compatibility:
+  gguf: true
+  awq: false
+  gptq: false
+  myelin_accelerator: false

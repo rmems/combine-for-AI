@@ -7,12 +7,11 @@ from pathlib import Path
 
 import pytest
 
-from benchmarks.cli import parse_args
 from benchmarks.datasets import DatasetRecord, DatasetSpec, JsonlDatasetLoader
 from benchmarks.metrics import MetricsAccumulator, entropy_from_counts
-from benchmarks.models import MockModelAdapter, ModelSpec, Prediction, QuantizationProfile
+from benchmarks.models import MockModelAdapter, ModelSpec, QuantizationProfile
 from benchmarks.reporting import metrics_to_row, write_csv, write_json
-from benchmarks.runner import build_metadata, load_config, run_benchmarks
+from benchmarks.runner import run_benchmarks
 from collections import Counter
 
 

@@ -1,0 +1,20 @@
+{
+  "run_name": "goz1-import-placeholder",
+  "seed": 20260812,
+  "model": {
+    "backend": "mock",
+    "name": "grok-1-goz1",
+    "revision": "goz1-v3"
+  },
+  "quantization": ["saaq", "fp16"],
+  "notes": "Placeholder until #22 experiment import lands. Point grok_ozempic_report_path at a multiblock report.",
+  "datasets": [
+    {
+      "name": "lambada",
+      "source": "jsonl",
+      "path": "configs/datasets/lambada.sample.jsonl",
+      "split": "validation",
+      "max_samples": 2
+    }
+  ]
+}

@@ -16,7 +16,9 @@ from nfl_combine_for_ai.manifest import (
     ArtifactStatus,
     GeneratedArtifact,
     ModelManifest,
+    default_scale_source_for_version,
     load_manifest,
+    sniff_goz1_header,
 )
 
 
@@ -40,32 +42,225 @@ def _resolve_path(base_path: Path, raw_path: str | None) -> Path | None:
     return (base_path / path).resolve()
 
 
-def _runnable_generated_artifact(base_path: Path, generated: list[GeneratedArtifact], source_format: ArtifactFormat | None = None) -> ArtifactSelection | None:
+_SUPPORTED_SMOKE_QUANTS = frozenset({"fp16", "awq", "gptq", "gguf", "ternary", "saaq"})
+
+
+def _quantization_for_goz1(artifact: GeneratedArtifact | None) -> str | None:
+    """Map GOZ1 manifest quantization metadata to a registry profile name.
+
+    Returns None when the declared method is present but not supported.
+    """
+    method = (artifact.quantization_method if artifact else None) or ""
+    method = method.strip().lower()
+    if method in ("", "saaq", "saaq_v1", "saaq1", "saaq_1_5", "saaq1.5"):
+        return "saaq"
+    if method in ("ternary", "ternary_snn", "trit"):
+        return "ternary"
+    if method in _SUPPORTED_SMOKE_QUANTS:
+        return method
+    return None
+
+
+def _quantization_for_generated(
+    fmt: ArtifactFormat, artifact: GeneratedArtifact | None = None
+) -> str | None:
+    if fmt == ArtifactFormat.GOZ1:
+        return _quantization_for_goz1(artifact)
+    return fmt.value
+
+
+def _goz1_failed_selection(
+    *,
+    source_format: str,
+    artifact_path: str | None,
+    failure_reason: str,
+    quantization_name: str | None = "saaq",
+) -> ArtifactSelection:
+    return ArtifactSelection(
+        status="failed",
+        source_format=source_format,
+        runtime_format="generated_goz1",
+        quantization_name=quantization_name,
+        generated_format="goz1",
+        artifact_path=artifact_path,
+        failure_reason=failure_reason,
+    )
+
+
+def _select_goz1_generated(
+    artifact: GeneratedArtifact,
+    resolved: Path,
+    source_format: str,
+) -> ArtifactSelection:
+    """Validate one GOZ1 generated artifact path and return success or failure."""
+    quant = _quantization_for_goz1(artifact)
+    if quant is None:
+        return _goz1_failed_selection(
+            source_format=source_format,
+            artifact_path=str(resolved),
+            failure_reason=(
+                "unsupported GOZ1 quantization_method: "
+                f"{artifact.quantization_method!r}"
+            ),
+            quantization_name=None,
+        )
+    header = sniff_goz1_header(resolved)
+    if not header.valid:
+        return _goz1_failed_selection(
+            source_format=source_format,
+            artifact_path=str(resolved),
+            failure_reason=header.error or "invalid GOZ1 header",
+            quantization_name=quant,
+        )
+    return ArtifactSelection(
+        status="success",
+        source_format=source_format,
+        runtime_format="generated_goz1",
+        quantization_name=quant,
+        generated_format="goz1",
+        artifact_path=str(resolved),
+    )
+
+
+def _missing_path_goz1_failure(
+    artifact: GeneratedArtifact,
+    resolved: Path | None,
+    src: str,
+) -> ArtifactSelection:
+    return _goz1_failed_selection(
+        source_format=src,
+        artifact_path=str(resolved) if resolved else artifact.path,
+        failure_reason=(
+            "GOZ1 generated artifact path does not exist or is not a file: "
+            f"{artifact.path!r}"
+        ),
+        quantization_name=_quantization_for_goz1(artifact) or "saaq",
+    )
+
+
+def _success_generated_selection(
+    artifact: GeneratedArtifact, resolved: Path, src: str
+) -> ArtifactSelection:
+    return ArtifactSelection(
+        status="success",
+        source_format=src,
+        runtime_format=f"generated_{artifact.format.value}",
+        quantization_name=_quantization_for_generated(artifact.format, artifact),
+        generated_format=artifact.format.value,
+        artifact_path=str(resolved),
+    )
+
+
+def _is_claimable_generated(artifact: GeneratedArtifact, fmt: ArtifactFormat) -> bool:
+    return (
+        artifact.status in (ArtifactStatus.SUCCESS, ArtifactStatus.PARTIAL)
+        and artifact.format == fmt
+    )
+
+
+def _resolved_file(base_path: Path, raw_path: str | None) -> Path | None:
+    resolved = _resolve_path(base_path, raw_path)
+    if resolved and resolved.exists() and resolved.is_file():
+        return resolved
+    return None
+
+
+def _materialize_generated(
+    fmt: ArtifactFormat,
+    artifact: GeneratedArtifact,
+    resolved: Path,
+    src: str,
+) -> ArtifactSelection:
+    if fmt == ArtifactFormat.GOZ1:
+        return _select_goz1_generated(artifact, resolved, src)
+    return _success_generated_selection(artifact, resolved, src)
+
+
+def _scan_generated_format(
+    fmt: ArtifactFormat,
+    generated: list[GeneratedArtifact],
+    base_path: Path,
+    src: str,
+) -> tuple[ArtifactSelection | None, ArtifactSelection | None]:
+    """Return (runnable_selection, goz1_missing_failure) for one preferred format."""
+    goz1_failure: ArtifactSelection | None = None
     for artifact in generated:
-        if artifact.status not in (ArtifactStatus.SUCCESS, ArtifactStatus.PARTIAL):
+        if not _is_claimable_generated(artifact, fmt):
             continue
-        if artifact.format not in (ArtifactFormat.AWQ, ArtifactFormat.GPTQ):
+        resolved = _resolved_file(base_path, artifact.path)
+        if resolved is None:
+            if fmt == ArtifactFormat.GOZ1:
+                goz1_failure = _missing_path_goz1_failure(
+                    artifact, _resolve_path(base_path, artifact.path), src
+                )
             continue
-        resolved = _resolve_path(base_path, artifact.path)
-        if resolved and resolved.exists():
-            return ArtifactSelection(
-                status="success",
-                source_format=source_format.value if source_format else "unknown",
-                runtime_format=f"generated_{artifact.format.value}",
-                quantization_name=artifact.format.value,
-                generated_format=artifact.format.value,
-                artifact_path=str(resolved),
-            )
+        return _materialize_generated(fmt, artifact, resolved, src), None
+    return None, goz1_failure
+
+
+def _runnable_generated_artifact(
+    base_path: Path,
+    generated: list[GeneratedArtifact],
+    source_format: ArtifactFormat | None = None,
+    preferred_formats: tuple[ArtifactFormat, ...] = (
+        ArtifactFormat.GOZ1,
+        ArtifactFormat.AWQ,
+        ArtifactFormat.GPTQ,
+    ),
+) -> ArtifactSelection | None:
+    """Prefer GOZ1, then AWQ/GPTQ. Claimed GOZ1 fails closed (no AWQ/HF fallback)."""
+    src = source_format.value if source_format else "unknown"
+    for fmt in preferred_formats:
+        selection, goz1_failure = _scan_generated_format(
+            fmt, generated, base_path, src
+        )
+        if selection is not None:
+            return selection
+        if fmt == ArtifactFormat.GOZ1 and goz1_failure is not None:
+            return goz1_failure
     return None
 
 
 def select_artifact_for_smoke(manifest: ModelManifest, base_path: Path) -> ArtifactSelection:
-    generated = _runnable_generated_artifact(base_path, manifest.generated_artifacts, manifest.source_artifact.format)
+    generated = _runnable_generated_artifact(
+        base_path, manifest.generated_artifacts, manifest.source_artifact.format
+    )
     if generated is not None:
         return generated
 
     source = manifest.source_artifact
     source_path = _resolve_path(base_path, source.path)
+
+    if source.format == ArtifactFormat.GOZ1:
+        if source_path and source_path.is_file():
+            header = sniff_goz1_header(source_path)
+            if not header.valid:
+                return ArtifactSelection(
+                    status="failed",
+                    source_format=source.format.value,
+                    runtime_format="goz1",
+                    quantization_name="saaq",
+                    generated_format=None,
+                    artifact_path=str(source_path),
+                    failure_reason=header.error or "invalid GOZ1 header",
+                )
+            return ArtifactSelection(
+                status="success",
+                source_format=source.format.value,
+                runtime_format="goz1",
+                quantization_name="saaq",
+                generated_format=None,
+                artifact_path=str(source_path),
+            )
+        return ArtifactSelection(
+            status="failed",
+            source_format=source.format.value,
+            runtime_format=None,
+            quantization_name=None,
+            generated_format=None,
+            artifact_path=str(source_path) if source_path else None,
+            failure_reason="GOZ1 source artifact path does not exist",
+        )
 
     if source.format == ArtifactFormat.GGUF:
         if source_path and source_path.is_file():
@@ -148,6 +343,33 @@ def _load_smoke_dataset(dataset_path: Path, max_samples: int, dataset_name: str)
 
 def _peak_vram_gb_from_metadata(metadata_vram_gb: float, gpu_memory_mb: list[int | None]) -> float | None:
     return metadata_vram_gb
+
+
+def _goz1_report_fields(selection: ArtifactSelection) -> dict[str, Any]:
+    """Attach GOZ1 header metadata to smoke report rows when applicable."""
+    path = selection.artifact_path
+    is_goz1 = selection.generated_format == "goz1" or selection.runtime_format in {
+        "goz1",
+        "generated_goz1",
+    }
+    if not is_goz1 or not path:
+        return {}
+    header = sniff_goz1_header(Path(path))
+    if not header.valid:
+        return {
+            "goz1_version": header.version or None,
+            "goz1_tensor_count": None,
+            "goz1_meta_count": None,
+            "goz1_scale_source": None,
+            "goz1_header_error": header.error,
+        }
+    return {
+        "goz1_version": header.version,
+        "goz1_tensor_count": header.tensor_count,
+        "goz1_meta_count": header.meta_count,
+        "goz1_scale_source": default_scale_source_for_version(header.version).value,
+        "goz1_header_error": None,
+    }
 
 
 def _build_failure_payload(
@@ -348,7 +570,7 @@ def run_artifact_smoke(
         if not records:
             raise ValueError(f"No records loaded from dataset: {dataset}")
         profile = default_quantization_registry().get(selection.quantization_name or "fp16")
-        if profile is None:
+        if not profile.supported:
             raise ValueError(f"Unsupported quantization profile: {selection.quantization_name}")
         adapter = build_model_adapter(
             ModelSpec(backend="mock", name=manifest.model_name, revision=manifest.source_artifact.hf_revision),
@@ -374,6 +596,9 @@ def run_artifact_smoke(
             len(records),
             metrics.perplexity,
         )
+        goz1_fields = _goz1_report_fields(selection)
+        if goz1_fields:
+            row.update(goz1_fields)
         payload = {
             "run": {
                 "run_id": metadata.run_id,
