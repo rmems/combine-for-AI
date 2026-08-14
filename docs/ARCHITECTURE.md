@@ -95,6 +95,26 @@ GOZ1 success path uses quantization profile **`saaq`** and attaches header field
 
 Science note (from grok-ozempic #61/#64/#68): expert-only ternary is routing-safe **within** a block; multi-block residual drift can collapse later routing. Cosine-only gates are insufficient.
 
+## grok-ozempic experiment import
+
+`nfl_combine_for_ai.goz_import` normalizes upstream experiment JSON without re-running quant or residual harnesses.
+
+| Kind | Detection | Schema id |
+|------|-----------|-----------|
+| Multiblock metrics | `chain.per_block` | `grok_ozempic.multiblock_metrics.v1` |
+| Route preservation | `pilot` + `summary` | `grok_ozempic.route_preservation.v1` |
+
+CLI: `scripts/import_goz_experiment.py`. Output rows map:
+
+- `router_top1_agreement` → `route_top1_agreement`
+- `router_top2_set_agreement` → `route_top2_agreement`
+- `block_output_cosine` → `block_output_cosine`
+- `residual_drift_relative_norm` / `residual_stream_drift` → `resid_in_drift`
+- `expert_load_js_bits` / `expert_load_js_divergence` → `expert_load_js`
+- pack provenance → `scale_source`, `goz1_version`, `sparsity`
+
+Payload includes `benchmark_linkage.grok_ozempic_report_path` and optional decision/provenance.
+
 ## Telemetry
 
 See `benchmarks/telemetry.py`: `SystemSnapshot`, `GPUMetrics` (optional `pynvml`), `RoutingMetrics`, upstream merge for corinth-canal / myelin-accelerator.

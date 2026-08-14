@@ -65,7 +65,16 @@ Beyond accuracy/perplexity, the report schema supports (nullable) fields used by
 
 Smoke runs on GOZ1 packs attach header fields: `goz1_version`, `goz1_tensor_count`, `goz1_scale_source`.
 
-Full experiment import from grok-ozempic report JSON is tracked in GitHub issues under epic **#20**.
+Import grok-ozempic experiment JSON (multiblock `metrics.json` or route-preservation reports) into combine rows:
+
+```bash
+python scripts/import_goz_experiment.py \
+  --input /path/to/grok-ozempic/reports/.../metrics.json \
+  --output-dir reports \
+  --arms expert_only,fp16_control
+```
+
+Writes `reports/json/<run_id>.goz-import.json` and `reports/csv/<run_id>.goz-import.csv` with route/residual fields populated (issue **#22**).
 
 ## Tracking
 

@@ -1,0 +1,101 @@
+{
+  "provenance": {
+    "issue": "GH #68 / Linear RM-255",
+    "agent": "fixture",
+    "scale_policy": "GOZ1 v3 pack-only"
+  },
+  "chain": {
+    "blocks": [0, 1],
+    "tokens": 128,
+    "token_seed": 20260806,
+    "top_k": 2,
+    "per_block": [
+      {
+        "block": 0,
+        "expert_only": {
+          "label": "goz1_expert_ternary_only",
+          "seconds": 1.5,
+          "block_output_cosine": 0.963572,
+          "residual_drift_relative_norm": 0.0,
+          "router_top1_agreement": 1.0,
+          "router_top2_set_agreement": 1.0,
+          "expert_load_js_bits": 0.0,
+          "moe_output_cosine": 0.773483,
+          "residual_stream_cosine": 1.0
+        },
+        "fp16_control": {
+          "label": "fp16_control",
+          "seconds": 1.0,
+          "block_output_cosine": 0.9999,
+          "residual_drift_relative_norm": 0.0,
+          "router_top1_agreement": 0.999,
+          "router_top2_set_agreement": 0.999,
+          "expert_load_js_bits": 0.0
+        }
+      },
+      {
+        "block": 1,
+        "expert_only": {
+          "label": "goz1_expert_ternary_only",
+          "seconds": 1.6,
+          "block_output_cosine": 0.945765,
+          "residual_drift_relative_norm": 0.277,
+          "router_top1_agreement": 0.887695,
+          "router_top2_set_agreement": 0.680664,
+          "expert_load_js_bits": 0.01,
+          "moe_output_cosine": 0.70,
+          "residual_stream_cosine": 0.95
+        },
+        "fp16_control": {
+          "label": "fp16_control",
+          "seconds": 1.1,
+          "block_output_cosine": 0.9998,
+          "residual_drift_relative_norm": 0.0,
+          "router_top1_agreement": 0.999,
+          "router_top2_set_agreement": 0.999,
+          "expert_load_js_bits": 0.0
+        }
+      }
+    ],
+    "pack_provenance": [
+      {
+        "block": 0,
+        "pack": "block_000-attention_plus_expert.goz1",
+        "container_versions": [3],
+        "scale_sources": {
+          "block_000.slot_00.moe_expert.gate": "pack_v2"
+        },
+        "ternary_scales": {
+          "block_000.slot_00.moe_expert.gate": {
+            "alpha": 0.03,
+            "sparsity": 0.65
+          }
+        },
+        "pack_metadata": {
+          "oz.quantization_version": 3
+        }
+      },
+      {
+        "block": 1,
+        "pack": "block_001-attention_plus_expert.goz1",
+        "container_versions": [3],
+        "scale_sources": {
+          "block_001.slot_00.moe_expert.gate": "pack_v2"
+        },
+        "ternary_scales": {
+          "block_001.slot_00.moe_expert.gate": {
+            "alpha": 0.04,
+            "sparsity": 0.63
+          }
+        },
+        "pack_metadata": {
+          "oz.quantization_version": 3
+        }
+      }
+    ]
+  },
+  "decision": {
+    "decision": 3,
+    "decision_text": "fixture option 3"
+  }
+}
