@@ -163,6 +163,37 @@ def _block_order(by_key: dict[tuple[Any, str], dict[str, Any]]) -> list[Any]:
     return blocks
 
 
+def _fill_metric_deltas(
+    entry: dict[str, Any],
+    base: dict[str, Any] | None,
+    treat: dict[str, Any] | None,
+) -> None:
+    for key in COMPARE_METRIC_KEYS:
+        bval = _numeric(base.get(key)) if base else None
+        tval = _numeric(treat.get(key)) if treat else None
+        entry[f"baseline_{key}"] = bval
+        entry[f"treatment_{key}"] = tval
+        entry[f"delta_{key}"] = _delta(tval, bval)
+
+
+def _fill_arm_meta(
+    entry: dict[str, Any],
+    base: dict[str, Any] | None,
+    treat: dict[str, Any] | None,
+) -> None:
+    for mk in _META_KEYS:
+        entry[mk] = None
+    if base:
+        entry["baseline_label"] = base.get("label")
+        entry["baseline_scale_source"] = base.get("scale_source")
+        entry["baseline_goz1_version"] = base.get("goz1_version")
+    if treat:
+        entry["treatment_label"] = treat.get("label")
+        entry["treatment_scale_source"] = treat.get("scale_source")
+        entry["treatment_goz1_version"] = treat.get("goz1_version")
+        entry["treatment_pack_basename"] = treat.get("pack_basename")
+
+
 def _pair_block_entry(
     block: Any,
     by_key: dict[tuple[Any, str], dict[str, Any]],
@@ -178,23 +209,8 @@ def _pair_block_entry(
         "baseline_arm": baseline_arm,
         "treatment_arm": treatment_arm,
     }
-    for key in COMPARE_METRIC_KEYS:
-        bval = _numeric(base.get(key)) if base else None
-        tval = _numeric(treat.get(key)) if treat else None
-        entry[f"baseline_{key}"] = bval
-        entry[f"treatment_{key}"] = tval
-        entry[f"delta_{key}"] = _delta(tval, bval)
-    for mk in _META_KEYS:
-        entry[mk] = None
-    if base:
-        entry["baseline_label"] = base.get("label")
-        entry["baseline_scale_source"] = base.get("scale_source")
-        entry["baseline_goz1_version"] = base.get("goz1_version")
-    if treat:
-        entry["treatment_label"] = treat.get("label")
-        entry["treatment_scale_source"] = treat.get("scale_source")
-        entry["treatment_goz1_version"] = treat.get("goz1_version")
-        entry["treatment_pack_basename"] = treat.get("pack_basename")
+    _fill_metric_deltas(entry, base, treat)
+    _fill_arm_meta(entry, base, treat)
     return entry
 
 
@@ -207,6 +223,36 @@ def _sort_key_block_arm(row: dict[str, Any]) -> tuple[Any, ...]:
     )
 
 
+def _require_both_arms(
+    by_key: dict[tuple[Any, str], dict[str, Any]],
+    baseline_arm: str,
+    treatment_arm: str,
+) -> None:
+    has_baseline = any(arm == baseline_arm for (_, arm) in by_key)
+    has_treatment = any(arm == treatment_arm for (_, arm) in by_key)
+    if not has_baseline or not has_treatment:
+        raise CompareError(
+            f"comparison requires both arms present: "
+            f"baseline={baseline_arm!r} found={has_baseline}, "
+            f"treatment={treatment_arm!r} found={has_treatment}"
+        )
+
+
+def _build_by_block_rows(
+    by_key: dict[tuple[Any, str], dict[str, Any]],
+    baseline_arm: str,
+    treatment_arm: str,
+) -> list[dict[str, Any]]:
+    by_block: list[dict[str, Any]] = []
+    for block in _block_order(by_key):
+        entry = _pair_block_entry(block, by_key, baseline_arm, treatment_arm)
+        if entry is not None:
+            by_block.append(entry)
+    if not by_block:
+        raise CompareError("no baseline/treatment block pairs to compare")
+    return by_block
+
+
 def build_comparison(
     rows: list[dict[str, Any]],
     *,
@@ -217,26 +263,39 @@ def build_comparison(
     arms = sorted({baseline_arm, treatment_arm})
     sources = sorted({str(r.get("source_path")) for r in rows if r.get("source_path")})
     by_key = _index_rows_by_block_arm(rows)
-
-    has_baseline = any(arm == baseline_arm for (_, arm) in by_key)
-    has_treatment = any(arm == treatment_arm for (_, arm) in by_key)
-    if not has_baseline or not has_treatment:
-        raise CompareError(
-            f"comparison requires both arms present: "
-            f"baseline={baseline_arm!r} found={has_baseline}, "
-            f"treatment={treatment_arm!r} found={has_treatment}"
-        )
-
-    by_block: list[dict[str, Any]] = []
-    for block in _block_order(by_key):
-        entry = _pair_block_entry(block, by_key, baseline_arm, treatment_arm)
-        if entry is not None:
-            by_block.append(entry)
-    if not by_block:
-        raise CompareError("no baseline/treatment block pairs to compare")
-
+    _require_both_arms(by_key, baseline_arm, treatment_arm)
+    by_block = _build_by_block_rows(by_key, baseline_arm, treatment_arm)
     flat = sorted(rows, key=_sort_key_block_arm)
     return CompareResult(rows=flat, by_block=by_block, sources=sources, arms=arms)
+
+
+def _write_json(result: CompareResult, output_dir: Path, run_id: str) -> Path:
+    from benchmarks.reporting import write_json
+
+    payload = result.to_payload()
+    payload["run_id"] = run_id
+    jpath = output_dir / "json" / f"{run_id}.compare.json"
+    write_json(jpath, payload)
+    return jpath
+
+
+def _write_csv(result: CompareResult, output_dir: Path, run_id: str) -> Path:
+    from benchmarks.reporting import write_csv
+
+    rows = result.by_block or result.rows
+    if not rows:
+        raise CompareError("no rows to write for csv")
+    suffix = "by-block" if result.by_block else "rows"
+    cpath = output_dir / "csv" / f"{run_id}.compare-{suffix}.csv"
+    write_csv(cpath, rows)
+    return cpath
+
+
+def _write_markdown(result: CompareResult, output_dir: Path, run_id: str) -> Path:
+    mpath = output_dir / "markdown" / f"{run_id}.compare.md"
+    mpath.parent.mkdir(parents=True, exist_ok=True)
+    mpath.write_text(_markdown_table(result), encoding="utf-8")
+    return mpath
 
 
 def write_comparison_reports(
@@ -246,42 +305,27 @@ def write_comparison_reports(
     run_id: str,
     formats: list[str] | None = None,
 ) -> dict[str, Path]:
-    from benchmarks.reporting import write_csv, write_json
-
     if formats is None:
         formats = ["json", "csv", "markdown"]
     if not formats:
         raise CompareError("no report formats selected")
     output_dir = Path(output_dir)
+    writers = {
+        "json": _write_json,
+        "csv": _write_csv,
+        "markdown": _write_markdown,
+    }
     written: dict[str, Path] = {}
-    payload = result.to_payload()
-    payload["run_id"] = run_id
-
     try:
-        if "json" in formats:
-            jpath = output_dir / "json" / f"{run_id}.compare.json"
-            write_json(jpath, payload)
-            written["json"] = jpath
-        if "csv" in formats:
-            rows = result.by_block or result.rows
-            if not rows:
-                raise CompareError("no rows to write for csv")
-            suffix = "by-block" if result.by_block else "rows"
-            cpath = output_dir / "csv" / f"{run_id}.compare-{suffix}.csv"
-            write_csv(cpath, rows)
-            written["csv"] = cpath
-        if "markdown" in formats:
-            mpath = output_dir / "markdown" / f"{run_id}.compare.md"
-            mpath.parent.mkdir(parents=True, exist_ok=True)
-            mpath.write_text(_markdown_table(result), encoding="utf-8")
-            written["markdown"] = mpath
+        for fmt in formats:
+            writer = writers.get(fmt)
+            if writer is None:
+                raise CompareError(f"unsupported report format: {fmt}")
+            written[fmt] = writer(result, output_dir, run_id)
     except OSError as exc:
         raise CompareError(f"failed to write reports: {exc}") from exc
     except ValueError as exc:
         raise CompareError(f"failed to serialize reports: {exc}") from exc
-
-    if not written:
-        raise CompareError("no report formats selected")
     return written
 
 

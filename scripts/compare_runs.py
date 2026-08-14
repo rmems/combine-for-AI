@@ -73,44 +73,56 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
-def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
-    arms = None
-    if args.arms:
-        arms = tuple(a.strip() for a in args.arms.split(",") if a.strip())
-    formats = [f.strip() for f in args.formats.split(",") if f.strip()]
-    run_id = args.run_id or (
+def _parse_arms(raw: str | None) -> tuple[str, ...] | None:
+    if not raw:
+        return None
+    return tuple(a.strip() for a in raw.split(",") if a.strip())
+
+
+def _parse_formats(raw: str) -> list[str]:
+    return [f.strip() for f in raw.split(",") if f.strip()]
+
+
+def _default_run_id() -> str:
+    return (
         f"{time.strftime('%Y%m%dT%H%M%S', time.gmtime())}."
         f"{int(time.time() % 1 * 1000):03d}Z-compare"
     )
-    try:
-        if not formats:
-            raise CompareError("no report formats selected")
-        rows = load_experiment_rows(args.input, arms=arms)
-        result = build_comparison(
-            rows,
-            baseline_arm=args.baseline_arm,
-            treatment_arm=args.treatment_arm,
-        )
-        written = write_comparison_reports(
-            result,
-            args.output_dir,
-            run_id=run_id,
-            formats=formats,
-        )
-    except CompareError as exc:
-        print(f"compare failed: {exc}", file=sys.stderr)
-        return 1
-    except (OSError, ValueError) as exc:
-        print(f"compare failed: {exc}", file=sys.stderr)
-        return 1
 
+
+def _run_compare(args: argparse.Namespace) -> dict[str, Path]:
+    formats = _parse_formats(args.formats)
+    if not formats:
+        raise CompareError("no report formats selected")
+    rows = load_experiment_rows(args.input, arms=_parse_arms(args.arms))
+    result = build_comparison(
+        rows,
+        baseline_arm=args.baseline_arm,
+        treatment_arm=args.treatment_arm,
+    )
+    run_id = args.run_id or _default_run_id()
+    written = write_comparison_reports(
+        result, args.output_dir, run_id=run_id, formats=formats
+    )
     print(
         f"compare arms={result.arms} blocks={len(result.by_block)} "
         f"rows={len(result.rows)}"
     )
     for fmt, path in written.items():
         print(f"  {fmt}: {path}")
+    return written
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    try:
+        _run_compare(args)
+    except CompareError as exc:
+        print(f"compare failed: {exc}", file=sys.stderr)
+        return 1
+    except (OSError, ValueError) as exc:
+        print(f"compare failed: {exc}", file=sys.stderr)
+        return 1
     return 0
 
 
