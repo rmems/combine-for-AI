@@ -2,7 +2,8 @@
 
 Neutral benchmark harness for **hybrid MoE/SNN quantization** experiments.
 
-Public slug / Python package: **`combine-for-AI`** / `combine-for-ai`.
+Public slug / PyPI distribution / Python import package:
+**`combine-for-AI`** / **`combine-for-ai`** / **`combine_for_ai`**.
 
 ## Role
 

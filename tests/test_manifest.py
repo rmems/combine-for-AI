@@ -195,3 +195,8 @@ def test_benchmark_linkage_accepts_legacy_nfl_keys() -> None:
     assert m.benchmark_linkage is not None
     assert m.benchmark_linkage.combine_run_id == "run-old"
     assert m.benchmark_linkage.combine_config_path == "configs/benchmark.sample.json"
+    dumped = m.benchmark_linkage.model_dump(by_alias=True)
+    assert dumped["combine_run_id"] == "run-old"
+    assert dumped["combine_config_path"] == "configs/benchmark.sample.json"
+    assert "nfl_combine_run_id" not in dumped
+    assert "nfl_combine_config_path" not in dumped

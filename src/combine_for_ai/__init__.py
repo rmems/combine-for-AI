@@ -1,2 +1,10 @@
+"""combine-for-ai package entrypoints."""
+
+from __future__ import annotations
+
+
 def main() -> None:
-    print("Hello from combine-for-ai!")
+    """Console script entry: delegate to the real benchmark CLI."""
+    from benchmarks.cli import main as cli_main
+
+    cli_main()
