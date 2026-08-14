@@ -1,7 +1,7 @@
 [project]
-name = "nfl-combine-for-ai"
+name = "combine-for-ai"
 version = "0.1.0"
-description = "Add your description here"
+description = "Neutral benchmark harness for hybrid MoE/SNN quantization experiments"
 readme = "README.md"
 authors = [
     { name = "Bot", email = "montoyaraul34@gmail.com" }
@@ -16,7 +16,7 @@ dependencies = [
 ]
 
 [project.scripts]
-nfl-combine-for-ai = "nfl_combine_for_ai:main"
+combine-for-ai = "combine_for_ai:main"
 
 [dependency-groups]
 dev = ["pytest>=8.0.0"]

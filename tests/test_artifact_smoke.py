@@ -5,7 +5,7 @@ import tempfile
 from pathlib import Path
 
 from benchmarks.artifact_smoke import run_artifact_smoke, select_artifact_for_smoke
-from nfl_combine_for_ai.manifest import load_manifest_from_string
+from combine_for_ai.manifest import load_manifest_from_string
 
 
 def _write_json(path: Path, payload: dict) -> None:

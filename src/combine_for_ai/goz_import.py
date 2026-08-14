@@ -102,7 +102,7 @@ class GozImportResult:
             "provenance": self.provenance,
             "decision": self.decision,
             "benchmark_linkage": {
-                "nfl_combine_run_id": rid,
+                "combine_run_id": rid,
                 "grok_ozempic_report_path": self.source_path,
                 "grok_ozempic_experiment_id": (
                     (self.provenance or {}).get("issue")

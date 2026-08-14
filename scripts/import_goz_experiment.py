@@ -14,7 +14,7 @@ if str(_REPO_ROOT) not in sys.path:
 if str(_REPO_ROOT / "src") not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT / "src"))
 
-from nfl_combine_for_ai.goz_import import (  # noqa: E402
+from combine_for_ai.goz_import import (  # noqa: E402
     GozImportError,
     import_goz_experiment,
     write_import_reports,

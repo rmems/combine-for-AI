@@ -25,5 +25,5 @@ backend_compatibility:
 
 # Optional benchmark linkage
 # benchmark_linkage:
-#   nfl_combine_run_id: "20240527-001"
-#   nfl_combine_config_path: "configs/benchmark.sample.json"
+#   combine_run_id: "20240527-001"
+#   combine_config_path: "configs/benchmark.sample.json"

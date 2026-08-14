@@ -2,7 +2,7 @@
 
 Neutral benchmark harness for **hybrid MoE/SNN quantization** experiments.
 
-Public slug: **`combine-for-AI`**. Python package name remains `nfl-combine-for-ai` for now.
+Public slug / Python package: **`combine-for-AI`** / `combine-for-ai`.
 
 ## Role
 

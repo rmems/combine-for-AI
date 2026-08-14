@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from nfl_combine_for_ai.goz_import import (
+from combine_for_ai.goz_import import (
     SCHEMA_MULTIBLOCK_V1,
     SCHEMA_ROUTE_PRESERVATION_V1,
     GozExperimentKind,
