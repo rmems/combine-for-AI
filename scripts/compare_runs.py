@@ -84,6 +84,8 @@ def main(argv: list[str] | None = None) -> int:
         f"{int(time.time() % 1 * 1000):03d}Z-compare"
     )
     try:
+        if not formats:
+            raise CompareError("no report formats selected")
         rows = load_experiment_rows(args.input, arms=arms)
         result = build_comparison(
             rows,
@@ -97,6 +99,9 @@ def main(argv: list[str] | None = None) -> int:
             formats=formats,
         )
     except CompareError as exc:
+        print(f"compare failed: {exc}", file=sys.stderr)
+        return 1
+    except (OSError, ValueError) as exc:
         print(f"compare failed: {exc}", file=sys.stderr)
         return 1
 

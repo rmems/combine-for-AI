@@ -42,16 +42,34 @@ def test_build_comparison_deltas() -> None:
     assert "fp16_control" in result.arms
     assert len(result.by_block) == 2
 
-    b0 = next(r for r in result.by_block if r["block_index"] == 0)
+    b0 = next((r for r in result.by_block if r["block_index"] == 0), None)
+    assert b0 is not None, "block_index=0 not found in result.by_block"
     assert b0["baseline_route_top1_agreement"] == pytest.approx(0.999)
     assert b0["treatment_route_top1_agreement"] == pytest.approx(1.0)
     assert b0["delta_route_top1_agreement"] == pytest.approx(1.0 - 0.999)
     assert b0["treatment_resid_in_drift"] == pytest.approx(0.0)
     assert b0["baseline_block_output_cosine"] == pytest.approx(0.9999)
 
-    b1 = next(r for r in result.by_block if r["block_index"] == 1)
+    b1 = next((r for r in result.by_block if r["block_index"] == 1), None)
+    assert b1 is not None, "block_index=1 not found in result.by_block"
     assert b1["treatment_resid_in_drift"] == pytest.approx(0.277)
     assert b1["delta_resid_in_drift"] == pytest.approx(0.277 - 0.0)
+
+
+def test_duplicate_block_arm_raises() -> None:
+    rows = [
+        {"arm": "fp16_control", "block_index": 0, "route_top1_agreement": 1.0},
+        {"arm": "fp16_control", "block_index": 0, "route_top1_agreement": 0.9},
+        {"arm": "expert_only", "block_index": 0, "route_top1_agreement": 0.8},
+    ]
+    with pytest.raises(CompareError, match="duplicate row"):
+        build_comparison(rows)
+
+
+def test_missing_arm_raises() -> None:
+    rows = [{"arm": "expert_only", "block_index": 0, "route_top1_agreement": 0.8}]
+    with pytest.raises(CompareError, match="both arms"):
+        build_comparison(rows)
 
 
 def test_write_comparison_reports(tmp_path: Path) -> None:
@@ -68,7 +86,7 @@ def test_write_comparison_reports(tmp_path: Path) -> None:
     assert len(payload["by_block"]) == 2
     md = written["markdown"].read_text(encoding="utf-8")
     assert "Hybrid quant comparison" in md
-    assert "Δtop1" in md
+    assert "d_top1" in md
 
 
 def test_empty_inputs_fail() -> None:

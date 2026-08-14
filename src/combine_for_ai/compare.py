@@ -25,6 +25,16 @@ COMPARE_METRIC_KEYS = (
     "seconds",
 )
 
+_META_KEYS = (
+    "baseline_label",
+    "baseline_scale_source",
+    "baseline_goz1_version",
+    "treatment_label",
+    "treatment_scale_source",
+    "treatment_goz1_version",
+    "treatment_pack_basename",
+)
+
 
 class CompareError(ValueError):
     """Raised when comparison inputs are invalid."""
@@ -49,17 +59,21 @@ class CompareResult:
         }
 
 
-def _load_rows_from_goz_import_report(path: Path) -> list[dict[str, Any]]:
+def _load_json_object(path: Path) -> dict[str, Any]:
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
-        raise CompareError(f"cannot read goz-import report {path}: {exc}") from exc
+        raise CompareError(f"cannot read {path}: {exc}") from exc
     if not isinstance(raw, dict):
-        raise CompareError(f"goz-import report root must be an object: {path}")
+        raise CompareError(f"input root must be a JSON object: {path}")
+    return raw
+
+
+def _rows_from_goz_import_report(path: Path, raw: dict[str, Any]) -> list[dict[str, Any]]:
     results = raw.get("results")
     if not isinstance(results, list) or not results:
         raise CompareError(f"goz-import report missing results[]: {path}")
-    rows: list[dict[str, Any]] = []
+    rows = []
     for item in results:
         if isinstance(item, dict):
             row = dict(item)
@@ -68,6 +82,18 @@ def _load_rows_from_goz_import_report(path: Path) -> list[dict[str, Any]]:
     if not rows:
         raise CompareError(f"no dict rows in results[]: {path}")
     return rows
+
+
+def _rows_from_experiment(
+    path: Path, arms: tuple[str, ...] | None
+) -> list[dict[str, Any]]:
+    try:
+        imported = import_goz_experiment(
+            path, arms=arms or ("expert_only", "fp16_control")
+        )
+    except GozImportError as exc:
+        raise CompareError(f"import failed for {path}: {exc}") from exc
+    return [row.to_report_row() for row in imported.rows]
 
 
 def load_experiment_rows(
@@ -81,28 +107,11 @@ def load_experiment_rows(
     all_rows: list[dict[str, Any]] = []
     for path in paths:
         path = Path(path)
-        try:
-            raw = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
-            raise CompareError(f"cannot read {path}: {exc}") from exc
-        if not isinstance(raw, dict):
-            raise CompareError(f"input root must be a JSON object: {path}")
-
+        raw = _load_json_object(path)
         if isinstance(raw.get("results"), list):
-            all_rows.extend(_load_rows_from_goz_import_report(path))
-            continue
-
-        # Treat as upstream grok-ozempic experiment JSON.
-        try:
-            imported = import_goz_experiment(
-                path,
-                arms=arms or ("expert_only", "fp16_control"),
-            )
-        except GozImportError as exc:
-            raise CompareError(f"import failed for {path}: {exc}") from exc
-        for row in imported.rows:
-            all_rows.append(row.to_report_row())
-
+            all_rows.extend(_rows_from_goz_import_report(path, raw))
+        else:
+            all_rows.extend(_rows_from_experiment(path, arms))
     if arms:
         allowed = set(arms)
         all_rows = [r for r in all_rows if r.get("arm") in allowed]
@@ -126,6 +135,78 @@ def _delta(a: float | None, b: float | None) -> float | None:
     return a - b
 
 
+def _index_rows_by_block_arm(
+    rows: list[dict[str, Any]],
+) -> dict[tuple[Any, str], dict[str, Any]]:
+    by_key: dict[tuple[Any, str], dict[str, Any]] = {}
+    for row in rows:
+        arm = row.get("arm")
+        if arm is None:
+            continue
+        key = (row.get("block_index"), str(arm))
+        if key in by_key:
+            raise CompareError(
+                f"duplicate row for block={key[0]}, arm={key[1]}: "
+                "cannot determine which to use for comparison"
+            )
+        by_key[key] = row
+    return by_key
+
+
+def _block_order(by_key: dict[tuple[Any, str], dict[str, Any]]) -> list[Any]:
+    blocks = sorted(
+        {block for (block, _) in by_key if block is not None},
+        key=lambda b: (isinstance(b, str), b),
+    )
+    if any(block is None for (block, _) in by_key):
+        return [None, *blocks]
+    return blocks
+
+
+def _pair_block_entry(
+    block: Any,
+    by_key: dict[tuple[Any, str], dict[str, Any]],
+    baseline_arm: str,
+    treatment_arm: str,
+) -> dict[str, Any] | None:
+    base = by_key.get((block, baseline_arm))
+    treat = by_key.get((block, treatment_arm))
+    if base is None and treat is None:
+        return None
+    entry: dict[str, Any] = {
+        "block_index": block,
+        "baseline_arm": baseline_arm,
+        "treatment_arm": treatment_arm,
+    }
+    for key in COMPARE_METRIC_KEYS:
+        bval = _numeric(base.get(key)) if base else None
+        tval = _numeric(treat.get(key)) if treat else None
+        entry[f"baseline_{key}"] = bval
+        entry[f"treatment_{key}"] = tval
+        entry[f"delta_{key}"] = _delta(tval, bval)
+    for mk in _META_KEYS:
+        entry[mk] = None
+    if base:
+        entry["baseline_label"] = base.get("label")
+        entry["baseline_scale_source"] = base.get("scale_source")
+        entry["baseline_goz1_version"] = base.get("goz1_version")
+    if treat:
+        entry["treatment_label"] = treat.get("label")
+        entry["treatment_scale_source"] = treat.get("scale_source")
+        entry["treatment_goz1_version"] = treat.get("goz1_version")
+        entry["treatment_pack_basename"] = treat.get("pack_basename")
+    return entry
+
+
+def _sort_key_block_arm(row: dict[str, Any]) -> tuple[Any, ...]:
+    block = row.get("block_index")
+    return (
+        block is not None,
+        block if block is not None else -1,
+        str(row.get("arm") or ""),
+    )
+
+
 def build_comparison(
     rows: list[dict[str, Any]],
     *,
@@ -133,63 +214,28 @@ def build_comparison(
     treatment_arm: str = "expert_only",
 ) -> CompareResult:
     """Pair baseline vs treatment by block_index; emit flat rows + by_block deltas."""
-    arms = sorted({str(r.get("arm")) for r in rows if r.get("arm") is not None})
+    arms = sorted({baseline_arm, treatment_arm})
     sources = sorted({str(r.get("source_path")) for r in rows if r.get("source_path")})
+    by_key = _index_rows_by_block_arm(rows)
 
-    # Index treatment/baseline by block.
-    by_key: dict[tuple[Any, str], dict[str, Any]] = {}
-    for row in rows:
-        arm = row.get("arm")
-        block = row.get("block_index")
-        if arm is None:
-            continue
-        by_key[(block, str(arm))] = row
-
-    blocks = sorted(
-        {block for (block, _) in by_key.keys() if block is not None},
-        key=lambda b: (isinstance(b, str), b),
-    )
-    # Also include None block as a single-row series when present.
-    if any(block is None for (block, _) in by_key):
-        blocks = [None, *blocks]
+    has_baseline = any(arm == baseline_arm for (_, arm) in by_key)
+    has_treatment = any(arm == treatment_arm for (_, arm) in by_key)
+    if not has_baseline or not has_treatment:
+        raise CompareError(
+            f"comparison requires both arms present: "
+            f"baseline={baseline_arm!r} found={has_baseline}, "
+            f"treatment={treatment_arm!r} found={has_treatment}"
+        )
 
     by_block: list[dict[str, Any]] = []
-    for block in blocks:
-        base = by_key.get((block, baseline_arm))
-        treat = by_key.get((block, treatment_arm))
-        if base is None and treat is None:
-            continue
-        entry: dict[str, Any] = {
-            "block_index": block,
-            "baseline_arm": baseline_arm,
-            "treatment_arm": treatment_arm,
-        }
-        for key in COMPARE_METRIC_KEYS:
-            bval = _numeric(base.get(key)) if base else None
-            tval = _numeric(treat.get(key)) if treat else None
-            entry[f"baseline_{key}"] = bval
-            entry[f"treatment_{key}"] = tval
-            entry[f"delta_{key}"] = _delta(tval, bval)
-        if base:
-            entry["baseline_label"] = base.get("label")
-            entry["baseline_scale_source"] = base.get("scale_source")
-            entry["baseline_goz1_version"] = base.get("goz1_version")
-        if treat:
-            entry["treatment_label"] = treat.get("label")
-            entry["treatment_scale_source"] = treat.get("scale_source")
-            entry["treatment_goz1_version"] = treat.get("goz1_version")
-            entry["treatment_pack_basename"] = treat.get("pack_basename")
-        by_block.append(entry)
+    for block in _block_order(by_key):
+        entry = _pair_block_entry(block, by_key, baseline_arm, treatment_arm)
+        if entry is not None:
+            by_block.append(entry)
+    if not by_block:
+        raise CompareError("no baseline/treatment block pairs to compare")
 
-    # Flat rows sorted for CSV readability.
-    flat = sorted(
-        rows,
-        key=lambda r: (
-            r.get("block_index") is None,
-            r.get("block_index") if r.get("block_index") is not None else -1,
-            str(r.get("arm") or ""),
-        ),
-    )
+    flat = sorted(rows, key=_sort_key_block_arm)
     return CompareResult(rows=flat, by_block=by_block, sources=sources, arms=arms)
 
 
@@ -202,32 +248,37 @@ def write_comparison_reports(
 ) -> dict[str, Path]:
     from benchmarks.reporting import write_csv, write_json
 
-    formats = formats or ["json", "csv", "markdown"]
+    if formats is None:
+        formats = ["json", "csv", "markdown"]
+    if not formats:
+        raise CompareError("no report formats selected")
     output_dir = Path(output_dir)
     written: dict[str, Path] = {}
     payload = result.to_payload()
     payload["run_id"] = run_id
 
-    if "json" in formats:
-        jpath = output_dir / "json" / f"{run_id}.compare.json"
-        write_json(jpath, payload)
-        written["json"] = jpath
-
-    if "csv" in formats:
-        if result.by_block:
-            cpath = output_dir / "csv" / f"{run_id}.compare-by-block.csv"
-            write_csv(cpath, result.by_block)
+    try:
+        if "json" in formats:
+            jpath = output_dir / "json" / f"{run_id}.compare.json"
+            write_json(jpath, payload)
+            written["json"] = jpath
+        if "csv" in formats:
+            rows = result.by_block or result.rows
+            if not rows:
+                raise CompareError("no rows to write for csv")
+            suffix = "by-block" if result.by_block else "rows"
+            cpath = output_dir / "csv" / f"{run_id}.compare-{suffix}.csv"
+            write_csv(cpath, rows)
             written["csv"] = cpath
-        elif result.rows:
-            cpath = output_dir / "csv" / f"{run_id}.compare-rows.csv"
-            write_csv(cpath, result.rows)
-            written["csv"] = cpath
-
-    if "markdown" in formats:
-        mpath = output_dir / "markdown" / f"{run_id}.compare.md"
-        mpath.parent.mkdir(parents=True, exist_ok=True)
-        mpath.write_text(_markdown_table(result), encoding="utf-8")
-        written["markdown"] = mpath
+        if "markdown" in formats:
+            mpath = output_dir / "markdown" / f"{run_id}.compare.md"
+            mpath.parent.mkdir(parents=True, exist_ok=True)
+            mpath.write_text(_markdown_table(result), encoding="utf-8")
+            written["markdown"] = mpath
+    except OSError as exc:
+        raise CompareError(f"failed to write reports: {exc}") from exc
+    except ValueError as exc:
+        raise CompareError(f"failed to serialize reports: {exc}") from exc
 
     if not written:
         raise CompareError("no report formats selected")
@@ -251,20 +302,20 @@ def _markdown_table(result: CompareResult) -> str:
         "block",
         "top1_base",
         "top1_treat",
-        "Δtop1",
+        "d_top1",
         "cos_base",
         "cos_treat",
-        "Δcos",
+        "d_cos",
         "resid_base",
         "resid_treat",
-        "Δresid",
+        "d_resid",
     ]
     lines.append("| " + " | ".join(headers) + " |")
     lines.append("| " + " | ".join(["---"] * len(headers)) + " |")
 
     def fmt(v: Any) -> str:
         if v is None:
-            return "—"
+            return "-"
         if isinstance(v, float):
             return f"{v:.4f}"
         return str(v)
