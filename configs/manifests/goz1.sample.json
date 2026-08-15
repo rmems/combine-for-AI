@@ -50,8 +50,8 @@
     "resid_in_drift": null
   },
   "benchmark_linkage": {
-    "nfl_combine_run_id": null,
-    "nfl_combine_config_path": "configs/benchmark.sample.json",
+    "combine_run_id": null,
+    "combine_config_path": "configs/benchmark.sample.json",
     "grok_ozempic_report_path": null,
     "grok_ozempic_experiment_id": null
   }

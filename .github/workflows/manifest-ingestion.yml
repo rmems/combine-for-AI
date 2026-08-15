@@ -31,7 +31,7 @@ jobs:
       - name: Load example manifests
         run: |
           uv run python -c "
-          from nfl_combine_for_ai.manifest import load_manifest
+          from combine_for_ai.manifest import load_manifest
           from pathlib import Path
           for path in Path('configs/manifests').glob('*.json'):
               m = load_manifest(path)
@@ -41,7 +41,7 @@ jobs:
       - name: Test valid manifest passes
         run: |
           uv run python -c "
-          from nfl_combine_for_ai.manifest import load_manifest_from_string
+          from combine_for_ai.manifest import load_manifest_from_string
           import json
           raw = {
               'manifest_version': '1.0.0',
@@ -56,7 +56,7 @@ jobs:
       - name: Test invalid manifest fails clearly
         run: |
           uv run python -c "
-          from nfl_combine_for_ai.manifest import load_manifest_from_string, ValidationError
+          from combine_for_ai.manifest import load_manifest_from_string, ValidationError
           import json
           raw = {'manifest_version': '1.0.0', 'source_artifact': {'format': 'gguf'}}
           try:
@@ -70,7 +70,7 @@ jobs:
       - name: Test dispatch logic
         run: |
           uv run python -c "
-          from nfl_combine_for_ai.manifest import (
+          from combine_for_ai.manifest import (
               dispatch_artifact, ModelManifest, SourceArtifact,
               GeneratedArtifact, ArtifactFormat, ArtifactStatus,
           )

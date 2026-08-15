@@ -7,7 +7,7 @@ import pytest
 
 from pydantic import ValidationError
 
-from nfl_combine_for_ai.manifest import (
+from combine_for_ai.manifest import (
     ArtifactFormat,
     ArtifactStatus,
     ModelManifest,

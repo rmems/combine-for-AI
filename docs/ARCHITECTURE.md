@@ -97,7 +97,7 @@ Science note (from grok-ozempic #61/#64/#68): expert-only ternary is routing-saf
 
 ## grok-ozempic experiment import
 
-`nfl_combine_for_ai.goz_import` normalizes upstream experiment JSON without re-running quant or residual harnesses.
+`combine_for_ai.goz_import` normalizes upstream experiment JSON without re-running quant or residual harnesses.
 
 | Kind | Detection | Schema id |
 |------|-----------|-----------|

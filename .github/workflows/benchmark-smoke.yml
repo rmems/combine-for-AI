@@ -70,7 +70,7 @@ jobs:
           if [ -n "$MANIFEST_PATH" ]; then
             echo "Using manifest: $MANIFEST_PATH"
             uv run python -c "
-            from nfl_combine_for_ai.manifest import load_manifest
+            from combine_for_ai.manifest import load_manifest
             import os
             from pathlib import Path
             m = load_manifest(Path(os.environ['MANIFEST_PATH']))

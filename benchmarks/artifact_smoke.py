@@ -11,7 +11,7 @@ from benchmarks.metrics import MetricsAccumulator
 from benchmarks.models import ModelSpec, build_model_adapter, default_quantization_registry
 from benchmarks.reporting import write_csv, write_json
 from benchmarks.runner import build_metadata
-from nfl_combine_for_ai.manifest import (
+from combine_for_ai.manifest import (
     ArtifactFormat,
     ArtifactStatus,
     GeneratedArtifact,
