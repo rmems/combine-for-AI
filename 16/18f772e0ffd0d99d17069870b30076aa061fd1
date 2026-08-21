@@ -1,0 +1,21 @@
+src/combine_for_ai/compare.py
+  s_ec344f5cf674dd::t_41d9ec4ddaf874 37-52,377,390
+tests/test_compare.py
+  s_ec344f5cf674dd::t_41d9ec4ddaf874 117-118
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "1618f772e0ffd0d99d17069870b30076aa061fd1",
+  "prompts": {},
+  "sessions": {
+    "s_ec344f5cf674dd": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0221e-5398-77b2-b0fd-7ba8ed35e914",
+        "model": "gpt-5.6-terra"
+      },
+      "human_author": "Raul Montoya Cardenas <montoyaraul34@gmail.com>"
+    }
+  }
+}
