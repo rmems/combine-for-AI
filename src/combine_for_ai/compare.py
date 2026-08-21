@@ -337,6 +337,12 @@ def _write_markdown(result: CompareResult, output_dir: Path, run_id: str) -> Pat
     return mpath
 
 
+def _validate_report_formats(formats: list[str], writers: dict[str, Any]) -> None:
+    unsupported = [fmt for fmt in formats if fmt not in writers]
+    if unsupported:
+        raise CompareError(f"unsupported report format: {unsupported[0]}")
+
+
 def write_comparison_reports(
     result: CompareResult,
     output_dir: Path,
@@ -354,9 +360,7 @@ def write_comparison_reports(
         "csv": _write_csv,
         "markdown": _write_markdown,
     }
-    unsupported = [fmt for fmt in formats if fmt not in writers]
-    if unsupported:
-        raise CompareError(f"unsupported report format: {unsupported[0]}")
+    _validate_report_formats(formats, writers)
     written: dict[str, Path] = {}
     try:
         for fmt in formats:
