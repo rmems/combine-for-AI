@@ -76,11 +76,20 @@ def test_incomplete_block_pairs_are_skipped() -> None:
     rows = [
         {"arm": "fp16_control", "block_index": 0},
         {"arm": "expert_only", "block_index": 1},
-        {"arm": "fp16_control", "block_index": 2},
-        {"arm": "expert_only", "block_index": 2},
+        {"arm": "fp16_control", "block_index": 2, "route_top1_agreement": 1.0},
+        {"arm": "expert_only", "block_index": 2, "route_top1_agreement": 0.9},
     ]
     result = build_comparison(rows)
     assert [row["block_index"] for row in result.by_block] == [2]
+
+
+def test_pairs_without_comparable_metrics_raise() -> None:
+    rows = [
+        {"arm": "fp16_control", "block_index": 0, "label": "baseline"},
+        {"arm": "expert_only", "block_index": 0, "label": "treatment"},
+    ]
+    with pytest.raises(CompareError, match="no baseline/treatment block pairs"):
+        build_comparison(rows)
 
 
 def test_incompatible_pairing_context_raises() -> None:
@@ -116,6 +125,26 @@ def test_write_comparison_reports(tmp_path: Path) -> None:
     assert "d_top1" in md
     assert "top2_base" in md
     assert "0.9990" in md
+
+
+def test_reports_validate_all_formats_before_writing(tmp_path: Path) -> None:
+    rows = load_experiment_rows([FIXTURES / "goz_multiblock_metrics.sample.json"])
+    result = build_comparison(rows)
+    with pytest.raises(CompareError, match="unsupported report format"):
+        write_comparison_reports(result, tmp_path, run_id="partial", formats=["json", "bogus"])
+    assert not (tmp_path / "json" / "partial.compare.json").exists()
+
+
+def test_comparison_csv_escapes_formula_metadata(tmp_path: Path) -> None:
+    rows = [
+        {"arm": "fp16_control", "block_index": 0, "label": "=evil()", "route_top1_agreement": 1.0},
+        {"arm": "expert_only", "block_index": 0, "label": "+evil()", "route_top1_agreement": 0.9},
+    ]
+    result = build_comparison(rows)
+    written = write_comparison_reports(result, tmp_path, run_id="csv-safe", formats=["csv"])
+    csv_text = written["csv"].read_text(encoding="utf-8")
+    assert "'=evil()" in csv_text
+    assert "'+evil()" in csv_text
 
 
 def test_empty_inputs_fail() -> None:

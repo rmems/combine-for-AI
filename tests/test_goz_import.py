@@ -53,6 +53,14 @@ def test_import_multiblock_rows() -> None:
     assert b0_expert.seed == 20260806
     assert b0_expert.pack_basename == "block_000-attention_plus_expert.goz1"
 
+    b0_fp16 = next(
+        r for r in result.rows if r.block_index == 0 and r.arm == "fp16_control"
+    )
+    assert b0_fp16.scale_source is None
+    assert b0_fp16.goz1_version is None
+    assert b0_fp16.sparsity is None
+    assert b0_fp16.pack_basename is None
+
     b1_expert = next(
         r for r in result.rows if r.block_index == 1 and r.arm == "expert_only"
     )

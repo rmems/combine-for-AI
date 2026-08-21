@@ -58,7 +58,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--arms",
         default=None,
-        help="Optional comma filter of arms to load (default: all in inputs)",
+        help="Optional comma filter of arms to load (default: baseline + treatment)",
     )
     p.add_argument(
         "--formats",

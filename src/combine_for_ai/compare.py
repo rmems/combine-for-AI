@@ -226,6 +226,12 @@ def _pair_block_entry(
         "treatment_arm": treatment_arm,
     }
     _fill_metric_deltas(entry, base, treat)
+    if not any(
+        entry[f"baseline_{key}"] is not None
+        and entry[f"treatment_{key}"] is not None
+        for key in COMPARE_METRIC_KEYS
+    ):
+        return None
     _fill_arm_meta(entry, base, treat)
     return entry
 
@@ -348,13 +354,13 @@ def write_comparison_reports(
         "csv": _write_csv,
         "markdown": _write_markdown,
     }
+    unsupported = [fmt for fmt in formats if fmt not in writers]
+    if unsupported:
+        raise CompareError(f"unsupported report format: {unsupported[0]}")
     written: dict[str, Path] = {}
     try:
         for fmt in formats:
-            writer = writers.get(fmt)
-            if writer is None:
-                raise CompareError(f"unsupported report format: {fmt}")
-            written[fmt] = writer(result, output_dir, run_id)
+            written[fmt] = writers[fmt](result, output_dir, run_id)
     except OSError as exc:
         raise CompareError(f"failed to write reports: {exc}") from exc
     except ValueError as exc:
