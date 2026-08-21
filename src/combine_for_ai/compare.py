@@ -347,12 +347,7 @@ def write_comparison_reports(
 
 
 def _markdown_table(result: CompareResult) -> str:
-    lines = [
-        "# Hybrid quant comparison",
-        "",
-        f"Sources: {len(result.sources)}",
-        "",
-    ]
+    lines = ["# Hybrid quant comparison", "", f"Sources: {len(result.sources)}", ""]
     if not result.by_block:
         lines.append("_No baseline/treatment block pairs found._")
         lines.append("")
