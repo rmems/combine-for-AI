@@ -114,6 +114,8 @@ def test_write_comparison_reports(tmp_path: Path) -> None:
     assert "Baseline arm: fp16_control" in md
     assert "Treatment arm: expert_only" in md
     assert "d_top1" in md
+    assert "top2_base" in md
+    assert "0.9990" in md
 
 
 def test_empty_inputs_fail() -> None:

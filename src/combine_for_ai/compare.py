@@ -34,6 +34,22 @@ _META_KEYS = (
     "treatment_pack_basename",
 )
 
+_MARKDOWN_COLUMNS = (
+    ("block", "block_index"),
+    ("top1_base", "baseline_route_top1_agreement"),
+    ("top1_treat", "treatment_route_top1_agreement"),
+    ("d_top1", "delta_route_top1_agreement"),
+    ("top2_base", "baseline_route_top2_agreement"),
+    ("top2_treat", "treatment_route_top2_agreement"),
+    ("d_top2", "delta_route_top2_agreement"),
+    ("cos_base", "baseline_block_output_cosine"),
+    ("cos_treat", "treatment_block_output_cosine"),
+    ("d_cos", "delta_block_output_cosine"),
+    ("resid_base", "baseline_resid_in_drift"),
+    ("resid_treat", "treatment_resid_in_drift"),
+    ("d_resid", "delta_resid_in_drift"),
+)
+
 
 class CompareError(ValueError):
     """Raised when comparison inputs are invalid."""
@@ -358,18 +374,7 @@ def _markdown_table(result: CompareResult) -> str:
         f"Treatment arm: {result.by_block[0]['treatment_arm']}",
     ]
 
-    headers = [
-        "block",
-        "top1_base",
-        "top1_treat",
-        "d_top1",
-        "cos_base",
-        "cos_treat",
-        "d_cos",
-        "resid_base",
-        "resid_treat",
-        "d_resid",
-    ]
+    headers = [header for header, _ in _MARKDOWN_COLUMNS]
     lines.append("| " + " | ".join(headers) + " |")
     lines.append("| " + " | ".join(["---"] * len(headers)) + " |")
 
@@ -382,22 +387,7 @@ def _markdown_table(result: CompareResult) -> str:
 
     for row in result.by_block:
         lines.append(
-            "| "
-            + " | ".join(
-                [
-                    fmt(row.get("block_index")),
-                    fmt(row.get("baseline_route_top1_agreement")),
-                    fmt(row.get("treatment_route_top1_agreement")),
-                    fmt(row.get("delta_route_top1_agreement")),
-                    fmt(row.get("baseline_block_output_cosine")),
-                    fmt(row.get("treatment_block_output_cosine")),
-                    fmt(row.get("delta_block_output_cosine")),
-                    fmt(row.get("baseline_resid_in_drift")),
-                    fmt(row.get("treatment_resid_in_drift")),
-                    fmt(row.get("delta_resid_in_drift")),
-                ]
-            )
-            + " |"
+            "| " + " | ".join(fmt(row.get(key)) for _, key in _MARKDOWN_COLUMNS) + " |"
         )
     lines.append("")
     return "\n".join(lines)
