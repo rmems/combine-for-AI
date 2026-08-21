@@ -10,6 +10,9 @@ from benchmarks.metrics import MetricsSummary
 from benchmarks.telemetry import TelemetrySnapshot
 
 
+_CSV_FORMULA_PREFIXES = ("=", "+", "-", "@")
+
+
 def ensure_dir(path: Path) -> None:
     path.mkdir(parents=True, exist_ok=True)
 
@@ -26,10 +29,18 @@ def write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
         raise ValueError("no rows to write to csv report")
 
     fieldnames = list(rows[0].keys())
+
+    def csv_safe(value: Any) -> Any:
+        if isinstance(value, str) and value.startswith(_CSV_FORMULA_PREFIXES):
+            return f"'{value}"
+        return value
+
     with path.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=fieldnames)
         writer.writeheader()
-        writer.writerows(rows)
+        writer.writerows(
+            {key: csv_safe(value) for key, value in row.items()} for row in rows
+        )
 
 
 def metrics_to_row(metrics: MetricsSummary) -> dict[str, Any]:

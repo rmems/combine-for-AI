@@ -314,6 +314,7 @@ def _row_from_arm_metrics(
     metrics: dict[str, Any],
 ) -> ImportedExperimentRow:
     label = metrics.get("label")
+    arm_pack = pack if arm != "fp16_control" else _PackFields(None, None, None, None)
     return ImportedExperimentRow(
         schema=SCHEMA_MULTIBLOCK_V1,
         experiment_kind=GozExperimentKind.MULTIBLOCK.value,
@@ -328,14 +329,14 @@ def _row_from_arm_metrics(
         block_output_cosine=_as_float(metrics.get("block_output_cosine")),
         resid_in_drift=_as_float(metrics.get("residual_drift_relative_norm")),
         expert_load_js=_as_float(metrics.get("expert_load_js_bits")),
-        scale_source=pack.scale_source,
-        goz1_version=pack.goz1_version,
-        sparsity=pack.sparsity,
+        scale_source=arm_pack.scale_source,
+        goz1_version=arm_pack.goz1_version,
+        sparsity=arm_pack.sparsity,
         tokens=ctx.tokens,
         seed=ctx.seed,
         label=str(label) if label is not None else arm,
         seconds=_as_float(metrics.get("seconds")),
-        pack_basename=pack.pack_name,
+        pack_basename=arm_pack.pack_name,
         extra={
             "moe_output_cosine": metrics.get("moe_output_cosine"),
             "residual_stream_cosine": metrics.get("residual_stream_cosine"),
@@ -575,4 +576,3 @@ __all__ = [
     "import_goz_experiment",
     "write_import_reports",
 ]
-
