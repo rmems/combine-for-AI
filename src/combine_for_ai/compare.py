@@ -359,7 +359,7 @@ def _markdown_table(result: CompareResult) -> str:
         return "\n".join(lines)
 
     lines[2:2] = [
-        f"Baseline arm: {result.by_block[0]['baseline_arm']}",
+        f"Baseline arm: {result.by_block[0]['baseline_arm']}; "
         f"Treatment arm: {result.by_block[0]['treatment_arm']}",
     ]
 
