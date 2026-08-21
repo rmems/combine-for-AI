@@ -94,7 +94,10 @@ def _run_compare(args: argparse.Namespace) -> dict[str, Path]:
     formats = _parse_formats(args.formats)
     if not formats:
         raise CompareError("no report formats selected")
-    rows = load_experiment_rows(args.input, arms=_parse_arms(args.arms))
+    selected_arms = _parse_arms(args.arms)
+    if selected_arms is None:
+        selected_arms = (args.baseline_arm, args.treatment_arm)
+    rows = load_experiment_rows(args.input, arms=selected_arms)
     result = build_comparison(
         rows,
         baseline_arm=args.baseline_arm,

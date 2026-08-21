@@ -72,6 +72,31 @@ def test_missing_arm_raises() -> None:
         build_comparison(rows)
 
 
+def test_incomplete_block_pairs_are_skipped() -> None:
+    rows = [
+        {"arm": "fp16_control", "block_index": 0},
+        {"arm": "expert_only", "block_index": 1},
+        {"arm": "fp16_control", "block_index": 2},
+        {"arm": "expert_only", "block_index": 2},
+    ]
+    result = build_comparison(rows)
+    assert [row["block_index"] for row in result.by_block] == [2]
+
+
+def test_incompatible_pairing_context_raises() -> None:
+    rows = [
+        {"arm": "fp16_control", "block_index": 0, "tokens": 128, "seed": 1},
+        {"arm": "expert_only", "block_index": 0, "tokens": 256, "seed": 1},
+    ]
+    with pytest.raises(CompareError, match="incompatible comparison context"):
+        build_comparison(rows)
+
+
+def test_identical_comparison_arms_raise() -> None:
+    with pytest.raises(CompareError, match="must be different"):
+        build_comparison([], baseline_arm="fp16_control", treatment_arm="fp16_control")
+
+
 def test_write_comparison_reports(tmp_path: Path) -> None:
     path = FIXTURES / "goz_multiblock_metrics.sample.json"
     rows = load_experiment_rows([path])
@@ -86,6 +111,8 @@ def test_write_comparison_reports(tmp_path: Path) -> None:
     assert len(payload["by_block"]) == 2
     md = written["markdown"].read_text(encoding="utf-8")
     assert "Hybrid quant comparison" in md
+    assert "Baseline arm: fp16_control" in md
+    assert "Treatment arm: expert_only" in md
     assert "d_top1" in md
 
 
@@ -111,3 +138,33 @@ def test_cli_main(tmp_path: Path) -> None:
     assert rc == 0
     assert (tmp_path / "json" / "cli-cmp.compare.json").is_file()
     assert (tmp_path / "markdown" / "cli-cmp.compare.md").is_file()
+
+
+def test_cli_loads_custom_selected_arms(tmp_path: Path) -> None:
+    from scripts.compare_runs import main
+
+    payload = json.loads((FIXTURES / "goz_multiblock_metrics.sample.json").read_text())
+    for block in payload["chain"]["per_block"]:
+        block["z_control"] = block.pop("fp16_control")
+        block["a_quant"] = block.pop("expert_only")
+    source = tmp_path / "custom-arms.json"
+    source.write_text(json.dumps(payload), encoding="utf-8")
+
+    rc = main(
+        [
+            "--input",
+            str(source),
+            "--output-dir",
+            str(tmp_path),
+            "--run-id",
+            "custom-arms",
+            "--baseline-arm",
+            "z_control",
+            "--treatment-arm",
+            "a_quant",
+        ]
+    )
+    assert rc == 0
+    markdown = (tmp_path / "markdown" / "custom-arms.compare.md").read_text()
+    assert "Baseline arm: z_control" in markdown
+    assert "Treatment arm: a_quant" in markdown

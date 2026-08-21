@@ -21,7 +21,6 @@ COMPARE_METRIC_KEYS = (
     "block_output_cosine",
     "resid_in_drift",
     "expert_load_js",
-    "sparsity",
     "seconds",
 )
 
@@ -202,8 +201,9 @@ def _pair_block_entry(
 ) -> dict[str, Any] | None:
     base = by_key.get((block, baseline_arm))
     treat = by_key.get((block, treatment_arm))
-    if base is None and treat is None:
+    if base is None or treat is None:
         return None
+    _require_matching_context(block, base, treat)
     entry: dict[str, Any] = {
         "block_index": block,
         "baseline_arm": baseline_arm,
@@ -212,6 +212,21 @@ def _pair_block_entry(
     _fill_metric_deltas(entry, base, treat)
     _fill_arm_meta(entry, base, treat)
     return entry
+
+
+def _require_matching_context(
+    block: Any, base: dict[str, Any], treat: dict[str, Any]
+) -> None:
+    """Reject a same-block arm pair when its experiment context differs."""
+    context_keys = ("model_family", "tokens", "seed")
+    mismatches = [
+        key for key in context_keys if base.get(key) != treat.get(key)
+    ]
+    if mismatches:
+        raise CompareError(
+            f"incompatible comparison context for block={block}: "
+            + ", ".join(mismatches)
+        )
 
 
 def _sort_key_block_arm(row: dict[str, Any]) -> tuple[Any, ...]:
@@ -260,6 +275,8 @@ def build_comparison(
     treatment_arm: str = "expert_only",
 ) -> CompareResult:
     """Pair baseline vs treatment by block_index; emit flat rows + by_block deltas."""
+    if baseline_arm == treatment_arm:
+        raise CompareError("baseline and treatment arms must be different")
     arms = sorted({baseline_arm, treatment_arm})
     sources = sorted({str(r.get("source_path")) for r in rows if r.get("source_path")})
     by_key = _index_rows_by_block_arm(rows)
@@ -333,7 +350,6 @@ def _markdown_table(result: CompareResult) -> str:
     lines = [
         "# Hybrid quant comparison",
         "",
-        f"Arms: {', '.join(result.arms) or '(none)'}",
         f"Sources: {len(result.sources)}",
         "",
     ]
@@ -341,6 +357,11 @@ def _markdown_table(result: CompareResult) -> str:
         lines.append("_No baseline/treatment block pairs found._")
         lines.append("")
         return "\n".join(lines)
+
+    lines[2:2] = [
+        f"Baseline arm: {result.by_block[0]['baseline_arm']}",
+        f"Treatment arm: {result.by_block[0]['treatment_arm']}",
+    ]
 
     headers = [
         "block",
