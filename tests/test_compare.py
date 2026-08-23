@@ -101,6 +101,44 @@ def test_incompatible_pairing_context_raises() -> None:
         build_comparison(rows)
 
 
+def test_cross_file_pairs_require_complete_context() -> None:
+    rows = [
+        {"arm": "fp16_control", "block_index": 0, "source_path": "base.json", "model_family": "grok-1", "route_top1_agreement": 1.0},
+        {"arm": "expert_only", "block_index": 0, "source_path": "treatment.json", "model_family": "grok-1", "route_top1_agreement": 0.9},
+    ]
+    with pytest.raises(CompareError, match="insufficient comparison context"):
+        build_comparison(rows)
+
+
+@pytest.mark.parametrize("invalid", [True, "NaN", "Infinity"])
+def test_nonfinite_or_boolean_metrics_are_not_comparable(invalid: object) -> None:
+    rows = [
+        {"arm": "fp16_control", "block_index": 0, "route_top1_agreement": invalid},
+        {"arm": "expert_only", "block_index": 0, "route_top1_agreement": invalid},
+    ]
+    with pytest.raises(CompareError, match="no baseline/treatment block pairs"):
+        build_comparison(rows)
+
+
+def test_flat_rows_sort_mixed_block_types() -> None:
+    rows = [
+        {"arm": "fp16_control", "block_index": 0, "route_top1_agreement": 1.0},
+        {"arm": "expert_only", "block_index": 0, "route_top1_agreement": 0.9},
+        {"arm": "fp16_control", "block_index": "1", "route_top1_agreement": 1.0},
+        {"arm": "expert_only", "block_index": "1", "route_top1_agreement": 0.9},
+    ]
+    assert len(build_comparison(rows).rows) == 4
+
+
+def test_baseline_pack_provenance_is_preserved() -> None:
+    rows = [
+        {"arm": "expert_only", "block_index": 0, "route_top1_agreement": 1.0, "pack_basename": "baseline.goz1"},
+        {"arm": "fp16_control", "block_index": 0, "route_top1_agreement": 0.9},
+    ]
+    result = build_comparison(rows, baseline_arm="expert_only", treatment_arm="fp16_control")
+    assert result.by_block[0]["baseline_pack_basename"] == "baseline.goz1"
+
+
 def test_identical_comparison_arms_raise() -> None:
     with pytest.raises(CompareError, match="must be different"):
         build_comparison([], baseline_arm="fp16_control", treatment_arm="fp16_control")
@@ -125,6 +163,7 @@ def test_write_comparison_reports(tmp_path: Path) -> None:
     assert "d_top1" in md
     assert "top2_base" in md
     assert "0.9990" in md
+    assert "Deltas: treatment - baseline" in md
 
 
 def test_reports_validate_all_formats_before_writing(tmp_path: Path) -> None:
@@ -145,6 +184,18 @@ def test_comparison_csv_escapes_formula_metadata(tmp_path: Path) -> None:
     csv_text = written["csv"].read_text(encoding="utf-8")
     assert "'=evil()" in csv_text
     assert "'+evil()" in csv_text
+
+
+def test_comparison_csv_escapes_control_formula_prefixes(tmp_path: Path) -> None:
+    rows = [
+        {"arm": "fp16_control", "block_index": 0, "label": "\t=evil()", "route_top1_agreement": 1.0},
+        {"arm": "expert_only", "block_index": 0, "label": "\r=evil()", "route_top1_agreement": 0.9},
+    ]
+    result = build_comparison(rows)
+    path = write_comparison_reports(result, tmp_path, run_id="csv-controls", formats=["csv"])["csv"]
+    csv_bytes = path.read_bytes()
+    assert b"'\t=evil()" in csv_bytes
+    assert b"'\r=evil()" in csv_bytes
 
 
 def test_empty_inputs_fail() -> None:
@@ -199,3 +250,6 @@ def test_cli_loads_custom_selected_arms(tmp_path: Path) -> None:
     markdown = (tmp_path / "markdown" / "custom-arms.compare.md").read_text()
     assert "Baseline arm: z_control" in markdown
     assert "Treatment arm: a_quant" in markdown
+    rows = load_experiment_rows([source], arms=("z_control", "a_quant"))
+    result = build_comparison(rows, baseline_arm="z_control", treatment_arm="a_quant")
+    assert result.by_block[0]["baseline_scale_source"] is None

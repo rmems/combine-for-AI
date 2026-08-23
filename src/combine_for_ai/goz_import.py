@@ -314,7 +314,8 @@ def _row_from_arm_metrics(
     metrics: dict[str, Any],
 ) -> ImportedExperimentRow:
     label = metrics.get("label")
-    arm_pack = pack if arm != "fp16_control" else _PackFields(None, None, None, None)
+    is_fp_control = arm == "fp16_control" or label == "fp16_control"
+    arm_pack = pack if not is_fp_control else _PackFields(None, None, None, None)
     return ImportedExperimentRow(
         schema=SCHEMA_MULTIBLOCK_V1,
         experiment_kind=GozExperimentKind.MULTIBLOCK.value,

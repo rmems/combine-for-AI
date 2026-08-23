@@ -8,6 +8,7 @@ across blocks.
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -28,6 +29,7 @@ _META_KEYS = (
     "baseline_label",
     "baseline_scale_source",
     "baseline_goz1_version",
+    "baseline_pack_basename",
     "treatment_label",
     "treatment_scale_source",
     "treatment_goz1_version",
@@ -136,12 +138,13 @@ def load_experiment_rows(
 
 
 def _numeric(value: Any) -> float | None:
-    if value is None:
+    if value is None or isinstance(value, bool):
         return None
     try:
-        return float(value)
+        numeric = float(value)
     except (TypeError, ValueError):
         return None
+    return numeric if math.isfinite(numeric) else None
 
 
 def _delta(a: float | None, b: float | None) -> float | None:
@@ -202,6 +205,7 @@ def _fill_arm_meta(
         entry["baseline_label"] = base.get("label")
         entry["baseline_scale_source"] = base.get("scale_source")
         entry["baseline_goz1_version"] = base.get("goz1_version")
+        entry["baseline_pack_basename"] = base.get("pack_basename")
     if treat:
         entry["treatment_label"] = treat.get("label")
         entry["treatment_scale_source"] = treat.get("scale_source")
@@ -249,12 +253,17 @@ def _require_matching_context(
             f"incompatible comparison context for block={block}: "
             + ", ".join(mismatches)
         )
+    if base.get("source_path") != treat.get("source_path") and any(
+        base.get(key) is None for key in context_keys
+    ):
+        raise CompareError(f"insufficient comparison context for block={block}")
 
 
 def _sort_key_block_arm(row: dict[str, Any]) -> tuple[Any, ...]:
     block = row.get("block_index")
     return (
         block is not None,
+        isinstance(block, str),
         block if block is not None else -1,
         str(row.get("arm") or ""),
     )
@@ -382,6 +391,8 @@ def _markdown_table(result: CompareResult) -> str:
     lines[2:2] = [
         f"Baseline arm: {result.by_block[0]['baseline_arm']}; "
         f"Treatment arm: {result.by_block[0]['treatment_arm']}",
+        "Deltas: treatment - baseline; positive values improve agreement/cosine "
+        "but increase drift and runtime.",
     ]
 
     headers = [header for header, _ in _MARKDOWN_COLUMNS]

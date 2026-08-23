@@ -10,7 +10,7 @@ from benchmarks.metrics import MetricsSummary
 from benchmarks.telemetry import TelemetrySnapshot
 
 
-_CSV_FORMULA_PREFIXES = ("=", "+", "-", "@")
+_CSV_FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
 
 
 def ensure_dir(path: Path) -> None:
