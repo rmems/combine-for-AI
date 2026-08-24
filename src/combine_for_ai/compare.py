@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -51,6 +52,9 @@ _MARKDOWN_COLUMNS = (
     ("resid_treat", "treatment_resid_in_drift"),
     ("d_resid", "delta_resid_in_drift"),
 )
+
+_RUN_ID_MAX_LENGTH = 128
+_RUN_ID_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 
 
 class CompareError(ValueError):
@@ -147,10 +151,28 @@ def _numeric(value: Any) -> float | None:
     return numeric if math.isfinite(numeric) else None
 
 
+def _json_safe(value: Any) -> Any:
+    """Recursively drop non-finite floats so reports stay standard JSON.
+
+    ``_numeric`` already filters NaN/Infinity out of the derived ``by_block``
+    metrics, but the flat rows are serialized straight from the source files;
+    without this, ``json.dump`` emits bare ``NaN``/``Infinity`` literals that
+    strict JSON consumers reject.
+    """
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
+    if isinstance(value, dict):
+        return {key: _json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(item) for item in value]
+    return value
+
+
 def _delta(a: float | None, b: float | None) -> float | None:
     if a is None or b is None:
         return None
-    return a - b
+    delta = a - b
+    return delta if math.isfinite(delta) else None
 
 
 def _index_rows_by_block_arm(
@@ -314,7 +336,35 @@ def build_comparison(
     _require_both_arms(by_key, baseline_arm, treatment_arm)
     by_block = _build_by_block_rows(by_key, baseline_arm, treatment_arm)
     flat = sorted(rows, key=_sort_key_block_arm)
-    return CompareResult(rows=flat, by_block=by_block, sources=sources, arms=arms)
+    return CompareResult(
+        rows=[_json_safe(row) for row in flat],
+        by_block=[_json_safe(entry) for entry in by_block],
+        sources=sources,
+        arms=arms,
+    )
+
+
+def _validate_run_id(run_id: str) -> str:
+    """Constrain a run id to one safe filename component.
+
+    Every writer builds its path as ``output_dir / <fmt> / f"{run_id}..."``, so
+    an absolute run id, a path separator or a ``..`` segment would let reports
+    be written or overwritten outside ``output_dir``.
+    """
+    if not isinstance(run_id, str):
+        raise CompareError(f"run id must be a string: {run_id!r}")
+    if not run_id:
+        raise CompareError("run id must not be empty")
+    if len(run_id) > _RUN_ID_MAX_LENGTH:
+        raise CompareError(
+            f"run id must be at most {_RUN_ID_MAX_LENGTH} characters: {run_id!r}"
+        )
+    if not _RUN_ID_PATTERN.fullmatch(run_id):
+        raise CompareError(
+            "run id must be a bare filename of ASCII letters, digits, '.', '_' "
+            f"or '-' starting with a letter or digit: {run_id!r}"
+        )
+    return run_id
 
 
 def _write_json(result: CompareResult, output_dir: Path, run_id: str) -> Path:
@@ -363,6 +413,7 @@ def write_comparison_reports(
         formats = ["json", "csv", "markdown"]
     if not formats:
         raise CompareError("no report formats selected")
+    run_id = _validate_run_id(run_id)
     output_dir = Path(output_dir)
     writers = {
         "json": _write_json,

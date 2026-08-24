@@ -166,6 +166,91 @@ def test_write_comparison_reports(tmp_path: Path) -> None:
     assert "Deltas: treatment - baseline" in md
 
 
+def test_report_json_rows_have_no_non_finite_values(tmp_path: Path) -> None:
+    rows = [
+        {"arm": "fp16_control", "block_index": 0, "route_top1_agreement": 0.999, "seconds": float("nan")},
+        {"arm": "expert_only", "block_index": 0, "route_top1_agreement": 1.0, "seconds": float("inf"),
+         "extra_mode": {"ratios": [float("-inf"), 0.5]}},
+    ]
+    result = build_comparison(rows)
+    written = write_comparison_reports(result, tmp_path, run_id="nan-rows", formats=["json"])
+
+    def reject_constant(name: str) -> float:
+        raise AssertionError(f"non-standard JSON constant in report: {name}")
+
+    payload = json.loads(
+        written["json"].read_text(encoding="utf-8"), parse_constant=reject_constant
+    )
+    assert [row["seconds"] for row in payload["rows"]] == [None, None]
+    treatment = next(row for row in payload["rows"] if row["arm"] == "expert_only")
+    assert treatment["extra_mode"] == {"ratios": [None, 0.5]}
+    assert payload["by_block"][0]["delta_route_top1_agreement"] == pytest.approx(0.001)
+    assert all(row["seconds"] is None for row in result.rows)
+
+
+def test_overflowing_delta_is_not_serialized_as_infinity(tmp_path: Path) -> None:
+    rows = [
+        {"arm": "fp16_control", "block_index": 0, "resid_in_drift": -1.7e308},
+        {"arm": "expert_only", "block_index": 0, "resid_in_drift": 1.7e308},
+    ]
+    result = build_comparison(rows)
+    assert result.by_block[0]["delta_resid_in_drift"] is None
+    written = write_comparison_reports(result, tmp_path, run_id="overflow")
+    for path in written.values():
+        text = path.read_text(encoding="utf-8")
+        assert "Infinity" not in text
+        assert "inf" not in text
+
+
+@pytest.mark.parametrize(
+    "run_id",
+    [
+        "/tmp/absolute",
+        "../../traversal",
+        "..",
+        ".hidden",
+        "nested/run",
+        "nested\\run",
+        "-leading-dash",
+        "",
+        "trailing\n",
+        "nul\x00byte",
+        "x" * 129,
+    ],
+)
+def test_unsafe_run_ids_are_rejected(tmp_path: Path, run_id: str) -> None:
+    rows = load_experiment_rows([FIXTURES / "goz_multiblock_metrics.sample.json"])
+    result = build_comparison(rows)
+    with pytest.raises(CompareError, match="run id"):
+        write_comparison_reports(result, tmp_path, run_id=run_id)
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_traversal_run_id_cannot_escape_output_dir(tmp_path: Path) -> None:
+    rows = load_experiment_rows([FIXTURES / "goz_multiblock_metrics.sample.json"])
+    result = build_comparison(rows)
+    output_dir = tmp_path / "reports"
+    output_dir.mkdir()
+    (tmp_path / "escaped.compare.md").write_text("keep me", encoding="utf-8")
+    with pytest.raises(CompareError, match="run id"):
+        write_comparison_reports(
+            result, output_dir, run_id="../escaped", formats=["markdown"]
+        )
+    assert (tmp_path / "escaped.compare.md").read_text(encoding="utf-8") == "keep me"
+    assert list(output_dir.iterdir()) == []
+
+
+@pytest.mark.parametrize(
+    "run_id", ["cmp-test", "20260101T000000.000Z-compare", "run_1.v2"]
+)
+def test_safe_run_ids_are_accepted(tmp_path: Path, run_id: str) -> None:
+    rows = load_experiment_rows([FIXTURES / "goz_multiblock_metrics.sample.json"])
+    result = build_comparison(rows)
+    written = write_comparison_reports(result, tmp_path, run_id=run_id, formats=["json"])
+    assert written["json"] == tmp_path / "json" / f"{run_id}.compare.json"
+    assert written["json"].is_file()
+
+
 def test_reports_validate_all_formats_before_writing(tmp_path: Path) -> None:
     rows = load_experiment_rows([FIXTURES / "goz_multiblock_metrics.sample.json"])
     result = build_comparison(rows)
@@ -220,6 +305,40 @@ def test_cli_main(tmp_path: Path) -> None:
     assert rc == 0
     assert (tmp_path / "json" / "cli-cmp.compare.json").is_file()
     assert (tmp_path / "markdown" / "cli-cmp.compare.md").is_file()
+
+
+def test_cli_rejects_traversal_run_id(tmp_path: Path) -> None:
+    from scripts.compare_runs import main
+
+    rc = main(
+        [
+            "--input",
+            str(FIXTURES / "goz_multiblock_metrics.sample.json"),
+            "--output-dir",
+            str(tmp_path / "nested" / "reports"),
+            "--run-id",
+            "../../pwned",
+        ]
+    )
+    assert rc == 1
+    assert not list(tmp_path.rglob("*pwned*"))
+
+
+def test_cli_default_run_id_is_a_safe_filename(tmp_path: Path) -> None:
+    from scripts.compare_runs import main
+
+    rc = main(
+        [
+            "--input",
+            str(FIXTURES / "goz_multiblock_metrics.sample.json"),
+            "--output-dir",
+            str(tmp_path),
+        ]
+    )
+    assert rc == 0
+    reports = list((tmp_path / "json").iterdir())
+    assert len(reports) == 1
+    assert reports[0].name.endswith(".compare.json")
 
 
 def test_cli_loads_custom_selected_arms(tmp_path: Path) -> None:
