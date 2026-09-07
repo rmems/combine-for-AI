@@ -2,9 +2,25 @@ name: CI
 
 on:
   push:
-    branches: [main, issue-*]
+    # Branch work is covered by the pull_request trigger below. The previous
+    # `issue-*` filter matched none of the branch names this repo actually uses
+    # (feat/*, chore/*, codex-*), so it only ever ran on main anyway.
+    branches: [main]
   pull_request:
     branches: [main]
+
+# The workflow only reads the checkout; nothing here writes to the repository,
+# issues or packages. Without this block every job inherits the repository
+# default token scope, which is broader than any step needs.
+permissions:
+  contents: read
+
+concurrency:
+  # One in-flight run per workflow per ref. Superseded pull-request runs are
+  # cancelled; runs on main are left alone so post-merge verification always
+  # finishes.
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   test-and-lint:

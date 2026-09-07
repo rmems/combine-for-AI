@@ -1,8 +1,21 @@
 name: Mini Eval Smoke
 
 on:
+  # Also run on main so a merge is verified by the same checks that gated it.
+  push:
+    branches: [main]
   pull_request:
     branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  # One in-flight run per workflow per ref. Superseded pull-request runs are
+  # cancelled; runs on main are left alone so post-merge verification always
+  # finishes.
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   smoke-tests:
