@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from benchmarks.reporting import json_safe, write_json
+from benchmarks.jsonio import json_safe, write_json
 
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
@@ -100,7 +100,7 @@ def test_import_report_of_a_nan_metric_is_valid_json(tmp_path: Path) -> None:
 
 def test_benchmark_report_of_a_nan_metric_is_valid_json(tmp_path: Path) -> None:
     """End-to-end: the benchmark writer goes through the same guard."""
-    from benchmarks.reporting import write_json as writer
+    from benchmarks.reporting import write_json as writer  # re-exported
 
     writer(
         tmp_path / "json" / "run.json",
@@ -108,3 +108,67 @@ def test_benchmark_report_of_a_nan_metric_is_valid_json(tmp_path: Path) -> None:
     )
     report = _strict_load(tmp_path / "json" / "run.json")
     assert report["results"][0]["perplexity"] is None
+
+
+def test_reporting_still_re_exports_the_writers() -> None:
+    """`benchmarks.reporting` is the import site three modules already use."""
+    from benchmarks import jsonio, reporting
+
+    assert reporting.write_json is jsonio.write_json
+    assert reporting.json_safe is jsonio.json_safe
+
+
+def test_standalone_telemetry_artifact_is_valid_json(tmp_path: Path) -> None:
+    """A benchmark run writes this file too, and it bypassed the guard.
+
+    Hardware probes legitimately return a non-finite reading, and
+    `write_telemetry_json` called `json.dump` directly, so `<run>.telemetry.json`
+    could be invalid even when the main report was clean.
+    """
+    from benchmarks.telemetry import (
+        RoutingMetrics,
+        SystemSnapshot,
+        TelemetrySnapshot,
+        write_telemetry_json,
+    )
+
+    snapshot = TelemetrySnapshot(
+        system=SystemSnapshot(
+            cpu_count_logical=8,
+            cpu_count_physical=4,
+            memory_total_gb=float("nan"),
+            memory_available_gb=16.0,
+            gpu_count=0,
+            gpu_names=None,
+            gpu_driver_version=None,
+            cuda_version=None,
+            platform="linux",
+            python_version="3.14",
+        ),
+        routing=RoutingMetrics(routing_entropy=float("inf")),
+        kernel_occupancy=float("-inf"),
+        vram_bandwidth_gbps=float("nan"),
+    )
+
+    path = tmp_path / "telemetry" / "run.telemetry.json"
+    write_telemetry_json(path, snapshot)
+
+    payload = _strict_load(path)
+    assert payload["sys_memory_total_gb"] is None
+    assert payload["sys_memory_available_gb"] == 16.0
+    assert payload["routing_entropy"] is None
+    assert payload["kernel_occupancy"] is None
+    assert payload["vram_bandwidth_gbps"] is None
+
+
+def test_benchmark_run_writes_no_invalid_json_anywhere(tmp_path: Path) -> None:
+    """Every JSON file a run produces must parse strictly, telemetry included."""
+    from benchmarks.runner import run_benchmarks
+
+    config = Path("configs/benchmark.sample.json")
+    run_benchmarks(config, tmp_path, ["json", "csv"], 42)
+
+    written = sorted(tmp_path.rglob("*.json"))
+    assert written, "the run produced no JSON at all"
+    for path in written:
+        _strict_load(path)  # raises if the file contains a bare constant
