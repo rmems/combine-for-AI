@@ -1,0 +1,21 @@
+benchmarks/runner.py
+  s_9d08da9f379af7::t_c3ffcbec58f371 8,80-84,86-87,93
+tests/test_runner_metadata.py
+  s_9d08da9f379af7::t_c398270288025d 79-98
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "112c4d0164bfa52b6bb538ecd2d6bdcf70a5db28",
+  "prompts": {},
+  "sessions": {
+    "s_9d08da9f379af7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9bfe7983-fcb5-4acf-be7e-31f1fb935cad",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Raul Montoya Cardenas <montoyaraul34@gmail.com>"
+    }
+  }
+}
