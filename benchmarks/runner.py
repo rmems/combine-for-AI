@@ -5,6 +5,7 @@ import os
 import platform
 import random
 import secrets
+import shutil
 import subprocess
 import time
 from dataclasses import replace
@@ -76,15 +77,20 @@ def _git(*args: str) -> str | None:
     benchmark launched from an installed wheel, a source tarball or a container
     layer without a `.git` directory should still produce a report.
     """
+    # Resolved to an absolute path rather than letting the OS search PATH, so a
+    # `git` planted earlier in PATH cannot be what a benchmark run executes.
+    git = shutil.which("git")
+    if git is None:
+        return None
     try:
-        output = subprocess.check_output(
-            ["git", *args],
+        output = subprocess.check_output(  # nosec B603 - fixed argv, no shell
+            [git, *args],
             text=True,
             stderr=subprocess.DEVNULL,
             timeout=_GIT_TIMEOUT_SECONDS,
         )
     except (subprocess.SubprocessError, OSError):
-        # Not a repository, git missing from PATH, or a hung invocation.
+        # Not a repository, or a hung invocation.
         return None
     stripped = output.strip()
     return stripped or None

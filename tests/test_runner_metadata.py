@@ -76,6 +76,26 @@ def test_blank_git_output_is_treated_as_unknown() -> None:
         assert get_git_info() == (UNKNOWN_GIT_INFO, UNKNOWN_GIT_INFO)
 
 
+def test_git_missing_from_path_is_treated_as_unknown() -> None:
+    with mock.patch("benchmarks.runner.shutil.which", return_value=None):
+        assert get_git_info() == (UNKNOWN_GIT_INFO, UNKNOWN_GIT_INFO)
+
+
+def test_git_is_invoked_by_absolute_path() -> None:
+    """A `git` planted earlier in PATH must not be what a run executes."""
+    with mock.patch(
+        "benchmarks.runner.shutil.which", return_value="/usr/bin/git"
+    ), mock.patch(
+        "benchmarks.runner.subprocess.check_output", return_value="abc123\n"
+    ) as check_output:
+        get_git_info()
+
+    assert check_output.call_args_list, "git was never invoked"
+    for call in check_output.call_args_list:
+        argv = call.args[0]
+        assert argv[0] == "/usr/bin/git", f"not an absolute path: {argv[0]!r}"
+
+
 def test_run_ids_do_not_collide_within_one_millisecond() -> None:
     """Parallel runs of the same commit must not overwrite each other's reports."""
     with mock.patch("benchmarks.runner.time.time", return_value=1_767_225_600.123):
