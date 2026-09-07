@@ -4,6 +4,7 @@ import json
 import os
 import platform
 import random
+import secrets
 import subprocess
 import time
 from dataclasses import replace
@@ -62,23 +63,60 @@ def load_config(path: Path) -> dict[str, Any]:
         return json.load(handle)
 
 
+#: Recorded for commit and branch when the git provenance cannot be read.
+UNKNOWN_GIT_INFO = "unknown"
+
+_GIT_TIMEOUT_SECONDS = 5
+
+
+def _git(*args: str) -> str | None:
+    """Run a read-only git command, or return None if it cannot be answered.
+
+    Provenance is metadata about the run, not a precondition for it: a
+    benchmark launched from an installed wheel, a source tarball or a container
+    layer without a `.git` directory should still produce a report.
+    """
+    try:
+        output = subprocess.check_output(
+            ["git", *args],
+            text=True,
+            stderr=subprocess.DEVNULL,
+            timeout=_GIT_TIMEOUT_SECONDS,
+        )
+    except (subprocess.SubprocessError, OSError):
+        # Not a repository, git missing from PATH, or a hung invocation.
+        return None
+    stripped = output.strip()
+    return stripped or None
+
+
 def get_git_info() -> tuple[str, str]:
-    commit = (
-        subprocess.check_output(["git", "rev-parse", "HEAD"], text=True)
-        .strip()
-    )
-    branch = (
-        subprocess.check_output(["git", "rev-parse", "--abbrev-ref", "HEAD"], text=True)
-        .strip()
-    )
+    """Return (commit, branch), falling back to "unknown" for either."""
+    commit = _git("rev-parse", "HEAD") or UNKNOWN_GIT_INFO
+    branch = _git("rev-parse", "--abbrev-ref", "HEAD") or UNKNOWN_GIT_INFO
     return commit, branch
+
+
+def _build_run_id(commit: str) -> str:
+    """Build a run id unique across concurrent runs of the same commit.
+
+    The commit prefix alone does not separate two runs, and the timestamp
+    repeats when parallel jobs start in the same millisecond. Colliding ids
+    resolve to the same JSON, CSV and telemetry paths, so the later run would
+    silently overwrite the earlier one's reports. Both halves of the timestamp
+    come from a single clock reading so they cannot straddle a second.
+    """
+    now = time.time()
+    stamp = time.strftime("%Y%m%dT%H%M%S", time.gmtime(now))
+    millis = int(now % 1 * 1000)
+    return f"{stamp}.{millis:03d}Z-{commit[:7]}-{secrets.token_hex(4)}"
 
 
 def build_metadata(run_name: str, seed: int) -> RunMetadata:
     commit, branch = get_git_info()
     telemetry = collect_telemetry_snapshot()
     return RunMetadata(
-        run_id=f"{time.strftime('%Y%m%dT%H%M%S', time.gmtime())}.{int(time.time() % 1 * 1000):03d}Z-{commit[:7]}",
+        run_id=_build_run_id(commit),
         run_name=run_name,
         seed=seed,
         git_commit=commit,
