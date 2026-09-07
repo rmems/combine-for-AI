@@ -388,6 +388,12 @@ def telemetry_to_dict(telemetry: TelemetrySnapshot) -> dict[str, Any]:
 
 
 def write_telemetry_json(path: Path, telemetry: TelemetrySnapshot) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8") as handle:
-        json.dump(telemetry_to_dict(telemetry), handle, indent=2, sort_keys=True)
+    """Write the standalone telemetry artifact as standard JSON.
+
+    A benchmark run writes this alongside its main report, and hardware probes
+    can legitimately yield a non-finite reading, so it goes through the same
+    guard as every other report rather than calling json.dump directly.
+    """
+    from benchmarks.jsonio import write_json
+
+    write_json(path, telemetry_to_dict(telemetry))
