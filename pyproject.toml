@@ -19,10 +19,29 @@ dependencies = [
 combine-for-ai = "combine_for_ai:main"
 
 [dependency-groups]
-dev = ["pytest>=8.0.0"]
+dev = ["pytest>=8.0.0", "ruff>=0.14.0,<0.15.0"]
 
 [tool.pytest.ini_options]
 pythonpath = [".", "src"]
+
+[tool.ruff]
+target-version = "py314"
+
+[tool.ruff.lint]
+# Selected explicitly rather than relying on ruff's defaults, so a ruff upgrade
+# cannot silently widen or narrow the gate. The tree is clean under this set;
+# `I` (import sorting) is deliberately left out for now — it is ~12 auto-fixable
+# hits that would swamp any diff it landed in, and belongs in its own pass.
+select = [
+    "E4",   # imports
+    "E7",   # statement-level errors
+    "E9",   # syntax / IO errors
+    "F",    # pyflakes: undefined names, unused imports
+    "W",    # whitespace
+    "B",    # bugbear: likely bugs
+    "C4",   # comprehension and literal misuse
+    "PIE",  # unnecessary code
+]
 
 [build-system]
 requires = ["uv_build>=0.11.6,<0.12.0"]

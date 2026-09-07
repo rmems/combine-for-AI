@@ -115,7 +115,7 @@ def calculate_cloze_accuracy(
     if not predictions:
         return 0.0
 
-    correct = sum(1 for pred, ref in zip(predictions, references) if pred == ref)
+    correct = sum(1 for pred, ref in zip(predictions, references, strict=True) if pred == ref)
     return correct / len(predictions)
 
 
