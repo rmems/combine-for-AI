@@ -11,10 +11,14 @@ permissions:
   contents: read
 
 concurrency:
-  # One in-flight run per workflow per ref. Superseded pull-request runs are
-  # cancelled; runs on main are left alone so post-merge verification always
-  # finishes.
-  group: ${{ github.workflow }}-${{ github.ref }}
+  # Pull requests group by ref, so pushing again cancels the superseded run.
+  #
+  # Pushes to main group by commit SHA instead, giving every merge its own
+  # group. A shared group would not be safe here even with cancel-in-progress
+  # off: GitHub allows at most one running and one pending job per group, so
+  # when three merges land in quick succession the middle one's pending job is
+  # replaced by the newest and that commit is never verified.
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
