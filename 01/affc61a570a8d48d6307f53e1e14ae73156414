@@ -1,0 +1,19 @@
+tests/test_runner_metadata.py
+  s_9d08da9f379af7::t_ac414939aaeceb 10,110-119
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "01affc61a570a8d48d6307f53e1e14ae73156414",
+  "prompts": {},
+  "sessions": {
+    "s_9d08da9f379af7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9bfe7983-fcb5-4acf-be7e-31f1fb935cad",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Raul Montoya Cardenas <montoyaraul34@gmail.com>"
+    }
+  }
+}
