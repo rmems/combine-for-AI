@@ -1,0 +1,26 @@
+benchmarks/jsonio.py
+  s_9d08da9f379af7::t_5264cc834c6582 1-49
+benchmarks/telemetry.py
+  s_9d08da9f379af7::t_446846a97b363c 391-399
+tests/test_reporting_json_safety.py
+  s_9d08da9f379af7::t_ef25c6e5e4e951 15,103,111-156,160-174
+  s_9d08da9f379af7::t_1a2735a576db52 157-159
+benchmarks/reporting.py
+  s_9d08da9f379af7::t_446846a97b363c 8,66-75
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "00efc4b80de9d5d38ce05def1cd1717411db1b97",
+  "prompts": {},
+  "sessions": {
+    "s_9d08da9f379af7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9bfe7983-fcb5-4acf-be7e-31f1fb935cad",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Raul Montoya Cardenas <montoyaraul34@gmail.com>"
+    }
+  }
+}
