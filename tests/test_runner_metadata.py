@@ -7,6 +7,7 @@ from an installed wheel, a source tarball, or a container layer without a
 
 from __future__ import annotations
 
+import string
 import subprocess
 from pathlib import Path
 from unittest import mock
@@ -106,7 +107,16 @@ def test_run_ids_do_not_collide_within_one_millisecond() -> None:
 def test_run_id_still_carries_the_commit_prefix() -> None:
     run_id = _build_run_id("abcdef1234567890")
     assert "abcdef1" in run_id, "the commit prefix identifies which build ran"
-    assert run_id.endswith(tuple("0123456789abcdef"))
+
+
+def test_run_id_ends_with_a_full_random_hex_suffix() -> None:
+    """It is the suffix that separates concurrent runs, so check all of it.
+
+    `endswith(tuple(HEXDIGITS))` would only constrain the final character.
+    """
+    suffix = _build_run_id("abcdef1234567890").rsplit("-", 1)[-1]
+    assert len(suffix) == 8, f"expected 8 hex characters, got {suffix!r}"
+    assert set(suffix) <= set(string.hexdigits.lower()), f"not hex: {suffix!r}"
 
 
 def test_run_id_is_a_safe_single_path_component() -> None:
