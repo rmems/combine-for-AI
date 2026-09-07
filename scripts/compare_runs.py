@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import secrets
 import sys
 import time
 from pathlib import Path
@@ -84,10 +85,18 @@ def _parse_formats(raw: str) -> list[str]:
 
 
 def _default_run_id() -> str:
-    return (
-        f"{time.strftime('%Y%m%dT%H%M%S', time.gmtime())}."
-        f"{int(time.time() % 1 * 1000):03d}Z-compare"
-    )
+    """Build a run id that stays unique across concurrent comparison processes.
+
+    The timestamp alone collides when parallel experiment-matrix jobs start
+    within the same millisecond; colliding ids resolve to the same JSON/CSV/
+    Markdown paths, and the writers would silently overwrite each other. The
+    random suffix makes that collision improbable, and both halves of the
+    timestamp come from one clock reading so they cannot straddle a second.
+    """
+    now = time.time()
+    stamp = time.strftime("%Y%m%dT%H%M%S", time.gmtime(now))
+    millis = int(now % 1 * 1000)
+    return f"{stamp}.{millis:03d}Z-{secrets.token_hex(4)}-compare"
 
 
 def _run_compare(args: argparse.Namespace) -> dict[str, Path]:

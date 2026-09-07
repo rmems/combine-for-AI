@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from unittest import mock
 
 import pytest
 
@@ -372,3 +373,159 @@ def test_cli_loads_custom_selected_arms(tmp_path: Path) -> None:
     rows = load_experiment_rows([source], arms=("z_control", "a_quant"))
     result = build_comparison(rows, baseline_arm="z_control", treatment_arm="a_quant")
     assert result.by_block[0]["baseline_scale_source"] is None
+
+
+def test_legacy_report_fp_control_pack_provenance_is_normalized(tmp_path: Path) -> None:
+    """A report written before the importer fix must not leak pack provenance.
+
+    Such a report carries the treatment pack's metadata on its ``fp16_control``
+    rows; loading it bypasses the importer, so the loader has to clear the
+    fields itself or the comparison publishes them as baseline provenance.
+    """
+    legacy = {
+        "results": [
+            {
+                "arm": "fp16_control",
+                "block_index": 0,
+                "label": "fp16_control",
+                "model_family": "grok-1",
+                "tokens": 8,
+                "seed": 1,
+                "route_top1_agreement": 1.0,
+                "scale_source": "LEGACY_SCALE",
+                "goz1_version": 3,
+                "sparsity": 0.5,
+                "pack_basename": "goz1-pack-v3",
+            },
+            {
+                "arm": "expert_only",
+                "block_index": 0,
+                "label": "expert_only",
+                "model_family": "grok-1",
+                "tokens": 8,
+                "seed": 1,
+                "route_top1_agreement": 0.9,
+                "scale_source": "GOZ1",
+                "goz1_version": 3,
+                "sparsity": 0.5,
+                "pack_basename": "goz1-pack-v3",
+            },
+        ]
+    }
+    report = tmp_path / "legacy.goz-import.json"
+    report.write_text(json.dumps(legacy), encoding="utf-8")
+
+    rows = load_experiment_rows([report])
+    control = next(r for r in rows if r["arm"] == "fp16_control")
+    assert control["pack_basename"] is None
+    assert control["goz1_version"] is None
+    assert control["scale_source"] is None
+    assert control["sparsity"] is None
+
+    entry = build_comparison(rows).by_block[0]
+    assert entry["baseline_pack_basename"] is None
+    assert entry["baseline_goz1_version"] is None
+    assert entry["baseline_scale_source"] is None
+    # The treatment arm keeps its own provenance.
+    assert entry["treatment_pack_basename"] == "goz1-pack-v3"
+
+
+def test_legacy_report_normalization_keeps_treatment_control_provenance(
+    tmp_path: Path,
+) -> None:
+    """Only ``fp16_control`` rows are normalized, whichever arm role they take."""
+    legacy = {
+        "results": [
+            {
+                "arm": "expert_only",
+                "block_index": 0,
+                "route_top1_agreement": 1.0,
+                "pack_basename": "goz1-pack-v3",
+            },
+            {
+                "arm": "fp16_control",
+                "block_index": 0,
+                "route_top1_agreement": 0.9,
+                "pack_basename": "leaked.goz1",
+            },
+        ]
+    }
+    report = tmp_path / "legacy-swapped.goz-import.json"
+    report.write_text(json.dumps(legacy), encoding="utf-8")
+
+    rows = load_experiment_rows([report])
+    entry = build_comparison(
+        rows, baseline_arm="expert_only", treatment_arm="fp16_control"
+    ).by_block[0]
+    assert entry["baseline_pack_basename"] == "goz1-pack-v3"
+    assert entry["treatment_pack_basename"] is None
+
+
+def test_metric_too_large_for_a_float_is_not_comparable() -> None:
+    """A JSON integer beyond the float range must be dropped, not crash.
+
+    ``float(10**400)`` raises ``OverflowError`` rather than returning a
+    non-finite value, so it needs the same treatment as NaN and Infinity.
+    """
+    huge = 10**400
+    rows = [
+        {"arm": "fp16_control", "block_index": 0, "route_top1_agreement": huge},
+        {"arm": "expert_only", "block_index": 0, "route_top1_agreement": huge},
+    ]
+    with pytest.raises(CompareError, match="no baseline/treatment block pairs"):
+        build_comparison(rows)
+
+
+def test_overflowing_metric_does_not_crash_the_cli(tmp_path: Path) -> None:
+    from scripts.compare_runs import main
+
+    payload = json.loads(
+        (FIXTURES / "goz_multiblock_metrics.sample.json").read_text(encoding="utf-8")
+    )
+    payload["chain"]["per_block"][0]["expert_only"]["seconds"] = 10**400
+    source = tmp_path / "overflowing-metric.json"
+    source.write_text(json.dumps(payload), encoding="utf-8")
+
+    rc = main(
+        [
+            "--input",
+            str(source),
+            "--output-dir",
+            str(tmp_path),
+            "--run-id",
+            "overflow-cli",
+            "--formats",
+            "json",
+        ]
+    )
+    assert rc == 0
+    report = json.loads(
+        (tmp_path / "json" / "overflow-cli.compare.json").read_text(encoding="utf-8")
+    )
+    block0 = next(b for b in report["by_block"] if b["block_index"] == 0)
+    assert block0["treatment_seconds"] is None
+    assert block0["delta_seconds"] is None
+
+
+def test_default_run_ids_do_not_collide_within_one_millisecond() -> None:
+    """Parallel matrix jobs must not resolve to the same report paths."""
+    from scripts.compare_runs import _default_run_id
+
+    fixed = 1_767_225_600.123
+    with mock.patch("scripts.compare_runs.time.time", return_value=fixed):
+        ids = {_default_run_id() for _ in range(64)}
+    assert len(ids) == 64, "default run ids collide when the clock does not advance"
+
+
+def test_default_run_id_is_accepted_as_a_report_run_id(tmp_path: Path) -> None:
+    from scripts.compare_runs import _default_run_id
+
+    run_id = _default_run_id()
+    result = build_comparison(
+        load_experiment_rows([FIXTURES / "goz_multiblock_metrics.sample.json"])
+    )
+    written = write_comparison_reports(
+        result, tmp_path, run_id=run_id, formats=["json"]
+    )
+    assert written["json"] == tmp_path / "json" / f"{run_id}.compare.json"
+    assert written["json"].is_file()

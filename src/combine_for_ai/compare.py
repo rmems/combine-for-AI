@@ -14,7 +14,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from combine_for_ai.goz_import import GozImportError, import_goz_experiment
+from combine_for_ai.goz_import import (
+    PACK_PROVENANCE_FIELDS,
+    GozImportError,
+    import_goz_experiment,
+    is_fp_control,
+)
 
 
 COMPARE_METRIC_KEYS = (
@@ -90,6 +95,23 @@ def _load_json_object(path: Path) -> dict[str, Any]:
     return raw
 
 
+def _normalize_pack_provenance(row: dict[str, Any]) -> dict[str, Any]:
+    """Clear pack provenance on FP16 control rows loaded from an existing report.
+
+    The importer already blanks these fields when it builds a control row, but
+    reports written before that fix still carry the treatment pack's metadata on
+    ``fp16_control`` rows. Loading such a report bypasses the importer entirely,
+    so without this the comparison would publish quantized pack metadata as the
+    unquantized baseline's provenance.
+    """
+    if not is_fp_control(row.get("arm"), row.get("label")):
+        return row
+    for key in PACK_PROVENANCE_FIELDS:
+        if row.get(key) is not None:
+            row[key] = None
+    return row
+
+
 def _rows_from_goz_import_report(path: Path, raw: dict[str, Any]) -> list[dict[str, Any]]:
     results = raw.get("results")
     if not isinstance(results, list) or not results:
@@ -97,7 +119,7 @@ def _rows_from_goz_import_report(path: Path, raw: dict[str, Any]) -> list[dict[s
     rows = []
     for item in results:
         if isinstance(item, dict):
-            row = dict(item)
+            row = _normalize_pack_provenance(dict(item))
             row.setdefault("source_path", str(path))
             rows.append(row)
     if not rows:
@@ -146,7 +168,8 @@ def _numeric(value: Any) -> float | None:
         return None
     try:
         numeric = float(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
+        # OverflowError: a JSON integer too large for a C double (e.g. 10**400).
         return None
     return numeric if math.isfinite(numeric) else None
 
