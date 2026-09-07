@@ -2,9 +2,29 @@ name: CI
 
 on:
   push:
-    branches: [main, issue-*]
+    # Branch work is covered by the pull_request trigger below. The previous
+    # `issue-*` filter matched none of the branch names this repo actually uses
+    # (feat/*, chore/*, codex-*), so it only ever ran on main anyway.
+    branches: [main]
   pull_request:
     branches: [main]
+
+# The workflow only reads the checkout; nothing here writes to the repository,
+# issues or packages. Without this block every job inherits the repository
+# default token scope, which is broader than any step needs.
+permissions:
+  contents: read
+
+concurrency:
+  # Pull requests group by ref, so pushing again cancels the superseded run.
+  #
+  # Pushes to main group by commit SHA instead, giving every merge its own
+  # group. A shared group would not be safe here even with cancel-in-progress
+  # off: GitHub allows at most one running and one pending job per group, so
+  # when three merges land in quick succession the middle one's pending job is
+  # replaced by the newest and that commit is never verified.
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   test-and-lint:
