@@ -47,6 +47,9 @@ jobs:
       - name: uv sync
         run: uv sync --frozen
 
+      - name: ruff
+        run: uv run ruff check .
+
       - name: pytest
         run: uv run pytest -q
 
