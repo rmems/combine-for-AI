@@ -1,0 +1,19 @@
+docs/TECH_DEBT.md
+  s_9d08da9f379af7::t_6031fee3e6436d 1-232
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "c166b917bfe1bdfc52715e50b060bdd1047c28ac",
+  "prompts": {},
+  "sessions": {
+    "s_9d08da9f379af7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9bfe7983-fcb5-4acf-be7e-31f1fb935cad",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Raul Montoya Cardenas <montoyaraul34@gmail.com>"
+    }
+  }
+}
