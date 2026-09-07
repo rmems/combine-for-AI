@@ -1,0 +1,19 @@
+.gitignore
+  s_9d08da9f379af7::t_da99ef9c0daff6 1,4-28
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "ea9db92c2f169cf3dddfec286019984a23fc5bd0",
+  "prompts": {},
+  "sessions": {
+    "s_9d08da9f379af7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9bfe7983-fcb5-4acf-be7e-31f1fb935cad",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Raul Montoya Cardenas <montoyaraul34@gmail.com>"
+    }
+  }
+}
