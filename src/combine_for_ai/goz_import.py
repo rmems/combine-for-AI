@@ -20,6 +20,14 @@ from typing import Any
 SCHEMA_MULTIBLOCK_V1 = "grok_ozempic.multiblock_metrics.v1"
 SCHEMA_ROUTE_PRESERVATION_V1 = "grok_ozempic.route_preservation.v1"
 
+#: Arm name of the unquantized control that every treatment is compared against.
+FP_CONTROL_ARM = "fp16_control"
+
+#: Row fields whose values describe the quantized pack an arm was built from.
+#: An FP16 control arm is never built from a pack, so these must stay ``None``
+#: for it, or downstream consumers read pack provenance as baseline provenance.
+PACK_PROVENANCE_FIELDS = ("scale_source", "goz1_version", "sparsity", "pack_basename")
+
 
 class GozExperimentKind(str, Enum):
     MULTIBLOCK = "multiblock"
@@ -125,7 +133,8 @@ def _as_float(value: Any) -> float | None:
         return None
     try:
         return float(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
+        # OverflowError: a JSON integer too large for a C double (e.g. 10**400).
         return None
 
 
@@ -134,7 +143,8 @@ def _as_int(value: Any) -> int | None:
         return None
     try:
         return int(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
+        # OverflowError: an infinite float has no integer value.
         return None
 
 
@@ -306,6 +316,11 @@ def _pack_fields(pack: dict[str, Any] | None) -> _PackFields:
     )
 
 
+def is_fp_control(arm: Any, label: Any = None) -> bool:
+    """Return whether an arm/label pair identifies the unquantized FP16 control."""
+    return arm == FP_CONTROL_ARM or label == FP_CONTROL_ARM
+
+
 def _row_from_arm_metrics(
     ctx: _ImportCtx,
     pack: _PackFields,
@@ -314,6 +329,11 @@ def _row_from_arm_metrics(
     metrics: dict[str, Any],
 ) -> ImportedExperimentRow:
     label = metrics.get("label")
+    arm_pack = (
+        _PackFields(None, None, None, None)
+        if is_fp_control(arm, label)
+        else pack
+    )
     return ImportedExperimentRow(
         schema=SCHEMA_MULTIBLOCK_V1,
         experiment_kind=GozExperimentKind.MULTIBLOCK.value,
@@ -328,14 +348,14 @@ def _row_from_arm_metrics(
         block_output_cosine=_as_float(metrics.get("block_output_cosine")),
         resid_in_drift=_as_float(metrics.get("residual_drift_relative_norm")),
         expert_load_js=_as_float(metrics.get("expert_load_js_bits")),
-        scale_source=pack.scale_source,
-        goz1_version=pack.goz1_version,
-        sparsity=pack.sparsity,
+        scale_source=arm_pack.scale_source,
+        goz1_version=arm_pack.goz1_version,
+        sparsity=arm_pack.sparsity,
         tokens=ctx.tokens,
         seed=ctx.seed,
         label=str(label) if label is not None else arm,
         seconds=_as_float(metrics.get("seconds")),
-        pack_basename=pack.pack_name,
+        pack_basename=arm_pack.pack_name,
         extra={
             "moe_output_cosine": metrics.get("moe_output_cosine"),
             "residual_stream_cosine": metrics.get("residual_stream_cosine"),
@@ -562,6 +582,8 @@ def write_import_reports(
 
 
 __all__ = [
+    "FP_CONTROL_ARM",
+    "PACK_PROVENANCE_FIELDS",
     "SCHEMA_MULTIBLOCK_V1",
     "SCHEMA_ROUTE_PRESERVATION_V1",
     "GozExperimentKind",
@@ -573,6 +595,6 @@ __all__ = [
     "import_multiblock_metrics",
     "import_route_preservation",
     "import_goz_experiment",
+    "is_fp_control",
     "write_import_reports",
 ]
-

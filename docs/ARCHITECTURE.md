@@ -115,6 +115,14 @@ CLI: `scripts/import_goz_experiment.py`. Output rows map:
 
 Payload includes `benchmark_linkage.grok_ozempic_report_path` and optional decision/provenance.
 
+## Hybrid comparison runner
+
+`combine_for_ai.compare` builds matrices from imported or raw experiment rows:
+
+- Baseline arm (default `fp16_control`) vs treatment (default `expert_only`)
+- Paired by `block_index` with deltas for route top-1/2, cosine, residual drift, etc.
+- CLI: `scripts/compare_runs.py` → `*.compare.json`, `*.compare-by-block.csv`, `*.compare.md`
+
 ## Telemetry
 
 See `benchmarks/telemetry.py`: `SystemSnapshot`, `GPUMetrics` (optional `pynvml`), `RoutingMetrics`, upstream merge for corinth-canal / myelin-accelerator.
