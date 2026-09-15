@@ -15,6 +15,7 @@ xai-dissect ──manifests──► grok-ozempic ──GOZ1 packs──► comb
 | Manifest ingestion | Validate magere-style handoff JSON/YAML; dispatch by artifact format |
 | GOZ1 header sniff | Magic/version/tensor_count only — no dequant (format SoT in grok-ozempic) |
 | Benchmark runner | Mock (CI) + future import adapters for grok-ozempic experiment JSON |
+| Matrix runner | Config-driven models × quant × datasets campaign; comparison + family reports |
 | Telemetry | Local GPU snapshot + optional corinth/myelin overlay |
 | Reports | JSON/CSV (+ markdown generators); MoE/SNN fields nullable |
 
@@ -72,6 +73,21 @@ Entrypoints:
 Selection priority for **existing** generated artifacts: **GOZ1 → AWQ → GPTQ**, then source GGUF / HF / GOZ1.
 
 GOZ1 success path uses quantization profile **`saaq`** and attaches header fields to the report row.
+
+## Experiment matrix
+
+Config: `configs/matrix/*.json` or `*.toml`. Cartesian product of `models` × `quantization` (per-model override allowed) × `datasets`, with optional `select` / `exclude` plus CLI filters (`--models`, `--families`, `--quant-methods`, `--datasets`).
+
+`MatrixRunner` (`src/combine_for_ai/matrix_runner.py`) iterates cells, invokes `run_benchmarks_from_config` for each, writes `reports/cells/<cell_id>/`, and aggregates:
+
+- `relative_accuracy_drop` = `(baseline_acc - treatment_acc) / baseline_acc`
+- `compression_ratio` = `baseline_bits / treatment_bits`
+- `throughput_gain` = `treatment_throughput / baseline_throughput`
+- `vram_savings` = `(baseline_vram - treatment_vram) / baseline_vram`
+
+Baseline is `baseline_quantization` (default `fp16`) for the same model+dataset. Progress is `matrix-progress.json` so interrupted campaigns resume. Family grouping uses `models[].family` (corinth-canal: `olmoe`, `qwen3moe`, `gemma4`, `deepseek2`, `llamamoe`, `zaya`).
+
+CLI: `python scripts/run_matrix.py --config configs/matrix/corinth_canal.sample.json`.
 
 ## Metrics
 
