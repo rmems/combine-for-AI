@@ -43,7 +43,7 @@ def main(argv: list[str] | None = None) -> None:
     if args.retry_failed or args.max_attempts is not None:
         retry = RetryPolicy(
             retry_failed=bool(args.retry_failed),
-            max_attempts=args.max_attempts or 1,
+            max_attempts=args.max_attempts if args.max_attempts is not None else 1,
         )
     result = run_matrix(args.config, args.output_dir, retry=retry)
     replay = replay_journal(result.journal_path)

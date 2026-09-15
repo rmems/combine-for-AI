@@ -22,6 +22,7 @@ from benchmarks.journal import (
     CellState,
     CommitPoint,
     JOURNAL_SCHEMA,
+    JournalError,
     ResumeJournal,
 )
 from benchmarks.jsonio import ensure_dir, write_json
@@ -108,7 +109,8 @@ class MatrixRunResult:
 
 
 def utc_now() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    stamp = datetime.now(timezone.utc).replace(microsecond=0)
+    return stamp.isoformat().replace("+00:00", "Z")
 
 
 def load_matrix_config(path: Path) -> MatrixDefinition:
@@ -156,29 +158,40 @@ def _transition(
     }
 
 
-def _apply_transition(status: CellStatus, record: Mapping[str, Any]) -> None:
-    state = CellState(str(record["state"]))
-    status.state = state
-    status.attempt = int(record.get("attempt") or 0)
-    if record.get("artifact_checksum") is not None:
-        status.artifact_checksum = record.get("artifact_checksum")
-    if record.get("fingerprint") is not None:
-        status.fingerprint = record.get("fingerprint")
-    if record.get("artifact_path") is not None:
-        status.artifact_path = record.get("artifact_path")
-    status.error = record.get("error")
-    ts = record.get("ts")
+def _optional_str(record: Mapping[str, Any], key: str) -> str | None:
+    value = record.get(key)
+    return value if isinstance(value, str) else None
+
+
+def _stamp_transition(status: CellStatus, state: CellState, ts: str | None) -> None:
     if state is CellState.RUNNING:
-        status.started_at = ts if isinstance(ts, str) else None
+        status.started_at = ts
         status.finished_at = None
-        return
-    if state in {CellState.SUCCEEDED, CellState.FAILED, CellState.SKIPPED}:
-        status.finished_at = ts if isinstance(ts, str) else None
         return
     if state is CellState.PENDING:
         return
-    never: Never = state
-    raise MatrixError(f"unhandled cell state: {never}")
+    status.finished_at = ts
+
+
+def _copy_present(status: CellStatus, record: Mapping[str, Any], field: str) -> None:
+    value = record.get(field)
+    if value is not None:
+        setattr(status, field, value)
+
+
+def _apply_transition(status: CellStatus, record: Mapping[str, Any]) -> None:
+    try:
+        state = CellState(str(record["state"]))
+        attempt = int(record.get("attempt") or 0)
+    except (KeyError, TypeError, ValueError) as exc:
+        raise JournalError("malformed journal transition") from exc
+    status.state = state
+    status.attempt = attempt
+    status.error = record.get("error")
+    _copy_present(status, record, "artifact_checksum")
+    _copy_present(status, record, "fingerprint")
+    _copy_present(status, record, "artifact_path")
+    _stamp_transition(status, state, _optional_str(record, "ts"))
 
 
 def _statuses_from_records(
@@ -195,7 +208,10 @@ def _statuses_from_records(
             continue
         if kind != "transition":
             continue
-        cell_id = str(record["cell_id"])
+        try:
+            cell_id = str(record["cell_id"])
+        except KeyError as exc:
+            raise JournalError("malformed journal transition") from exc
         identity = definition.cell_by_id.get(cell_id)
         if identity is None:
             raise IncompatibleMatrixError(
@@ -237,25 +253,16 @@ def artifact_is_valid(status: CellStatus, output_dir: Path) -> bool:
 
 def decide_action(status: CellStatus, policy: RetryPolicy, output_dir: Path) -> Action:
     state = status.state
-    if state is CellState.PENDING:
-        return Action.RUN
-    if state is CellState.RUNNING:
-        # Interrupted mid-cell: never treat a leftover artifact as success.
+    if state in {CellState.PENDING, CellState.RUNNING}:
         return Action.RUN
     if state is CellState.FAILED:
-        if policy.allows_retry(status.attempt):
-            return Action.RUN
-        return Action.KEEP
-    if state is CellState.SUCCEEDED:
-        if artifact_is_valid(status, output_dir):
-            return Action.SKIP
-        return Action.RUN
-    if state is CellState.SKIPPED:
-        if artifact_is_valid(status, output_dir):
-            return Action.KEEP
-        return Action.RUN
-    never: Never = state
-    raise MatrixError(f"unhandled cell state: {never}")
+        return Action.RUN if policy.allows_retry(status.attempt) else Action.KEEP
+    if state not in {CellState.SUCCEEDED, CellState.SKIPPED}:
+        never: Never = state
+        raise MatrixError(f"unhandled cell state: {never}")
+    if artifact_is_valid(status, output_dir):
+        return Action.SKIP if state is CellState.SUCCEEDED else Action.KEEP
+    return Action.RUN
 
 
 def resolve_dataset(spec: DatasetSpec, base_path: Path) -> DatasetSpec:
@@ -280,7 +287,7 @@ def execute_cell(
         identity.quantization,
         dataset.spec.name,
     )
-    rng = random.Random(scoped)
+    rng = random.Random(scoped)  # nosec B311: deterministic eval RNG, not crypto
     accumulator = MetricsAccumulator()
     for record in dataset.records:
         prediction = adapter.predict(record, rng)
@@ -321,23 +328,31 @@ class MatrixHooks:
         self.clock = clock or utc_now
         self._counts: dict[tuple[CommitPoint, str | None, CellState | None], int] = {}
 
+    def _matches_crash(
+        self,
+        point: CommitPoint,
+        cell_id: str | None,
+        state: CellState | None,
+    ) -> bool:
+        crash = self.crash
+        if crash is None or crash.point is not point:
+            return False
+        if crash.cell_id is not None and crash.cell_id != cell_id:
+            return False
+        return crash.state is None or crash.state is state
+
     def on_commit(
         self,
         point: CommitPoint,
         cell_id: str | None = None,
         state: CellState | None = None,
     ) -> None:
-        if self.crash is None:
+        crash = self.crash
+        if crash is None or not self._matches_crash(point, cell_id, state):
             return
-        if self.crash.point is not point:
-            return
-        if self.crash.cell_id is not None and self.crash.cell_id != cell_id:
-            return
-        if self.crash.state is not None and self.crash.state is not state:
-            return
-        key = (point, cell_id, self.crash.state)
+        key = (point, cell_id, crash.state)
         self._counts[key] = self._counts.get(key, 0) + 1
-        if self._counts[key] == self.crash.occurrence:
+        if self._counts[key] == crash.occurrence:
             raise SimulatedInterrupt(point, cell_id)
 
 
@@ -360,7 +375,12 @@ def _dataset_for(
     loaded: dict[tuple[str, str, str | None], LoadedDataset],
 ) -> LoadedDataset:
     key = (identity.dataset.name, identity.dataset.split, identity.dataset.path)
-    return loaded[key]
+    try:
+        return loaded[key]
+    except KeyError as exc:
+        raise MatrixError(
+            f"dataset {identity.dataset.name}/{identity.dataset.split} was not loaded"
+        ) from exc
 
 
 def _journaled_cell_ids(records: tuple[dict[str, Any], ...]) -> set[str]:
@@ -404,6 +424,214 @@ def _aggregate_payload(
     }
 
 
+def _ensure_journal_header(
+    journal: ResumeJournal,
+    replay_records: tuple[dict[str, Any], ...],
+    definition: MatrixDefinition,
+    hooks: MatrixHooks,
+) -> None:
+    header = next((record for record in replay_records if record.get("kind") == "header"), None)
+    if header is None:
+        if replay_records:
+            raise IncompatibleMatrixError("journal has transitions but no header")
+        journal.append(_journal_header(definition, hooks.clock()))
+        hooks.on_commit(CommitPoint.JOURNAL_WRITE, None)
+        return
+    if header.get("schema") != JOURNAL_SCHEMA:
+        raise IncompatibleMatrixError(f"unsupported journal schema {header.get('schema')!r}")
+    assert_compatible(str(header["definition_fingerprint"]), definition)
+
+
+def _journal_pending_cells(
+    definition: MatrixDefinition,
+    statuses: dict[str, CellStatus],
+    replay_records: tuple[dict[str, Any], ...],
+    journal: ResumeJournal,
+    hooks: MatrixHooks,
+) -> None:
+    already_journaled = _journaled_cell_ids(replay_records)
+    for identity in definition.cells:
+        cell_id = identity.cell_id()
+        if cell_id in already_journaled:
+            continue
+        ts = hooks.clock()
+        journal.append(_transition(identity, CellState.PENDING, 0, ts))
+        hooks.on_commit(CommitPoint.JOURNAL_WRITE, cell_id, CellState.PENDING)
+        statuses[cell_id].state = CellState.PENDING
+
+
+def _record_skip(
+    identity: CellIdentity,
+    status: CellStatus,
+    journal: ResumeJournal,
+    hooks: MatrixHooks,
+) -> None:
+    ts = hooks.clock()
+    journal.append(
+        _transition(
+            identity,
+            CellState.SKIPPED,
+            status.attempt,
+            ts,
+            artifact_checksum=status.artifact_checksum,
+            fingerprint=status.fingerprint,
+            artifact_path=status.artifact_path,
+        )
+    )
+    hooks.on_commit(CommitPoint.JOURNAL_WRITE, identity.cell_id(), CellState.SKIPPED)
+    _apply_transition(
+        status,
+        {
+            "state": CellState.SKIPPED.value,
+            "attempt": status.attempt,
+            "artifact_checksum": status.artifact_checksum,
+            "fingerprint": status.fingerprint,
+            "artifact_path": status.artifact_path,
+            "ts": ts,
+        },
+    )
+
+
+def _fail_cell(
+    identity: CellIdentity,
+    status: CellStatus,
+    attempt: int,
+    error: str,
+    journal: ResumeJournal,
+    hooks: MatrixHooks,
+) -> None:
+    ts = hooks.clock()
+    journal.append(
+        _transition(
+            identity,
+            CellState.FAILED,
+            attempt,
+            ts,
+            fingerprint=identity.fingerprint(),
+            error=error,
+        )
+    )
+    hooks.on_commit(CommitPoint.JOURNAL_WRITE, identity.cell_id(), CellState.FAILED)
+    _apply_transition(
+        status,
+        {"state": CellState.FAILED.value, "attempt": attempt, "error": error, "ts": ts},
+    )
+
+
+def _succeed_cell(
+    identity: CellIdentity,
+    status: CellStatus,
+    attempt: int,
+    artifact: Path,
+    journal: ResumeJournal,
+    hooks: MatrixHooks,
+) -> None:
+    checksum = _file_checksum(artifact)
+    ts = hooks.clock()
+    journal.append(
+        _transition(
+            identity,
+            CellState.SUCCEEDED,
+            attempt,
+            ts,
+            artifact_checksum=checksum,
+            fingerprint=identity.fingerprint(),
+            artifact_path=str(artifact),
+        )
+    )
+    hooks.on_commit(CommitPoint.JOURNAL_WRITE, identity.cell_id(), CellState.SUCCEEDED)
+    _apply_transition(
+        status,
+        {
+            "state": CellState.SUCCEEDED.value,
+            "attempt": attempt,
+            "artifact_checksum": checksum,
+            "fingerprint": identity.fingerprint(),
+            "artifact_path": str(artifact),
+            "ts": ts,
+        },
+    )
+
+
+def _run_cell(
+    identity: CellIdentity,
+    status: CellStatus,
+    matrix_dir: Path,
+    journal: ResumeJournal,
+    hooks: MatrixHooks,
+    loaded: dict[tuple[str, str, str | None], LoadedDataset],
+) -> None:
+    cell_id = identity.cell_id()
+    attempt = status.attempt + 1
+    ts = hooks.clock()
+    journal.append(_transition(identity, CellState.RUNNING, attempt, ts))
+    hooks.on_commit(CommitPoint.JOURNAL_WRITE, cell_id, CellState.RUNNING)
+    status.state = CellState.RUNNING
+    status.attempt = attempt
+    status.started_at = ts
+    status.finished_at = None
+    status.error = None
+    artifact = cell_artifact_path(matrix_dir, cell_id)
+    try:
+        if cell_id in hooks.fail_cell_ids or attempt == hooks.fail_on_attempt.get(cell_id):
+            raise RuntimeError("injected cell failure")
+        payload = execute_cell(identity, _dataset_for(identity, loaded))
+        _atomic_write_json(artifact, payload)
+        hooks.on_commit(CommitPoint.RESULT_COMMIT, cell_id)
+        _succeed_cell(identity, status, attempt, artifact, journal, hooks)
+    except SimulatedInterrupt:
+        raise
+    except Exception as exc:
+        _fail_cell(identity, status, attempt, str(exc), journal, hooks)
+
+
+def _process_cell(
+    identity: CellIdentity,
+    status: CellStatus,
+    policy: RetryPolicy,
+    matrix_dir: Path,
+    journal: ResumeJournal,
+    hooks: MatrixHooks,
+    loaded: dict[tuple[str, str, str | None], LoadedDataset],
+) -> None:
+    action = decide_action(status, policy, matrix_dir)
+    if action is Action.KEEP:
+        return
+    if action is Action.SKIP:
+        _record_skip(identity, status, journal, hooks)
+        return
+    if action is Action.RUN:
+        _run_cell(identity, status, matrix_dir, journal, hooks, loaded)
+        return
+    never: Never = action
+    raise MatrixError(f"unhandled resume action: {never}")
+
+
+def _execute_session(
+    definition: MatrixDefinition,
+    policy: RetryPolicy,
+    hooks: MatrixHooks,
+    matrix_dir: Path,
+    journal: ResumeJournal,
+    replay_records: tuple[dict[str, Any], ...],
+    truncated_tail: bool,
+    config_dir: Path,
+    aggregate_path: Path,
+) -> tuple[dict[str, CellStatus], dict[str, Any]]:
+    _ensure_journal_header(journal, replay_records, definition, hooks)
+    statuses = _statuses_from_records(definition, replay_records)
+    loaded = _load_datasets(definition, config_dir)
+    _journal_pending_cells(definition, statuses, replay_records, journal, hooks)
+    for identity in definition.cells:
+        _process_cell(
+            identity, statuses[identity.cell_id()], policy, matrix_dir, journal, hooks, loaded
+        )
+    aggregate = _aggregate_payload(definition, statuses, truncated_tail)
+    _atomic_write_json(aggregate_path, aggregate)
+    hooks.on_commit(CommitPoint.AGGREGATE_UPDATE, None)
+    return statuses, aggregate
+
+
 def run_matrix(
     config_path: Path,
     output_dir: Path,
@@ -417,155 +645,27 @@ def run_matrix(
     matrix_dir = output_dir / definition.name
     journal_path = matrix_dir / "journal.jsonl"
     aggregate_path = matrix_dir / "aggregate.json"
-    statuses: dict[str, CellStatus] = {}
-    truncated_tail = False
-    aggregate: dict[str, Any] | None = None
-
     journal = ResumeJournal(journal_path)
     replay = journal.open()
-    truncated_tail = replay.truncated_tail
     try:
-        header = next((record for record in replay.records if record.get("kind") == "header"), None)
-        if header is None:
-            if replay.records:
-                raise IncompatibleMatrixError("journal has transitions but no header")
-            journal.append(_journal_header(definition, hooks.clock()))
-            hooks.on_commit(CommitPoint.JOURNAL_WRITE, None)
-        else:
-            if header.get("schema") != JOURNAL_SCHEMA:
-                raise IncompatibleMatrixError(
-                    f"unsupported journal schema {header.get('schema')!r}"
-                )
-            assert_compatible(str(header["definition_fingerprint"]), definition)
-
-        statuses = _statuses_from_records(definition, replay.records)
-        loaded = _load_datasets(definition, config_path.parent)
-        already_journaled = _journaled_cell_ids(replay.records)
-
-        for identity in definition.cells:
-            cell_id = identity.cell_id()
-            if cell_id in already_journaled:
-                continue
-            ts = hooks.clock()
-            journal.append(_transition(identity, CellState.PENDING, 0, ts))
-            hooks.on_commit(CommitPoint.JOURNAL_WRITE, cell_id, CellState.PENDING)
-            statuses[cell_id].state = CellState.PENDING
-
-        for identity in definition.cells:
-            cell_id = identity.cell_id()
-            status = statuses[cell_id]
-            action = decide_action(status, policy, matrix_dir)
-            if action is Action.KEEP:
-                continue
-            if action is Action.SKIP:
-                ts = hooks.clock()
-                journal.append(
-                    _transition(
-                        identity,
-                        CellState.SKIPPED,
-                        status.attempt,
-                        ts,
-                        artifact_checksum=status.artifact_checksum,
-                        fingerprint=status.fingerprint,
-                        artifact_path=status.artifact_path,
-                    )
-                )
-                hooks.on_commit(CommitPoint.JOURNAL_WRITE, cell_id, CellState.SKIPPED)
-                _apply_transition(
-                    status,
-                    {
-                        "state": CellState.SKIPPED.value,
-                        "attempt": status.attempt,
-                        "artifact_checksum": status.artifact_checksum,
-                        "fingerprint": status.fingerprint,
-                        "artifact_path": status.artifact_path,
-                        "ts": ts,
-                    },
-                )
-                continue
-            if action is not Action.RUN:
-                never: Never = action
-                raise MatrixError(f"unhandled resume action: {never}")
-
-            attempt = status.attempt + 1
-            ts = hooks.clock()
-            journal.append(_transition(identity, CellState.RUNNING, attempt, ts))
-            hooks.on_commit(CommitPoint.JOURNAL_WRITE, cell_id, CellState.RUNNING)
-            status.state = CellState.RUNNING
-            status.attempt = attempt
-            status.started_at = ts
-            status.finished_at = None
-            status.error = None
-
-            artifact = cell_artifact_path(matrix_dir, cell_id)
-            try:
-                if cell_id in hooks.fail_cell_ids or attempt == hooks.fail_on_attempt.get(cell_id):
-                    raise RuntimeError("injected cell failure")
-                payload = execute_cell(identity, _dataset_for(identity, loaded))
-                _atomic_write_json(artifact, payload)
-                hooks.on_commit(CommitPoint.RESULT_COMMIT, cell_id)
-                checksum = _file_checksum(artifact)
-                ts = hooks.clock()
-                journal.append(
-                    _transition(
-                        identity,
-                        CellState.SUCCEEDED,
-                        attempt,
-                        ts,
-                        artifact_checksum=checksum,
-                        fingerprint=identity.fingerprint(),
-                        artifact_path=str(artifact),
-                    )
-                )
-                hooks.on_commit(CommitPoint.JOURNAL_WRITE, cell_id, CellState.SUCCEEDED)
-                _apply_transition(
-                    status,
-                    {
-                        "state": CellState.SUCCEEDED.value,
-                        "attempt": attempt,
-                        "artifact_checksum": checksum,
-                        "fingerprint": identity.fingerprint(),
-                        "artifact_path": str(artifact),
-                        "ts": ts,
-                    },
-                )
-            except SimulatedInterrupt:
-                raise
-            except Exception as exc:
-                ts = hooks.clock()
-                journal.append(
-                    _transition(
-                        identity,
-                        CellState.FAILED,
-                        attempt,
-                        ts,
-                        fingerprint=identity.fingerprint(),
-                        error=str(exc),
-                    )
-                )
-                hooks.on_commit(CommitPoint.JOURNAL_WRITE, cell_id, CellState.FAILED)
-                _apply_transition(
-                    status,
-                    {
-                        "state": CellState.FAILED.value,
-                        "attempt": attempt,
-                        "error": str(exc),
-                        "ts": ts,
-                    },
-                )
-
-        aggregate = _aggregate_payload(definition, statuses, truncated_tail)
-        _atomic_write_json(aggregate_path, aggregate)
-        hooks.on_commit(CommitPoint.AGGREGATE_UPDATE, None)
+        statuses, aggregate = _execute_session(
+            definition,
+            policy,
+            hooks,
+            matrix_dir,
+            journal,
+            replay.records,
+            replay.truncated_tail,
+            config_path.parent,
+            aggregate_path,
+        )
     finally:
         journal.close()
-
-    assert aggregate is not None
     return MatrixRunResult(
         definition=definition,
         statuses=statuses,
         aggregate=aggregate,
         journal_path=journal_path,
         aggregate_path=aggregate_path,
-        truncated_tail=truncated_tail,
+        truncated_tail=replay.truncated_tail,
     )

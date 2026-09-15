@@ -10,6 +10,7 @@ import pytest
 from benchmarks.journal import (
     CellState,
     CommitPoint,
+    JournalError,
     encode_record,
     recover_journal_file,
     replay_journal,
@@ -18,6 +19,7 @@ from benchmarks.matrix import (
     DuplicateCellIdError,
     IncompatibleMatrixError,
     MatrixDefinition,
+    MatrixError,
     RetryPolicy,
     sha256_hex,
 )
@@ -28,6 +30,7 @@ from benchmarks.matrix_runner import (
     load_matrix_config,
     run_matrix,
 )
+from scripts.run_matrix import main as run_matrix_main
 
 
 def _write_dataset(path: Path) -> None:
@@ -372,3 +375,30 @@ def test_aggregate_exposes_retry_count_and_disposition(tmp_path: Path) -> None:
     assert by_id[second_id]["retry_count"] == 1
     assert "retry_count" in resumed.aggregate["cells"][0]
     assert "disposition" in resumed.aggregate["cells"][0]
+
+
+def test_cli_rejects_zero_max_attempts(tmp_path: Path) -> None:
+    config_path = write_matrix_config(tmp_path, quantization=["fp16"])
+    with pytest.raises(MatrixError, match="max_attempts"):
+        run_matrix_main(
+            [
+                "--config",
+                str(config_path),
+                "--output-dir",
+                str(tmp_path / "out"),
+                "--max-attempts",
+                "0",
+            ]
+        )
+
+
+def test_malformed_transition_is_journal_error(tmp_path: Path) -> None:
+    config_path = write_matrix_config(tmp_path, quantization=["fp16"])
+    output = tmp_path / "out"
+    result = run_matrix(config_path, output)
+    result.journal_path.write_bytes(
+        result.journal_path.read_bytes()
+        + encode_record({"kind": "transition", "state": "running", "attempt": 1})
+    )
+    with pytest.raises(JournalError, match="malformed"):
+        run_matrix(config_path, output)

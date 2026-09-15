@@ -10,7 +10,7 @@ import hashlib
 import json
 import re
 from dataclasses import dataclass
-from typing import Any, Mapping
+from typing import Any, Mapping, TypeVar
 
 from benchmarks.datasets import DatasetSpec
 from benchmarks.models import ModelSpec
@@ -143,19 +143,10 @@ class MatrixDefinition:
         name = validate_matrix_name(str(raw.get("matrix_name", "")))
         config_revision = str(raw.get("config_revision", "1"))
         seed = int(raw.get("seed", 0))
-        models = tuple(ModelSpec.from_dict(item) for item in raw.get("models") or [])
-        quantizations = tuple(str(name) for name in raw.get("quantization") or [])
-        datasets = tuple(DatasetSpec.from_dict(item) for item in raw.get("datasets") or [])
-        retry = RetryPolicy.from_dict(raw.get("retry") if isinstance(raw.get("retry"), dict) else None)
-        if not models:
-            raise MatrixError("matrix config must list at least one model")
-        if not quantizations:
-            raise MatrixError("matrix config must list at least one quantization")
-        if not datasets:
-            raise MatrixError("matrix config must list at least one dataset")
+        models, quantizations, datasets = _parse_axes(raw)
+        retry_raw = raw.get("retry")
+        retry = RetryPolicy.from_dict(retry_raw if isinstance(retry_raw, dict) else None)
         cells = expand_cells(models, quantizations, datasets, seed, config_revision)
-        cell_by_id = {cell.cell_id(): cell for cell in cells}
-        fingerprint = definition_fingerprint(name, config_revision, cells)
         return MatrixDefinition(
             name=name,
             config_revision=config_revision,
@@ -165,9 +156,31 @@ class MatrixDefinition:
             datasets=datasets,
             retry=retry,
             cells=cells,
-            cell_by_id=cell_by_id,
-            fingerprint=fingerprint,
+            cell_by_id={cell.cell_id(): cell for cell in cells},
+            fingerprint=definition_fingerprint(name, config_revision, cells),
         )
+
+
+_T = TypeVar("_T")
+
+
+def _require_axis(values: tuple[_T, ...], label: str) -> tuple[_T, ...]:
+    if not values:
+        raise MatrixError(f"matrix config must list at least one {label}")
+    return values
+
+
+def _parse_axes(
+    raw: Mapping[str, Any],
+) -> tuple[tuple[ModelSpec, ...], tuple[str, ...], tuple[DatasetSpec, ...]]:
+    models = tuple(ModelSpec.from_dict(item) for item in raw.get("models") or [])
+    quantizations = tuple(str(item) for item in raw.get("quantization") or [])
+    datasets = tuple(DatasetSpec.from_dict(item) for item in raw.get("datasets") or [])
+    return (
+        _require_axis(models, "model"),
+        _require_axis(quantizations, "quantization"),
+        _require_axis(datasets, "dataset"),
+    )
 
 
 def expand_cells(
