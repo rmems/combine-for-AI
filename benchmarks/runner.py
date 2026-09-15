@@ -121,7 +121,11 @@ def _apply_dataset_cache_defaults(
     updates: dict[str, Any] = {}
     if spec.cache_mode is None and cache_cfg.get("mode"):
         updates["cache_mode"] = cache_cfg["mode"]
-    if spec.cache_root is None and cache_cfg.get("root"):
+    if spec.cache_root:
+        root = Path(spec.cache_root).expanduser()
+        if not root.is_absolute():
+            updates["cache_root"] = str((base_path / root).resolve())
+    elif cache_cfg.get("root"):
         root = Path(str(cache_cfg["root"])).expanduser()
         if not root.is_absolute():
             root = (base_path / root).resolve()

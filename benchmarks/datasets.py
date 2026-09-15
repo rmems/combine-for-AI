@@ -9,8 +9,14 @@ from benchmarks.dataset_cache import (
     DatasetFetchFn,
     fetch_huggingface_dataset,
     jsonl_provenance_metadata,
+    normalize_license,
 )
-from benchmarks.dataset_types import DatasetRecord, DatasetSpec, LoadedDataset
+from benchmarks.dataset_types import (
+    DatasetRecord,
+    DatasetSpec,
+    LoadedDataset,
+    validate_dataset_record,
+)
 
 __all__ = [
     "DatasetSpec",
@@ -44,6 +50,8 @@ class JsonlDatasetLoader:
                 line = line.strip()
                 if not line:
                     continue
+                if spec.max_samples is not None and len(records) >= spec.max_samples:
+                    break
                 try:
                     payload = json.loads(line)
                 except json.JSONDecodeError as exc:
@@ -57,10 +65,8 @@ class JsonlDatasetLoader:
                     choices=payload.get("choices"),
                     answer_index=payload.get("answer_index"),
                 )
+                validate_dataset_record(record)
                 records.append(record)
-
-                if spec.max_samples and len(records) >= spec.max_samples:
-                    break
 
         return LoadedDataset(
             spec=spec,
@@ -81,12 +87,12 @@ class HuggingFaceDatasetLoader:
         loaded = cache.load(spec, fetch=self._fetch)
         records = loaded.records
         if spec.max_samples is not None:
-            if spec.max_samples < 0:
-                raise ValueError("max_samples must be non-negative")
             records = records[: spec.max_samples]
         metadata = loaded.metadata(source="hf")
         metadata["hf_id"] = spec.hf_id
         metadata["hf_subset"] = spec.hf_subset
+        if spec.upstream_license:
+            metadata["dataset_upstream_license"] = normalize_license(spec.upstream_license)
         return LoadedDataset(spec=spec, records=records, metadata=metadata)
 
 

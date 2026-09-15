@@ -18,7 +18,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Callable, Never
 
-from benchmarks.dataset_types import DatasetRecord, DatasetSpec
+from benchmarks.dataset_types import DatasetRecord, DatasetSpec, validate_dataset_record
 
 try:
     from datasets import load_dataset as hf_load_dataset
@@ -29,6 +29,7 @@ LOADER_SCHEMA_VERSION = "1"
 UNKNOWN_LICENSE = "unknown"
 LICENSE_SCOPE_DATASET_SOURCE = "dataset_source_not_repository"
 UNSPECIFIED_REVISION = "unspecified"
+DEFAULT_HF_REVISION = "main"
 RECORDS_FILENAME = "records.jsonl"
 MANIFEST_FILENAME = "manifest.json"
 QUARANTINE_DIRNAME = "quarantine"
@@ -186,13 +187,21 @@ def default_cache_root() -> Path:
     return Path.home() / ".cache" / "combine-for-ai" / "datasets"
 
 
+def requested_revision(spec: DatasetSpec) -> str:
+    if spec.revision:
+        return spec.revision
+    if spec.hf_id:
+        return DEFAULT_HF_REVISION
+    return UNSPECIFIED_REVISION
+
+
 def cache_key_for(spec: DatasetSpec, *, schema_version: str = LOADER_SCHEMA_VERSION) -> CacheKey:
     return CacheKey(
         dataset_name=spec.name,
         hf_id=spec.hf_id or "",
         configuration=spec.hf_subset or "",
         split=spec.split,
-        revision=spec.revision or UNSPECIFIED_REVISION,
+        revision=requested_revision(spec),
         schema_version=schema_version,
     )
 
@@ -207,15 +216,19 @@ def serialize_record(record: DatasetRecord) -> dict[str, Any]:
 
 
 def deserialize_record(raw: dict[str, Any]) -> DatasetRecord:
-    return DatasetRecord(
+    record = DatasetRecord(
         prompt=raw["prompt"],
         reference=raw.get("reference"),
         choices=raw.get("choices"),
         answer_index=raw.get("answer_index"),
     )
+    validate_dataset_record(record)
+    return record
 
 
 def encode_records(records: list[DatasetRecord]) -> bytes:
+    for record in records:
+        validate_dataset_record(record)
     lines = [
         json.dumps(serialize_record(record), sort_keys=True, separators=(",", ":"))
         for record in records
@@ -380,10 +393,6 @@ def _write_in_dir(dir_fd: int, name: str, payload: bytes, entry: Path) -> None:
             os.close(fd)
 
 
-def _rename_in_dir(dir_fd: int, src: str, dst: str) -> None:
-    os.rename(src, dst, src_dir_fd=dir_fd, dst_dir_fd=dir_fd)
-
-
 def jsonl_provenance_metadata(spec: DatasetSpec, path: Path, row_count: int) -> dict[str, Any]:
     return {
         "source": "jsonl",
@@ -463,17 +472,13 @@ class DatasetCache:
         fetched = fetch(spec)
         payload = encode_records(fetched.records)
         checksum = checksum_bytes(payload)
-        if (
-            existing is not None
-            and existing.manifest.checksum_sha256 == checksum
-            and existing.manifest.resolved_revision == fetched.resolved_revision
-        ):
+        if existing is not None and _fetched_matches_manifest(existing.manifest, fetched, checksum):
             return existing
         if existing is not None:
             self._quarantine(
                 entry,
                 reason=(
-                    "online fetch checksum or revision differed from the cached "
+                    "online fetch checksum or provenance differed from the cached "
                     f"entry (cached={existing.manifest.checksum_sha256}, "
                     f"fetched={checksum})"
                 ),
@@ -525,47 +530,48 @@ class DatasetCache:
         payload: bytes,
         checksum: str,
     ) -> CacheLoad:
-        entry = self.entry_dir(key)
-        existing = _lstat_or_none(entry)
-        if existing is not None and (
-            _is_symlink(existing) or not _is_directory(existing)
-        ):
-            self._quarantine(entry, reason="unsafe-symlink")
-        self._ensure_real_directory(entry)
-        dir_fd = _open_dir_nofollow(entry)
+        self._ensure_real_directory(self.root)
         token = f"{os.getpid()}-{secrets.token_hex(8)}"
-        tmp_records = f".{RECORDS_FILENAME}.{token}.tmp"
-        tmp_manifest = f".{MANIFEST_FILENAME}.{token}.tmp"
+        staging = self.root / f".{key.digest()}.staging-{token}"
+        staging.mkdir(parents=False)
+        manifest = CacheManifest(
+            cache_key=key.as_dict(),
+            cache_key_digest=key.digest(),
+            source_uri=fetched.source_uri,
+            resolved_revision=fetched.resolved_revision,
+            retrieved_at=utc_timestamp(),
+            checksum_sha256=checksum,
+            row_count=len(fetched.records),
+            upstream_license=normalize_license(fetched.upstream_license),
+            license_scope=LICENSE_SCOPE_DATASET_SOURCE,
+            loader_schema_version=key.schema_version,
+        )
         try:
-            _write_in_dir(dir_fd, tmp_records, payload, entry)
-            manifest = CacheManifest(
-                cache_key=key.as_dict(),
-                cache_key_digest=key.digest(),
-                source_uri=fetched.source_uri,
-                resolved_revision=fetched.resolved_revision,
-                retrieved_at=utc_timestamp(),
-                checksum_sha256=checksum,
-                row_count=len(fetched.records),
-                upstream_license=normalize_license(fetched.upstream_license),
-                license_scope=LICENSE_SCOPE_DATASET_SOURCE,
-                loader_schema_version=key.schema_version,
-            )
-            _write_in_dir(
-                dir_fd,
-                tmp_manifest,
-                (json.dumps(manifest.to_dict(), indent=2, sort_keys=True) + "\n").encode(
-                    "utf-8"
-                ),
-                entry,
-            )
-            _rename_in_dir(dir_fd, tmp_records, RECORDS_FILENAME)
-            _rename_in_dir(dir_fd, tmp_manifest, MANIFEST_FILENAME)
-        finally:
-            os.close(dir_fd)
+            dir_fd = _open_dir_nofollow(staging)
+            try:
+                _write_in_dir(dir_fd, RECORDS_FILENAME, payload, staging)
+                _write_in_dir(
+                    dir_fd,
+                    MANIFEST_FILENAME,
+                    (
+                        json.dumps(manifest.to_dict(), indent=2, sort_keys=True) + "\n"
+                    ).encode("utf-8"),
+                    staging,
+                )
+            finally:
+                os.close(dir_fd)
+            live = self.entry_dir(key)
+            if _lstat_or_none(live) is not None:
+                self._quarantine(live, reason="replaced-by-new-store")
+            os.rename(staging, live)
+        except Exception:
+            if _lstat_or_none(staging) is not None:
+                self._quarantine(staging, reason="incomplete-store")
+            raise
         return CacheLoad(
             records=list(fetched.records),
             manifest=manifest,
-            cache_path=entry,
+            cache_path=live,
             cache_hit=False,
         )
 
@@ -702,7 +708,7 @@ def _decode_records(payload: bytes, entry: Path) -> list[DatasetRecord]:
         try:
             raw = json.loads(line)
             records.append(deserialize_record(raw))
-        except (json.JSONDecodeError, KeyError, TypeError) as exc:
+        except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
             raise CacheValidationError(
                 f"invalid record on line {line_number} in {entry / RECORDS_FILENAME}",
                 path=entry,
@@ -717,11 +723,10 @@ def huggingface_source_uri(spec: DatasetSpec) -> str:
     uri = f"hf://datasets/{spec.hf_id}"
     if spec.hf_subset:
         uri += f"/{spec.hf_subset}"
-    revision = spec.revision or UNSPECIFIED_REVISION
-    return f"{uri}@{revision}"
+    return f"{uri}@{requested_revision(spec)}"
 
 
-def fetch_huggingface_dataset(spec: DatasetSpec) -> FetchResult:
+def _load_hf_split(spec: DatasetSpec):
     if hf_load_dataset is None:
         raise ImportError(
             "datasets is required for Hugging Face sources; "
@@ -729,34 +734,54 @@ def fetch_huggingface_dataset(spec: DatasetSpec) -> FetchResult:
         )
     if not spec.hf_id:
         raise ValueError(f"hf dataset '{spec.name}' is missing hf_id")
+    return hf_load_dataset(
+        spec.hf_id,
+        spec.hf_subset,
+        split=spec.split,
+        revision=requested_revision(spec),
+    )
 
-    kwargs: dict[str, Any] = {}
-    if spec.revision:
-        kwargs["revision"] = spec.revision
-    dataset = hf_load_dataset(spec.hf_id, spec.hf_subset, split=spec.split, **kwargs)
-    records: list[DatasetRecord] = []
-    for row in dataset:
-        records.append(
-            DatasetRecord(
-                prompt=row["prompt"],
-                reference=row.get("reference"),
-                choices=row.get("choices"),
-                answer_index=row.get("answer_index"),
-            )
-        )
 
-    license_id = spec.upstream_license
+def _record_from_row(row: dict[str, Any]) -> DatasetRecord:
+    record = DatasetRecord(
+        prompt=row["prompt"],
+        reference=row.get("reference"),
+        choices=row.get("choices"),
+        answer_index=row.get("answer_index"),
+    )
+    validate_dataset_record(record)
+    return record
+
+
+def _hf_license(spec: DatasetSpec, dataset: Any) -> str | None:
+    if spec.upstream_license:
+        return spec.upstream_license
     info = getattr(dataset, "info", None)
-    if license_id is None and info is not None:
-        license_id = getattr(info, "license", None) or getattr(info, "license_name", None)
-    resolved = spec.revision or UNSPECIFIED_REVISION
-    if info is not None:
-        version = getattr(info, "version", None)
-        if version is not None and spec.revision is None:
-            resolved = str(version)
+    if info is None:
+        return None
+    license_id = getattr(info, "license", None) or getattr(info, "license_name", None)
+    return license_id if license_id else None
+
+
+def fetch_huggingface_dataset(spec: DatasetSpec) -> FetchResult:
+    dataset = _load_hf_split(spec)
+    records = [_record_from_row(row) for row in dataset]
     return FetchResult(
         records=records,
         source_uri=huggingface_source_uri(spec),
-        resolved_revision=str(resolved),
-        upstream_license=normalize_license(license_id),
+        resolved_revision=requested_revision(spec),
+        upstream_license=normalize_license(_hf_license(spec, dataset)),
+    )
+
+
+def _fetched_matches_manifest(
+    manifest: CacheManifest,
+    fetched: FetchResult,
+    checksum: str,
+) -> bool:
+    return (
+        manifest.checksum_sha256 == checksum
+        and manifest.resolved_revision == fetched.resolved_revision
+        and manifest.source_uri == fetched.source_uri
+        and manifest.upstream_license == normalize_license(fetched.upstream_license)
     )

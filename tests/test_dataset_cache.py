@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from benchmarks.dataset_cache import (
+    DEFAULT_HF_REVISION,
     LICENSE_SCOPE_DATASET_SOURCE,
     LOADER_SCHEMA_VERSION,
     UNKNOWN_LICENSE,
@@ -23,9 +24,10 @@ from benchmarks.dataset_cache import (
     checksum_bytes,
     encode_records,
     parse_cache_mode,
+    requested_revision,
 )
-from benchmarks.datasets import DatasetRecord, DatasetSpec, HuggingFaceDatasetLoader
-from benchmarks.runner import run_benchmarks
+from benchmarks.datasets import DatasetRecord, DatasetSpec, HuggingFaceDatasetLoader, JsonlDatasetLoader
+from benchmarks.runner import _apply_dataset_cache_defaults, run_benchmarks
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "dataset_cache"
 
@@ -305,20 +307,55 @@ def test_prefer_cache_miss_fetches_once(tmp_path: Path) -> None:
     assert second.metadata["row_count"] == 2
 
 
-def test_hf_loader_rejects_negative_max_samples(tmp_path: Path) -> None:
+def test_hf_loader_rejects_negative_max_samples() -> None:
+    with pytest.raises(ValueError, match="non-negative"):
+        DatasetSpec(
+            name="fixture-cloze",
+            source="hf",
+            hf_id="local/fixture-cloze",
+            max_samples=-1,
+        )
+
+
+def test_unpinned_hf_revision_defaults_to_main() -> None:
+    spec = DatasetSpec(name="fixture-cloze", hf_id="local/fixture-cloze")
+    assert requested_revision(spec) == DEFAULT_HF_REVISION
+    assert cache_key_for(spec).revision == DEFAULT_HF_REVISION
+
+
+def test_jsonl_max_samples_zero(tmp_path: Path) -> None:
+    path = tmp_path / "data.jsonl"
+    path.write_text(
+        json.dumps({"prompt": "hello", "reference": "world"}) + "\n",
+        encoding="utf-8",
+    )
+    loaded = JsonlDatasetLoader().load(
+        DatasetSpec(name="smoke", source="jsonl", path=str(path), max_samples=0)
+    )
+    assert loaded.records == []
+
+
+def test_explicit_license_override_on_cache_hit(tmp_path: Path) -> None:
     spec = DatasetSpec(
         name="fixture-cloze",
         source="hf",
         hf_id="local/fixture-cloze",
         split="validation",
         revision="rev-1",
-        cache_mode="prefer-cache",
+        cache_mode="offline",
         cache_root=str(tmp_path / "cache"),
-        max_samples=-1,
+        upstream_license="cc-by-4.0",
     )
-    loader = HuggingFaceDatasetLoader(fetch=_fetch_ok)
-    with pytest.raises(ValueError, match="non-negative"):
-        loader.load(spec)
+    cache = DatasetCache.for_spec(spec)
+    _install_fixture(cache, spec, "unknown-license")
+    loaded = HuggingFaceDatasetLoader(fetch=_network_must_not_run).load(spec)
+    assert loaded.metadata["dataset_upstream_license"] == "cc-by-4.0"
+
+
+def test_relative_dataset_cache_root_is_resolved_against_config_dir(tmp_path: Path) -> None:
+    spec = DatasetSpec(name="smoke", cache_root="dataset-cache")
+    updated = _apply_dataset_cache_defaults(spec, {}, tmp_path)
+    assert updated.cache_root == str((tmp_path / "dataset-cache").resolve())
 
 
 def test_sample_manifest_fixture_is_machine_readable() -> None:
