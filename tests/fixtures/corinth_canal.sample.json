@@ -6,5 +6,21 @@
   "event_rate": 150.0,
   "latent_stability": 0.95,
   "dv_dt_reductions": 0.12,
-  "raw_path": "experiments/saaq-lambda-001/routing.json"
+  "raw_path": "experiments/saaq-lambda-001/routing.json",
+  "firing_rate": 7.3875,
+  "membrane_pressure": 0.03645833333333333,
+  "membrane_dv_dt": 0.4375,
+  "saaq_delta_q": 0.235891,
+  "saaq_delta_q_last": 0.296199,
+  "saaq_delta_q_legacy": 0.1160645,
+  "saaq_delta_q_v15": 0.235891,
+  "saaq_rule": "SaaqV1_5SqrtRate",
+  "saaq_primary_rule": "SaaqV1_5SqrtRate",
+  "model_family": "Olmoe",
+  "model_slug": "olmoe_baseline",
+  "ticks_completed": 4,
+  "latent_rows": 4,
+  "delta_q_trajectory": [0.146087, 0.226744, 0.274534, 0.296199],
+  "delta_q_legacy_trajectory": [0.077833, 0.117057, 0.128203, 0.141165],
+  "delta_q_v15_trajectory": [0.146087, 0.226744, 0.274534, 0.296199]
 }

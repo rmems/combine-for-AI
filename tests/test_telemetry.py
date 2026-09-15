@@ -4,7 +4,9 @@ import json
 import tempfile
 from pathlib import Path
 
+import pytest
 
+from benchmarks.reporting import telemetry_to_row
 from benchmarks.telemetry import (
     CorinthCanalArtifact,
     GPUMetrics,
@@ -281,5 +283,29 @@ def test_load_fixture_files() -> None:
     assert myelin_path.exists(), f"missing fixture: {myelin_path}"
     c = CorinthCanalArtifact.from_file(corinth_path)
     assert c.experiment_id == "saaq-lambda-001"
+    assert c.firing_rate == pytest.approx(7.3875)
+    assert c.saaq_rule == "SaaqV1_5SqrtRate"
+    assert c.saaq_delta_q_trajectory[-1] == pytest.approx(0.296199)
     m = MyelinAcceleratorArtifact.from_file(myelin_path)
     assert m.benchmark_id == "myelin-conv2d-001"
+
+
+def test_telemetry_to_row_empty_matches_populated_keys() -> None:
+    system = SystemSnapshot(
+        cpu_count_logical=4,
+        cpu_count_physical=2,
+        memory_total_gb=None,
+        memory_available_gb=None,
+        gpu_count=None,
+        gpu_names=None,
+        gpu_driver_version=None,
+        cuda_version=None,
+        platform="Linux",
+        python_version="3.14.0",
+    )
+    empty = telemetry_to_row(None)
+    populated = telemetry_to_row(TelemetrySnapshot(system=system))
+    assert set(empty) == set(populated)
+    assert "telemetry_firing_rate" in empty
+    assert "telemetry_saaq_delta_q" in empty
+    assert empty["telemetry_firing_rate"] is None
