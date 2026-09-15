@@ -16,6 +16,11 @@ on:
         required: false
         default: "json,csv"
 
+# Reads the checkout and uploads artifacts; artifact upload uses the Actions
+# runtime token, not this scope.
+permissions:
+  contents: read
+
 jobs:
   benchmark:
     runs-on: ubuntu-latest
