@@ -77,6 +77,18 @@ python scripts/import_goz_experiment.py \
 
 Writes `reports/json/<run_id>.goz-import.json` and `reports/csv/<run_id>.goz-import.csv` with route/residual fields populated (issue **#22**).
 
+Compare hybrid quant arms (e.g. `fp16_control` vs `expert_only` across blocks):
+
+```bash
+python scripts/compare_runs.py \
+  --input tests/fixtures/goz_multiblock_metrics.sample.json \
+  --baseline-arm fp16_control \
+  --treatment-arm expert_only \
+  --output-dir reports
+```
+
+Writes JSON, by-block CSV, and a short Markdown table (issue **#15**).
+
 ## Tracking
 
 Primary board: [GitHub issues](https://github.com/rmems/combine-for-AI/issues) — epic **#20** (GOZ1 / MoE-SNN evaluation readiness for grok-ozempic).
