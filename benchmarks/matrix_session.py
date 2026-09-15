@@ -245,24 +245,22 @@ def execute_cell(
 def _load_datasets(
     definition: MatrixDefinition,
     base_path: Path,
-) -> dict[tuple[str, str, str | None], LoadedDataset]:
+) -> dict[DatasetSpec, LoadedDataset]:
     registry = default_dataset_registry()
-    loaded: dict[tuple[str, str, str | None], LoadedDataset] = {}
+    loaded: dict[DatasetSpec, LoadedDataset] = {}
     for spec in definition.datasets:
-        resolved = resolve_dataset(spec, base_path)
-        key = (spec.name, spec.split, spec.path)
-        if key not in loaded:
-            loaded[key] = registry.loader_for(resolved.source).load(resolved)
+        if spec not in loaded:
+            resolved = resolve_dataset(spec, base_path)
+            loaded[spec] = registry.loader_for(resolved.source).load(resolved)
     return loaded
 
 
 def _dataset_for(
     identity: CellIdentity,
-    loaded: dict[tuple[str, str, str | None], LoadedDataset],
+    loaded: dict[DatasetSpec, LoadedDataset],
 ) -> LoadedDataset:
-    key = (identity.dataset.name, identity.dataset.split, identity.dataset.path)
     try:
-        return loaded[key]
+        return loaded[identity.dataset]
     except KeyError as exc:
         raise MatrixError(
             f"dataset {identity.dataset.name}/{identity.dataset.split} was not loaded"
@@ -432,7 +430,7 @@ def _run_cell(
     ctx: SessionContext,
     identity: CellIdentity,
     status: CellStatus,
-    loaded: dict[tuple[str, str, str | None], LoadedDataset],
+    loaded: dict[DatasetSpec, LoadedDataset],
 ) -> None:
     cell_id = identity.cell_id()
     attempt = status.attempt + 1
@@ -462,7 +460,7 @@ def _process_cell(
     ctx: SessionContext,
     identity: CellIdentity,
     status: CellStatus,
-    loaded: dict[tuple[str, str, str | None], LoadedDataset],
+    loaded: dict[DatasetSpec, LoadedDataset],
 ) -> None:
     action = decide_action(status, ctx.policy, ctx.matrix_dir)
     if action is Action.KEEP:

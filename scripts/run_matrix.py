@@ -9,7 +9,7 @@ sys.path.append(str(REPO_ROOT))
 
 from benchmarks.journal import replay_journal  # noqa: E402
 from benchmarks.matrix import RetryPolicy  # noqa: E402
-from benchmarks.matrix_runner import run_matrix  # noqa: E402
+from benchmarks.matrix_runner import load_matrix_config, run_matrix  # noqa: E402
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -41,9 +41,14 @@ def main(argv: list[str] | None = None) -> None:
     args = parse_args(argv)
     retry = None
     if args.retry_failed or args.max_attempts is not None:
+        base = load_matrix_config(args.config).retry
+        max_attempts = args.max_attempts
+        if max_attempts is None:
+            # A failed cell already has attempt >= 1, so a budget of 1 never retries.
+            max_attempts = max(base.max_attempts, 2)
         retry = RetryPolicy(
-            retry_failed=bool(args.retry_failed),
-            max_attempts=args.max_attempts if args.max_attempts is not None else 1,
+            retry_failed=True if args.retry_failed else base.retry_failed,
+            max_attempts=max_attempts,
         )
     result = run_matrix(args.config, args.output_dir, retry=retry)
     replay = replay_journal(result.journal_path)

@@ -43,7 +43,7 @@ def sha256_hex(value: str | bytes) -> str:
 
 
 def validate_matrix_name(name: str) -> str:
-    if not name or not _SAFE_NAME.fullmatch(name):
+    if not name or name in {".", ".."} or not _SAFE_NAME.fullmatch(name):
         raise MatrixError(
             f"invalid matrix_name {name!r}; use letters, digits, '.', '_' or '-'"
         )

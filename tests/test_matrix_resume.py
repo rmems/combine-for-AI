@@ -392,6 +392,124 @@ def test_cli_rejects_zero_max_attempts(tmp_path: Path) -> None:
         )
 
 
+def test_matrix_name_rejects_dot_and_dotdot_path_components() -> None:
+    raw = {
+        "config_revision": "rev1",
+        "seed": 1,
+        "models": [{"backend": "mock", "name": "toy", "revision": "r1"}],
+        "quantization": ["fp16"],
+        "datasets": [
+            {"name": "smoke", "source": "jsonl", "path": "unused.jsonl", "split": "validation"}
+        ],
+    }
+    for name in (".", ".."):
+        with pytest.raises(MatrixError, match="invalid matrix_name"):
+            MatrixDefinition.from_dict({**raw, "matrix_name": name})
+    accepted = MatrixDefinition.from_dict({**raw, "matrix_name": "v1.2"})
+    assert accepted.name == "v1.2"
+
+
+def test_cli_retry_failed_retries_without_max_attempts(tmp_path: Path) -> None:
+    config_path = write_matrix_config(tmp_path, quantization=["fp16"])
+    definition = load_matrix_config(config_path)
+    cell_id = definition.cells[0].cell_id()
+    output = tmp_path / "out"
+    first = run_matrix(
+        config_path,
+        output,
+        retry=RetryPolicy(retry_failed=False, max_attempts=1),
+        hooks=MatrixHooks(fail_on_attempt={cell_id: 1}),
+    )
+    assert first.statuses[cell_id].state is CellState.FAILED
+
+    run_matrix_main(
+        ["--config", str(config_path), "--output-dir", str(output), "--retry-failed"]
+    )
+    aggregate = json.loads((output / definition.name / "aggregate.json").read_text())
+    assert aggregate["cells"][0]["state"] == "succeeded"
+    assert aggregate["cells"][0]["retry_count"] == 1
+
+
+def test_cli_retry_failed_preserves_config_max_attempts(tmp_path: Path) -> None:
+    config_path = write_matrix_config(tmp_path, quantization=["fp16"])
+    payload = json.loads(config_path.read_text(encoding="utf-8"))
+    payload["retry"] = {"retry_failed": False, "max_attempts": 3}
+    config_path.write_text(json.dumps(payload), encoding="utf-8")
+    definition = load_matrix_config(config_path)
+    cell_id = definition.cells[0].cell_id()
+    output = tmp_path / "out"
+    first = run_matrix(
+        config_path,
+        output,
+        retry=RetryPolicy(retry_failed=False, max_attempts=1),
+        hooks=MatrixHooks(fail_on_attempt={cell_id: 1}),
+    )
+    assert first.statuses[cell_id].state is CellState.FAILED
+    second = run_matrix(
+        config_path,
+        output,
+        retry=RetryPolicy(retry_failed=True, max_attempts=2),
+        hooks=MatrixHooks(fail_on_attempt={cell_id: 2}),
+    )
+    assert second.statuses[cell_id].state is CellState.FAILED
+    assert second.statuses[cell_id].attempt == 2
+
+    run_matrix_main(
+        ["--config", str(config_path), "--output-dir", str(output), "--retry-failed"]
+    )
+    aggregate = json.loads((output / definition.name / "aggregate.json").read_text())
+    assert aggregate["cells"][0]["state"] == "succeeded"
+    assert aggregate["cells"][0]["attempt"] == 3
+
+
+def test_distinct_dataset_identity_fields_load_separately(tmp_path: Path) -> None:
+    dataset_path = tmp_path / "data.jsonl"
+    dataset_path.write_text(
+        json.dumps({"prompt": "one", "reference": "a"})
+        + "\n"
+        + json.dumps({"prompt": "two", "reference": "b"})
+        + "\n",
+        encoding="utf-8",
+    )
+    config = {
+        "matrix_name": "caps",
+        "config_revision": "rev1",
+        "seed": 7,
+        "retry": {"retry_failed": False, "max_attempts": 1},
+        "models": [{"backend": "mock", "name": "toy-alpha", "revision": "r1"}],
+        "quantization": ["fp16"],
+        "datasets": [
+            {
+                "name": "smoke",
+                "source": "jsonl",
+                "path": str(dataset_path),
+                "split": "validation",
+                "max_samples": 1,
+            },
+            {
+                "name": "smoke",
+                "source": "jsonl",
+                "path": str(dataset_path),
+                "split": "validation",
+                "max_samples": 2,
+            },
+        ],
+    }
+    config_path = tmp_path / "matrix.json"
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+    output = tmp_path / "out"
+    result = run_matrix(config_path, output)
+    counts = []
+    for cell in result.definition.cells:
+        artifact = json.loads(
+            (output / result.definition.name / "cells" / cell.cell_id() / "result.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        counts.append(artifact["sample_count"])
+    assert sorted(counts) == [1, 2]
+
+
 def test_malformed_transition_is_journal_error(tmp_path: Path) -> None:
     config_path = write_matrix_config(tmp_path, quantization=["fp16"])
     output = tmp_path / "out"
