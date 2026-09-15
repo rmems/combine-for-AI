@@ -1,2 +1,2 @@
-{"prompt": "What is the main source of energy for Earth's climate?", "choices": ["the Sun", "the Moon", "volcanoes", "tides"], "answer_index": 0}
-{"prompt": "Which object is best for measuring temperature?", "choices": ["thermometer", "ruler", "scale", "stopwatch"], "answer_index": 0}
+{"example_id": "arc_easy:validation:0000", "prompt": "What is the main source of energy for Earth's climate?", "choices": ["the Sun", "the Moon", "volcanoes", "tides"], "answer_index": 0}
+{"example_id": "arc_easy:validation:0001", "prompt": "Which object is best for measuring temperature?", "choices": ["thermometer", "ruler", "scale", "stopwatch"], "answer_index": 0}
