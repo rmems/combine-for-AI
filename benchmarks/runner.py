@@ -134,6 +134,25 @@ def run_benchmarks(
     seed_override: int | None = None,
 ) -> RunMetadata:
     config = load_config(config_path)
+    metadata, _results = run_benchmarks_from_config(
+        config,
+        output_dir,
+        formats,
+        seed_override,
+        config_base_path=config_path.parent,
+    )
+    return metadata
+
+
+def run_benchmarks_from_config(
+    config: dict[str, Any],
+    output_dir: Path,
+    formats: list[str],
+    seed_override: int | None = None,
+    *,
+    config_base_path: Path,
+) -> tuple[RunMetadata, list[DatasetResult]]:
+    """Run a benchmark from an in-memory config (used by the matrix runner)."""
     run_name = config.get("run_name", "benchmark-run")
     seed = seed_override if seed_override is not None else config.get("seed", 0)
     metadata = build_metadata(run_name, seed)
@@ -141,7 +160,7 @@ def run_benchmarks(
     # Optionally enrich telemetry with upstream artifacts
     telemetry = _load_upstream_telemetry(
         config,
-        config_path.parent,
+        config_base_path,
         metadata.telemetry,
     )
     metadata = RunMetadata(
@@ -158,7 +177,7 @@ def run_benchmarks(
         telemetry=telemetry,
     )
 
-    datasets = load_datasets(config, config_path.parent)
+    datasets = load_datasets(config, config_base_path)
     model_spec = ModelSpec.from_dict(config["model"])
     quantization_names = config.get("quantization") or ["fp16"]
 
@@ -196,7 +215,7 @@ def run_benchmarks(
             )
 
     write_reports(output_dir, formats, metadata, model_spec, results)
-    return metadata
+    return metadata, results
 
 
 def write_reports(
