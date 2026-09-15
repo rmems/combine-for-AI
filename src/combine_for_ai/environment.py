@@ -13,28 +13,16 @@ import json
 import os
 import platform
 import re
-import subprocess
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 from typing import Any, Mapping, Sequence, assert_never
 
-try:
-    from pynvml import (
-        nvmlDeviceGetCount,
-        nvmlDeviceGetHandleByIndex,
-        nvmlDeviceGetName,
-        nvmlInit,
-        nvmlShutdown,
-        nvmlSystemGetDriverVersion,
-    )
-except ImportError:
-    nvmlDeviceGetCount = None
-    nvmlDeviceGetHandleByIndex = None
-    nvmlDeviceGetName = None
-    nvmlInit = None
-    nvmlShutdown = None
-    nvmlSystemGetDriverVersion = None
+from combine_for_ai.environment_probe import (
+    discover_repo_root,
+    probe_accelerator,
+    probe_git,
+)
 
 
 FINGERPRINT_SCHEMA = "combine_for_ai.environment_fingerprint.v1"
@@ -72,8 +60,6 @@ _TOP_LEVEL_VOLATILE_KEYS = frozenset(
     }
 )
 _LOCK_FILENAMES = ("uv.lock", "poetry.lock", "pdm.lock", "requirements.lock")
-_GIT_TIMEOUT_S = 5.0
-_ACCEL_TIMEOUT_S = 5.0
 
 
 class AcceleratorBackend(str, Enum):
@@ -266,10 +252,19 @@ def probe_environment(
     *,
     repo_root: Path | None = None,
 ) -> EnvironmentSnapshot:
-    root = repo_root if repo_root is not None else _discover_repo_root()
-    commit, dirty = _probe_git(root)
+    root = repo_root if repo_root is not None else discover_repo_root()
+    commit, dirty = probe_git(root)
     lock_kind, lock_bytes = _probe_lock(root)
-    backend, devices, driver, runtime = _probe_accelerator()
+    backend_name, devices, driver, runtime = probe_accelerator()
+    match backend_name:
+        case AcceleratorBackend.CPU.value:
+            backend = AcceleratorBackend.CPU
+        case AcceleratorBackend.CUDA.value:
+            backend = AcceleratorBackend.CUDA
+        case AcceleratorBackend.ROCM.value:
+            backend = AcceleratorBackend.ROCM
+        case _:
+            backend = AcceleratorBackend.CPU
     home = str(Path.home())
     username = _probe_username()
     return EnvironmentSnapshot(
@@ -432,22 +427,6 @@ def _cpu_safe_versions(
     return driver_version, runtime_version
 
 
-def _discover_repo_root() -> Path | None:
-    output = _run_git(["rev-parse", "--show-toplevel"], cwd=None)
-    if output is None:
-        return Path.cwd()
-    return Path(output)
-
-
-def _probe_git(repo_root: Path | None) -> tuple[str | None, bool | None]:
-    cwd = repo_root
-    commit = _run_git(["rev-parse", "HEAD"], cwd=cwd)
-    porcelain = _run_git(["status", "--porcelain"], cwd=cwd)
-    if porcelain is None:
-        return commit, None
-    return commit, bool(porcelain)
-
-
 def _probe_lock(repo_root: Path | None) -> tuple[str | None, bytes | None]:
     base = repo_root if repo_root is not None else Path.cwd()
     for name in _LOCK_FILENAMES:
@@ -466,113 +445,6 @@ def _probe_username() -> str:
         return getpass.getuser()
     except Exception:
         return ""
-
-
-def _probe_accelerator() -> tuple[
-    AcceleratorBackend, tuple[str, ...], str | None, str | None
-]:
-    devices, driver = _nvml_devices_and_driver()
-    if devices:
-        return AcceleratorBackend.CUDA, devices, driver, _cuda_runtime_version()
-    rocm_devices, rocm_driver = _rocm_devices_and_driver()
-    if rocm_devices:
-        return AcceleratorBackend.ROCM, rocm_devices, rocm_driver, None
-    return AcceleratorBackend.CPU, (), None, None
-
-
-def _nvml_devices_and_driver() -> tuple[tuple[str, ...], str | None]:
-    if nvmlInit is None:
-        return (), None
-    try:
-        nvmlInit()
-    except Exception:
-        return (), None
-    try:
-        count = int(nvmlDeviceGetCount())
-        names: list[str] = []
-        for index in range(count):
-            handle = nvmlDeviceGetHandleByIndex(index)
-            raw_name = nvmlDeviceGetName(handle)
-            names.append(_decode_nvml(raw_name))
-        driver = _decode_nvml(nvmlSystemGetDriverVersion())
-        if not names:
-            return (), None
-        return tuple(names), driver or None
-    except Exception:
-        return (), None
-    finally:
-        try:
-            nvmlShutdown()
-        except Exception:
-            pass
-
-
-def _decode_nvml(value: Any) -> str:
-    if isinstance(value, bytes):
-        return value.decode("utf-8", errors="replace")
-    return str(value)
-
-
-def _cuda_runtime_version() -> str | None:
-    output = _run_command(["nvidia-smi"], timeout=_ACCEL_TIMEOUT_S)
-    if output:
-        marker = "CUDA Version:"
-        if marker in output:
-            tail = output.split(marker, maxsplit=1)[1].strip()
-            parts = tail.split()
-            if parts:
-                return parts[0]
-    output = _run_command(["nvcc", "--version"], timeout=_ACCEL_TIMEOUT_S)
-    if output:
-        marker = "release "
-        if marker in output:
-            tail = output.split(marker, maxsplit=1)[1]
-            parts = tail.split(",", maxsplit=1)
-            if parts:
-                return parts[0].strip()
-    return None
-
-
-def _rocm_devices_and_driver() -> tuple[tuple[str, ...], str | None]:
-    output = _run_command(["rocminfo"], timeout=_ACCEL_TIMEOUT_S)
-    if not output:
-        return (), None
-    names: list[str] = []
-    for line in output.splitlines():
-        if "Marketing Name:" not in line:
-            continue
-        name = line.split(":", 1)[1].strip()
-        if name and name.upper() != "AMD":
-            names.append(name)
-    if not names:
-        return (), None
-    return tuple(names), None
-
-
-def _run_git(args: list[str], cwd: Path | None) -> str | None:
-    return _run_command(["git", *args], cwd=cwd, timeout=_GIT_TIMEOUT_S)
-
-
-def _run_command(
-    args: list[str],
-    *,
-    cwd: Path | None = None,
-    timeout: float = 5.0,
-) -> str | None:
-    try:
-        completed = subprocess.run(
-            args,
-            cwd=cwd,
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-        )
-    except (OSError, subprocess.TimeoutExpired):
-        return None
-    if completed.returncode != 0:
-        return None
-    return completed.stdout.strip()
 
 
 __all__ = [

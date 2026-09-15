@@ -7,6 +7,7 @@ fingerprint on every cell and refuses to silently pool incompatible runs.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping, Sequence
@@ -21,6 +22,12 @@ from combine_for_ai.environment import (
 
 MATRIX_CELL_SCHEMA = "combine_for_ai.matrix_cell.v1"
 MATRIX_AGGREGATE_SCHEMA = "combine_for_ai.matrix_aggregate.v1"
+_RUN_ID_RE = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
+_SUPPORTED_FORMATS = frozenset({"json", "markdown"})
+
+
+class MatrixReportError(ValueError):
+    """Raised when a matrix aggregate cannot be written."""
 
 
 @dataclass(frozen=True)
@@ -108,34 +115,24 @@ def render_matrix_markdown(payload: Mapping[str, Any]) -> str:
     matrix_id = payload.get("matrix_id") or "unnamed"
     warnings = list(payload.get("compatibility_warnings") or [])
     digests = list(payload.get("fingerprint_digests") or [])
-    lines = [
-        f"# Matrix aggregate `{matrix_id}`",
-        "",
-        f"Cells: {payload.get('cell_count', 0)}",
-        f"Fingerprint digests: {len(digests)}",
-        "",
-        "## Compatibility",
-        "",
-    ]
-    if not warnings:
-        if digests:
-            lines.append(
-                f"All cells share fingerprint digest `{digests[0]}`."
-            )
-        else:
-            lines.append("No cells to compare.")
-    else:
-        for warning in warnings:
-            lines.append(f"- {warning}")
-    lines.append("")
-    lines.append("## Cells")
-    lines.append("")
-    for cell in payload.get("cells") or []:
-        cell_id = cell.get("cell_id", "")
-        digest = cell.get("fingerprint_digest", "")
-        lines.append(f"- `{cell_id}` fingerprint `{digest}`")
-    lines.append("")
-    return "\n".join(lines)
+    cells = list(payload.get("cells") or [])
+    return "\n".join(
+        [
+            f"# Matrix aggregate `{matrix_id}`",
+            "",
+            f"Cells: {payload.get('cell_count', 0)}",
+            f"Fingerprint digests: {len(digests)}",
+            "",
+            "## Compatibility",
+            "",
+            *_compatibility_lines(warnings, digests),
+            "",
+            "## Cells",
+            "",
+            *_cell_lines(cells),
+            "",
+        ]
+    )
 
 
 def write_matrix_reports(
@@ -147,18 +144,54 @@ def write_matrix_reports(
 ) -> dict[str, Path]:
     """Write JSON and Markdown aggregate reports. JSON is the machine record."""
     selected = list(formats) if formats is not None else ["json", "markdown"]
+    _validate_formats(selected)
+    safe_id = _validate_run_id(run_id)
     output_dir = Path(output_dir)
     written: dict[str, Path] = {}
     if "json" in selected:
-        path = output_dir / "json" / f"{run_id}.matrix.json"
+        path = output_dir / "json" / f"{safe_id}.matrix.json"
         write_json(path, dict(payload))
         written["json"] = path
     if "markdown" in selected:
-        path = output_dir / "markdown" / f"{run_id}.matrix.md"
+        path = output_dir / "markdown" / f"{safe_id}.matrix.md"
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(render_matrix_markdown(payload), encoding="utf-8")
         written["markdown"] = path
     return written
+
+
+def _compatibility_lines(warnings: Sequence[str], digests: Sequence[str]) -> list[str]:
+    if warnings:
+        return [f"- {warning}" for warning in warnings]
+    if digests:
+        return [f"All cells share fingerprint digest `{digests[0]}`."]
+    return ["No cells to compare."]
+
+
+def _cell_lines(cells: Sequence[Mapping[str, Any]]) -> list[str]:
+    return [
+        f"- `{cell.get('cell_id', '')}` fingerprint `{cell.get('fingerprint_digest', '')}`"
+        for cell in cells
+    ]
+
+
+def _validate_run_id(run_id: str) -> str:
+    if _RUN_ID_RE.fullmatch(run_id):
+        return run_id
+    raise MatrixReportError(
+        "run_id must be a single path component matching [A-Za-z0-9._-]{1,128}"
+    )
+
+
+def _validate_formats(selected: Sequence[str]) -> None:
+    if not selected:
+        raise MatrixReportError("no report formats selected")
+    unknown = [item for item in selected if item not in _SUPPORTED_FORMATS]
+    if unknown:
+        raise MatrixReportError(
+            f"unsupported report formats: {unknown}; "
+            f"allowed={sorted(_SUPPORTED_FORMATS)}"
+        )
 
 
 def _short_digest(digest: str) -> str:
@@ -169,6 +202,7 @@ __all__ = [
     "MATRIX_AGGREGATE_SCHEMA",
     "MATRIX_CELL_SCHEMA",
     "MatrixCellResult",
+    "MatrixReportError",
     "aggregate_matrix_report",
     "compatibility_warnings",
     "render_matrix_markdown",

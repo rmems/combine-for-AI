@@ -4,6 +4,8 @@ import json
 from dataclasses import replace
 from pathlib import Path
 
+import pytest
+
 from combine_for_ai.environment import (
     AcceleratorBackend,
     EnvironmentSnapshot,
@@ -11,6 +13,7 @@ from combine_for_ai.environment import (
 )
 from combine_for_ai.matrix import (
     MatrixCellResult,
+    MatrixReportError,
     aggregate_matrix_report,
     compatibility_warnings,
     render_matrix_markdown,
@@ -119,6 +122,29 @@ def test_aggregate_references_digests_not_just_inline_fingerprints() -> None:
     report = aggregate_matrix_report([cell], matrix_id="single")
     assert report["fingerprint_digests"] == [cell.fingerprint.digest()]
     assert report["cells"][0]["fingerprint_digest"] == cell.fingerprint.digest()
+
+
+def test_write_matrix_reports_rejects_unsafe_run_id(tmp_path: Path) -> None:
+    report = aggregate_matrix_report(
+        [_cell("toy/fp16/lambada", _snapshot())],
+        matrix_id="demo",
+    )
+    with pytest.raises(MatrixReportError, match="run_id"):
+        write_matrix_reports(report, tmp_path, run_id="../escaped")
+    with pytest.raises(MatrixReportError, match="run_id"):
+        write_matrix_reports(report, tmp_path, run_id="nested/id")
+    assert list(tmp_path.rglob("*")) == []
+
+
+def test_write_matrix_reports_rejects_unknown_formats(tmp_path: Path) -> None:
+    report = aggregate_matrix_report(
+        [_cell("toy/fp16/lambada", _snapshot())],
+        matrix_id="demo",
+    )
+    with pytest.raises(MatrixReportError, match="unsupported report formats"):
+        write_matrix_reports(report, tmp_path, run_id="demo-run", formats=["pdf"])
+    with pytest.raises(MatrixReportError, match="no report formats"):
+        write_matrix_reports(report, tmp_path, run_id="demo-run", formats=[])
 
 
 def test_write_matrix_reports_json_and_markdown(tmp_path: Path) -> None:
