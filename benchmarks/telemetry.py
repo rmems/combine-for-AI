@@ -8,6 +8,20 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
+from benchmarks.gpu_telemetry import (
+    AMDGPUTelemetryCollector as AMDGPUTelemetryCollector,
+    AppleMetalTelemetryCollector as AppleMetalTelemetryCollector,
+    GPUMetrics,
+    GPUPlatform,
+    GPUTelemetryUnavailableWarning as GPUTelemetryUnavailableWarning,
+    NVIDIAGPUTelemetryCollector as NVIDIAGPUTelemetryCollector,
+    apple_snapshot_notes,
+    bandwidth_from_metrics,
+    collect_gpu_info,
+    collect_gpu_metrics,
+    detect_gpu_platform,
+)
+
 
 @dataclass(frozen=True)
 class SystemSnapshot:
@@ -23,21 +37,6 @@ class SystemSnapshot:
     cuda_version: str | None
     platform: str
     python_version: str
-
-
-@dataclass(frozen=True)
-class GPUMetrics:
-    """GPU telemetry when pynvml / nvidia-ml-py is available."""
-
-    index: int
-    name: str
-    utilization_percent: float | None
-    memory_used_mb: int | None
-    memory_total_mb: int | None
-    temperature_c: int | None
-    power_draw_w: float | None
-    clock_sm_mhz: int | None
-    clock_memory_mhz: int | None
 
 
 @dataclass(frozen=True)
@@ -83,8 +82,9 @@ def collect_system_snapshot() -> SystemSnapshot:
     except ImportError:
         pass
 
-    gpu_count, gpu_names, gpu_driver = _collect_gpu_info_nvidia()
-    cuda_version = _collect_cuda_version()
+    detected = detect_gpu_platform()
+    gpu_count, gpu_names, gpu_driver = collect_gpu_info()
+    cuda_version = _collect_cuda_version() if detected is GPUPlatform.NVIDIA else None
 
     return SystemSnapshot(
         cpu_count_logical=cpu_count_logical,
@@ -136,126 +136,15 @@ def _collect_cuda_version() -> str | None:
     return None
 
 
-def _collect_gpu_info_nvidia() -> tuple[int | None, list[str] | None, str | None]:
-    """Use pynvml if available; otherwise return None. No CUDA kernels."""
-    try:
-        from pynvml import (
-            nvmlDeviceGetCount,
-            nvmlDeviceGetHandleByIndex,
-            nvmlDeviceGetName,
-            nvmlInit,
-            nvmlShutdown,
-            nvmlSystemGetDriverVersion,
-        )
-
-        nvmlInit()
-        try:
-            count = nvmlDeviceGetCount()
-            names = []
-            for i in range(count):
-                handle = nvmlDeviceGetHandleByIndex(i)
-                name_bytes = nvmlDeviceGetName(handle)
-                names.append(name_bytes.decode("utf-8") if isinstance(name_bytes, bytes) else str(name_bytes))
-            driver = nvmlSystemGetDriverVersion()
-            driver_str = driver.decode("utf-8") if isinstance(driver, bytes) else str(driver)
-            return count, names, driver_str
-        finally:
-            nvmlShutdown()
-    except Exception:
-        return None, None, None
-
-
-def collect_gpu_metrics() -> list[GPUMetrics] | None:
-    """Per-GPU telemetry when pynvml is available."""
-    try:
-        from pynvml import (
-            nvmlDeviceGetCount,
-            nvmlDeviceGetHandleByIndex,
-            nvmlDeviceGetClockInfo,
-            nvmlDeviceGetMemoryInfo,
-            nvmlDeviceGetName,
-            nvmlDeviceGetPowerUsage,
-            nvmlDeviceGetTemperature,
-            nvmlDeviceGetUtilizationRates,
-            nvmlInit,
-            nvmlShutdown,
-            NVML_CLOCK_SM,
-            NVML_CLOCK_MEM,
-            NVML_TEMPERATURE_GPU,
-        )
-
-        nvmlInit()
-        try:
-            metrics: list[GPUMetrics] = []
-            count = nvmlDeviceGetCount()
-            for i in range(count):
-                handle = nvmlDeviceGetHandleByIndex(i)
-                name_bytes = nvmlDeviceGetName(handle)
-                name = name_bytes.decode("utf-8") if isinstance(name_bytes, bytes) else str(name_bytes)
-
-                util = None
-                try:
-                    util = nvmlDeviceGetUtilizationRates(handle).gpu
-                except Exception:
-                    pass
-
-                mem_used = None
-                mem_total = None
-                try:
-                    mem = nvmlDeviceGetMemoryInfo(handle)
-                    mem_used = mem.used // (1024 * 1024)
-                    mem_total = mem.total // (1024 * 1024)
-                except Exception:
-                    pass
-
-                temp = None
-                try:
-                    temp = nvmlDeviceGetTemperature(handle, NVML_TEMPERATURE_GPU)
-                except Exception:
-                    pass
-
-                power = None
-                try:
-                    power = nvmlDeviceGetPowerUsage(handle) / 1000.0
-                except Exception:
-                    pass
-
-                clock_sm = None
-                try:
-                    clock_sm = nvmlDeviceGetClockInfo(handle, NVML_CLOCK_SM)
-                except Exception:
-                    pass
-
-                clock_mem = None
-                try:
-                    clock_mem = nvmlDeviceGetClockInfo(handle, NVML_CLOCK_MEM)
-                except Exception:
-                    pass
-
-                metrics.append(
-                    GPUMetrics(
-                        index=i,
-                        name=name,
-                        utilization_percent=util,
-                        memory_used_mb=mem_used,
-                        memory_total_mb=mem_total,
-                        temperature_c=temp,
-                        power_draw_w=power,
-                        clock_sm_mhz=clock_sm,
-                        clock_memory_mhz=clock_mem,
-                    )
-                )
-            return metrics
-        finally:
-            nvmlShutdown()
-    except Exception:
-        return None
-
-
 def collect_telemetry_snapshot() -> TelemetrySnapshot:
     system = collect_system_snapshot()
     gpu_metrics = collect_gpu_metrics()
-    return TelemetrySnapshot(system=system, gpu_metrics=gpu_metrics)
+    return TelemetrySnapshot(
+        system=system,
+        gpu_metrics=gpu_metrics,
+        vram_bandwidth_gbps=bandwidth_from_metrics(gpu_metrics),
+        notes=apple_snapshot_notes(gpu_metrics),
+    )
 
 
 # ---------------------------------------------------------------------------
