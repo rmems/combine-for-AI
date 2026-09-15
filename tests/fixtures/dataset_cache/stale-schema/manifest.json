@@ -1,0 +1,18 @@
+{
+  "cache_key": {
+    "configuration": "",
+    "dataset_name": "fixture-cloze",
+    "revision": "rev-1",
+    "schema_version": "0",
+    "split": "validation"
+  },
+  "cache_key_digest": "95f2c09bacb07e54c9c1382fbb1259cfe1792aa70334be4a8e9813700f3bb895",
+  "checksum_sha256": "c8e8dbed4ea7972e68be523e7f249ae619303ecac8092be186a8e30f18a0f7d6",
+  "license_scope": "dataset_source_not_repository",
+  "loader_schema_version": "0",
+  "resolved_revision": "rev-1",
+  "retrieved_at": "2026-09-15T00:00:00Z",
+  "row_count": 2,
+  "source_uri": "hf://datasets/local/fixture-cloze@rev-1",
+  "upstream_license": "cc-by-4.0"
+}

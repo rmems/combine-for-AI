@@ -12,6 +12,9 @@
     "gptq",
     "gguf"
   ],
+  "dataset_cache": {
+    "mode": "prefer-cache"
+  },
   "datasets": [
     {
       "name": "lambada",
