@@ -7,6 +7,7 @@ directory. Offline mode never calls a network client.
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import json
 import os
@@ -290,6 +291,13 @@ def _is_regular_file(st: os.stat_result) -> bool:
     return stat.S_ISREG(st.st_mode)
 
 
+def _destination_occupied_by_live_entry(exc: OSError, live: Path) -> bool:
+    if exc.errno not in {errno.EEXIST, errno.ENOTEMPTY, errno.EISDIR}:
+        return False
+    st = _lstat_or_none(live)
+    return st is not None and _is_directory(st) and not _is_symlink(st)
+
+
 def _open_nofollow(path: Path, flags: int, mode: int = 0o644) -> int:
     if hasattr(os, "O_NOFOLLOW"):
         flags |= os.O_NOFOLLOW
@@ -530,7 +538,7 @@ class DatasetCache:
         payload: bytes,
         checksum: str,
     ) -> CacheLoad:
-        self._ensure_real_directory(self.root)
+        self._ensure_writable_root()
         token = f"{os.getpid()}-{secrets.token_hex(8)}"
         staging = self.root / f".{key.digest()}.staging-{token}"
         staging.mkdir(parents=False)
@@ -551,9 +559,30 @@ class DatasetCache:
         )
 
     def _publish_staging(self, staging: Path, live: Path) -> None:
-        if _lstat_or_none(live) is not None:
-            self._quarantine(live, reason="replaced-by-new-store")
-        os.rename(staging, live)
+        try:
+            os.rename(staging, live)
+        except OSError as exc:
+            if not _destination_occupied_by_live_entry(exc, live):
+                raise
+            if _lstat_or_none(staging) is not None:
+                self._quarantine(staging, reason="lost-publish-race")
+
+    def _ensure_writable_root(self) -> None:
+        self.root.mkdir(parents=True, exist_ok=True)
+        try:
+            st = self.root.stat()
+        except OSError as exc:
+            raise CacheValidationError(
+                f"cache root is not usable: {self.root}",
+                path=self.root,
+                reason="cache-root-unusable",
+            ) from exc
+        if not _is_directory(st):
+            raise CacheValidationError(
+                f"cache root is not a directory: {self.root}",
+                path=self.root,
+                reason="not-a-directory",
+            )
 
     def _quarantine(self, entry: Path, *, reason: str) -> Path:
         dest_parent = self.root / QUARANTINE_DIRNAME

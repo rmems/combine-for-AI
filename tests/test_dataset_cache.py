@@ -456,3 +456,44 @@ def test_symlink_records_file_is_rejected_without_following(tmp_path: Path) -> N
     assert excinfo.value.quarantined_to is not None
     assert (excinfo.value.quarantined_to / "records.jsonl").is_symlink()
 
+
+def test_symlink_cache_root_can_store(tmp_path: Path) -> None:
+    real = tmp_path / "real-cache"
+    real.mkdir()
+    link = tmp_path / "link-cache"
+    os.symlink(real, link)
+    cache = DatasetCache(root=link, mode=CacheMode.PREFER_CACHE)
+
+    loaded = cache.load(FIXTURE_SPEC, fetch=_fetch_ok)
+
+    assert loaded.cache_hit is False
+    digest = cache.key_for(FIXTURE_SPEC).digest()
+    live = cache.entry_dir(cache.key_for(FIXTURE_SPEC))
+    assert live.is_dir()
+    assert not live.is_symlink()
+    assert (live / "records.jsonl").is_file()
+    assert (real / digest / "records.jsonl").is_file()
+
+
+def test_second_store_keeps_existing_live_entry(tmp_path: Path) -> None:
+    root = tmp_path / "cache"
+    cache = DatasetCache(root=root, mode=CacheMode.PREFER_CACHE)
+    first = cache.load(FIXTURE_SPEC, fetch=_fetch_ok)
+    payload = encode_records(first.records)
+    again = cache._store(
+        cache.key_for(FIXTURE_SPEC),
+        _fetch_ok(FIXTURE_SPEC),
+        payload,
+        checksum_bytes(payload),
+    )
+    assert again.cache_path == first.cache_path
+    assert first.cache_path.is_dir()
+    assert list(root.glob(".*.staging-*")) == []
+    notes = list((root / "quarantine").glob("*/quarantine.json"))
+    assert notes
+    reasons = [json.loads(path.read_text(encoding="utf-8"))["reason"] for path in notes]
+    assert "lost-publish-race" in reasons
+    hit = cache.load(FIXTURE_SPEC, fetch=_network_must_not_run)
+    assert hit.cache_hit is True
+    assert hit.manifest.checksum_sha256 == first.manifest.checksum_sha256
+
