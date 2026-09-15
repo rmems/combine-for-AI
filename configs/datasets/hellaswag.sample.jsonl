@@ -1,2 +1,2 @@
-{"prompt": "A woman is cooking pasta. She drains the pot and then", "choices": ["adds sauce and serves dinner.", "puts it back on the stove to freeze."], "answer_index": 0}
-{"prompt": "A cyclist reaches a red light. They", "choices": ["stop and wait for green.", "keep pedaling through traffic."], "answer_index": 0}
+{"example_id": "hellaswag:validation:0000", "prompt": "A woman is cooking pasta. She drains the pot and then", "choices": ["adds sauce and serves dinner.", "puts it back on the stove to freeze."], "answer_index": 0}
+{"example_id": "hellaswag:validation:0001", "prompt": "A cyclist reaches a red light. They", "choices": ["stop and wait for green.", "keep pedaling through traffic."], "answer_index": 0}
