@@ -1,23 +1,13 @@
 from __future__ import annotations
 
 import csv
-import json
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
+from benchmarks.jsonio import ensure_dir, json_safe, write_json
 from benchmarks.metrics import MetricsSummary
 from benchmarks.telemetry import TelemetrySnapshot
-
-
-def ensure_dir(path: Path) -> None:
-    path.mkdir(parents=True, exist_ok=True)
-
-
-def write_json(path: Path, payload: dict[str, Any]) -> None:
-    ensure_dir(path.parent)
-    with path.open("w", encoding="utf-8") as handle:
-        json.dump(payload, handle, indent=2, sort_keys=True)
 
 
 def write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
@@ -73,3 +63,13 @@ def telemetry_to_row(telemetry: TelemetrySnapshot | None) -> dict[str, Any]:
     d["telemetry_vram_bandwidth_gbps"] = telemetry.vram_bandwidth_gbps
     d["telemetry_notes"] = telemetry.notes
     return d
+
+
+__all__ = [
+    "ensure_dir",
+    "json_safe",
+    "write_json",
+    "write_csv",
+    "metrics_to_row",
+    "telemetry_to_row",
+]
