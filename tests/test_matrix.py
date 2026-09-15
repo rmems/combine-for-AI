@@ -23,7 +23,7 @@ from combine_for_ai.matrix import (
     relative_drop,
     ratio,
 )
-from combine_for_ai.matrix_runner import MatrixRunner, build_matrix_report
+from combine_for_ai.matrix_runner import MatrixRunner, MatrixRunOptions, build_matrix_report
 from scripts.run_matrix import build_parser, main
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -75,6 +75,20 @@ class RecordingExecutor:
             vram_gb=vram,
             bits=bits,
         )
+
+
+def _runner(
+    matrix,
+    output_dir: Path,
+    executor: RecordingExecutor | None = None,
+    **options: object,
+) -> MatrixRunner:
+    return MatrixRunner(
+        matrix,
+        output_dir,
+        executor=executor,
+        options=MatrixRunOptions(**options),
+    )
 
 
 def _write_jsonl(path: Path) -> None:
@@ -225,7 +239,7 @@ def test_comparison_metrics_against_baseline(tmp_path: Path) -> None:
         quantization=["fp16", "awq"],
     )
     matrix = load_experiment_matrix(path)
-    report = MatrixRunner(
+    report = _runner(
         matrix,
         tmp_path / "out",
         executor=RecordingExecutor(),
@@ -249,7 +263,7 @@ def test_comparison_metrics_against_baseline(tmp_path: Path) -> None:
 def test_family_level_aggregation(tmp_path: Path) -> None:
     path = _mini_config(tmp_path)
     matrix = load_experiment_matrix(path)
-    report = MatrixRunner(
+    report = _runner(
         matrix,
         tmp_path / "out",
         executor=RecordingExecutor(),
@@ -276,7 +290,7 @@ def test_resume_skips_completed_cells(tmp_path: Path) -> None:
     fail_id = [cell.cell_id for cell in matrix.cells if cell.quantization == "awq"][0]
     output = tmp_path / "out"
     first = RecordingExecutor(fail_on=frozenset({fail_id}))
-    report1 = MatrixRunner(
+    report1 = _runner(
         matrix,
         output,
         executor=first,
@@ -289,7 +303,7 @@ def test_resume_skips_completed_cells(tmp_path: Path) -> None:
     assert len(first.calls) == 2
 
     second = RecordingExecutor()
-    report2 = MatrixRunner(
+    report2 = _runner(
         matrix,
         output,
         executor=second,
@@ -310,7 +324,7 @@ def test_fresh_reruns_completed_cells(tmp_path: Path) -> None:
     )
     matrix = load_experiment_matrix(path)
     output = tmp_path / "out"
-    MatrixRunner(
+    _runner(
         matrix,
         output,
         executor=RecordingExecutor(),
@@ -319,7 +333,7 @@ def test_fresh_reruns_completed_cells(tmp_path: Path) -> None:
         run_id="a",
     ).run()
     rerun = RecordingExecutor()
-    MatrixRunner(
+    _runner(
         matrix,
         output,
         executor=rerun,
@@ -338,7 +352,7 @@ def test_reports_include_individual_and_aggregate(tmp_path: Path) -> None:
     )
     matrix = load_experiment_matrix(path)
     output = tmp_path / "out"
-    report = MatrixRunner(
+    report = _runner(
         matrix,
         output,
         executor=RecordingExecutor(),
@@ -372,7 +386,7 @@ def test_end_to_end_with_mock_model_adapter(tmp_path: Path) -> None:
     )
     matrix = load_experiment_matrix(path)
     output = tmp_path / "out"
-    report = MatrixRunner(
+    report = _runner(
         matrix,
         output,
         formats=["json", "csv"],
@@ -393,7 +407,7 @@ def test_end_to_end_with_mock_model_adapter(tmp_path: Path) -> None:
 
 def test_sample_matrix_orchestrates_all_families(tmp_path: Path) -> None:
     matrix = load_experiment_matrix(SAMPLE_JSON)
-    report = MatrixRunner(
+    report = _runner(
         matrix,
         tmp_path / "out",
         executor=RecordingExecutor(),

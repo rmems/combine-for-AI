@@ -18,7 +18,7 @@ from combine_for_ai.matrix import (  # noqa: E402
     MatrixSelection,
     load_experiment_matrix,
 )
-from combine_for_ai.matrix_runner import MatrixRunner  # noqa: E402
+from combine_for_ai.matrix_runner import MatrixRunner, MatrixRunOptions  # noqa: E402
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -28,6 +28,13 @@ def build_parser() -> argparse.ArgumentParser:
             "individual cell reports plus a unified comparison report."
         )
     )
+    _add_io_args(parser)
+    _add_filter_args(parser)
+    _add_run_args(parser)
+    return parser
+
+
+def _add_io_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--config",
         "-c",
@@ -47,12 +54,9 @@ def build_parser() -> argparse.ArgumentParser:
         default="json,csv,markdown",
         help="Comma-separated outputs: json,csv,markdown",
     )
-    parser.add_argument(
-        "--seed",
-        type=int,
-        default=None,
-        help="Override matrix seed.",
-    )
+
+
+def _add_filter_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--models",
         default=None,
@@ -73,6 +77,15 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Comma-separated dataset names to run.",
     )
+
+
+def _add_run_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help="Override matrix seed.",
+    )
     parser.add_argument(
         "--fresh",
         action="store_true",
@@ -88,7 +101,6 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Optional matrix run id (default: timestamped).",
     )
-    return parser
 
 
 def _csv_set(raw: str | None) -> frozenset[str] | None:
@@ -114,11 +126,13 @@ def main(argv: list[str] | None = None) -> int:
         runner = MatrixRunner(
             matrix,
             args.output_dir,
-            formats=_parse_formats(args.formats),
-            resume=not args.fresh,
-            fail_fast=args.fail_fast,
-            run_id=args.run_id,
-            seed=args.seed,
+            options=MatrixRunOptions(
+                formats=_parse_formats(args.formats),
+                resume=not args.fresh,
+                fail_fast=args.fail_fast,
+                run_id=args.run_id,
+                seed=args.seed,
+            ),
         )
         report = runner.run()
     except MatrixError as exc:

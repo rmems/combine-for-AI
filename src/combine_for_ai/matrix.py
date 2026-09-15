@@ -143,15 +143,13 @@ class MatrixSelection:
     datasets: frozenset[str] | None = None
 
     def allows(self, cell: MatrixCell) -> bool:
-        if self.models is not None and cell.model.name not in self.models:
-            return False
-        if self.families is not None and cell.model.family not in self.families:
-            return False
-        if self.quantization is not None and cell.quantization not in self.quantization:
-            return False
-        if self.datasets is not None and cell.dataset.name not in self.datasets:
-            return False
-        return True
+        pairs = (
+            (self.models, cell.model.name),
+            (self.families, cell.model.family),
+            (self.quantization, cell.quantization),
+            (self.datasets, cell.dataset.name),
+        )
+        return all(_set_allows(allowed, value) for allowed, value in pairs)
 
 
 @dataclass(frozen=True)
@@ -274,58 +272,93 @@ def expand_matrix(
     config_path: Path | None = None,
     extra_select: MatrixSelection | None = None,
 ) -> ExperimentMatrix:
-    quant_registry = default_quantization_registry()
-    default_quants = _validate_quants(config.quantization, quant_registry)
-    baseline = config.baseline_quantization
-    if baseline not in set(quant_registry.supported_names()):
-        raise MatrixError(f"unknown baseline quantization '{baseline}'")
-
+    registry = default_quantization_registry()
+    default_quants = _validate_quants(config.quantization, registry)
+    _require_known_quant(config.baseline_quantization, registry)
     base_path = config_path.parent if config_path is not None else Path(".")
-    datasets = tuple(_resolve_dataset(raw, base_path) for raw in config.datasets)
-
-    cells: list[MatrixCell] = []
-    for model_cfg in config.models:
-        quants = (
-            _validate_quants(model_cfg.quantization, quant_registry)
-            if model_cfg.quantization is not None
-            else default_quants
-        )
-        model = MatrixModelSpec(
-            name=model_cfg.name,
-            family=model_cfg.family,
-            backend=model_cfg.backend,
-            revision=model_cfg.revision,
-            quantization=quants,
-        )
-        for quant in quants:
-            for dataset in datasets:
-                cells.append(
-                    MatrixCell(model=model, quantization=quant, dataset=dataset)
-                )
-
     select = merge_selections(
         selection_from_config(config.select),
         extra_select or MatrixSelection(),
     )
-    selected = tuple(
-        cell
-        for cell in cells
-        if select.allows(cell) and not _excluded(cell, config.exclude)
+    selected = _apply_selection(
+        _cartesian_cells(config, base_path, registry, default_quants),
+        select,
+        config.exclude,
     )
-    if not selected:
-        raise MatrixError("matrix selection matched no cells")
-    cell_ids = [cell.cell_id for cell in selected]
-    if len(cell_ids) != len(set(cell_ids)):
-        raise MatrixError("duplicate cell ids in expanded matrix")
     return ExperimentMatrix(
         name=config.matrix_name,
         seed=config.seed,
-        baseline_quantization=baseline,
+        baseline_quantization=config.baseline_quantization,
         cells=selected,
         config_path=config_path,
         select=select,
         exclude=tuple(config.exclude),
     )
+
+
+def _require_known_quant(name: str, registry: QuantizationRegistry) -> None:
+    if name not in set(registry.supported_names()):
+        raise MatrixError(f"unknown baseline quantization '{name}'")
+
+
+def _cartesian_cells(
+    config: MatrixFileConfig,
+    base_path: Path,
+    registry: QuantizationRegistry,
+    default_quants: tuple[str, ...],
+) -> list[MatrixCell]:
+    datasets = tuple(_resolve_dataset(raw, base_path) for raw in config.datasets)
+    cells: list[MatrixCell] = []
+    for model_cfg in config.models:
+        cells.extend(_cells_for_model(model_cfg, datasets, registry, default_quants))
+    return cells
+
+
+def _cells_for_model(
+    model_cfg: MatrixModelConfig,
+    datasets: tuple[DatasetSpec, ...],
+    registry: QuantizationRegistry,
+    default_quants: tuple[str, ...],
+) -> list[MatrixCell]:
+    quants = (
+        _validate_quants(model_cfg.quantization, registry)
+        if model_cfg.quantization is not None
+        else default_quants
+    )
+    model = MatrixModelSpec(
+        name=model_cfg.name,
+        family=model_cfg.family,
+        backend=model_cfg.backend,
+        revision=model_cfg.revision,
+        quantization=quants,
+    )
+    return [
+        MatrixCell(model=model, quantization=quant, dataset=dataset)
+        for quant in quants
+        for dataset in datasets
+    ]
+
+
+def _apply_selection(
+    cells: list[MatrixCell],
+    select: MatrixSelection,
+    exclude: list[MatrixExclude],
+) -> tuple[MatrixCell, ...]:
+    selected = tuple(cell for cell in cells if _keep_cell(cell, select, exclude))
+    if not selected:
+        raise MatrixError("matrix selection matched no cells")
+    cell_ids = [cell.cell_id for cell in selected]
+    if len(cell_ids) != len(set(cell_ids)):
+        raise MatrixError("duplicate cell ids in expanded matrix")
+    return selected
+
+
+def _keep_cell(
+    cell: MatrixCell, select: MatrixSelection, exclude: list[MatrixExclude]
+) -> bool:
+    if not select.allows(cell):
+        return False
+    return not _excluded(cell, exclude)
 
 
 def load_experiment_matrix(
@@ -398,35 +431,51 @@ def family_aggregates(
     *,
     baseline_quantization: str,
 ) -> list[dict[str, Any]]:
+    groups = _group_completed_rows(rows)
+    return [
+        _family_summary(family, items, baseline_quantization)
+        for family, items in sorted(groups.items())
+    ]
+
+
+def _group_completed_rows(rows: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
     groups: dict[str, list[dict[str, Any]]] = {}
     for row in rows:
         if row.get("status") != CellStatus.COMPLETED.value:
             continue
         family = str(row.get("family") or "unknown")
         groups.setdefault(family, []).append(row)
+    return groups
 
-    aggregated: list[dict[str, Any]] = []
-    for family, items in sorted(groups.items()):
-        compared = [row for row in items if row.get("quantization") != baseline_quantization]
-        aggregated.append(
-            {
-                "family": family,
-                "cell_count": len(items),
-                "model_count": len({row["model"] for row in items}),
-                "mean_accuracy": _mean(row.get("accuracy") for row in items),
-                "mean_throughput": _mean(row.get("throughput") for row in items),
-                "mean_vram_gb": _mean(row.get("vram_gb") for row in items),
-                "mean_relative_accuracy_drop": _mean(
-                    row.get("relative_accuracy_drop") for row in compared
-                ),
-                "mean_compression_ratio": _mean(
-                    row.get("compression_ratio") for row in compared
-                ),
-                "mean_throughput_gain": _mean(row.get("throughput_gain") for row in compared),
-                "mean_vram_savings": _mean(row.get("vram_savings") for row in compared),
-            }
-        )
-    return aggregated
+
+def _family_summary(
+    family: str,
+    items: list[dict[str, Any]],
+    baseline_quantization: str,
+) -> dict[str, Any]:
+    compared = _non_baseline_rows(items, baseline_quantization)
+    return {
+        "family": family,
+        "cell_count": len(items),
+        "model_count": len({row["model"] for row in items}),
+        "mean_accuracy": _column_mean(items, "accuracy"),
+        "mean_throughput": _column_mean(items, "throughput"),
+        "mean_vram_gb": _column_mean(items, "vram_gb"),
+        "mean_relative_accuracy_drop": _column_mean(compared, "relative_accuracy_drop"),
+        "mean_compression_ratio": _column_mean(compared, "compression_ratio"),
+        "mean_throughput_gain": _column_mean(compared, "throughput_gain"),
+        "mean_vram_savings": _column_mean(compared, "vram_savings"),
+    }
+
+
+def _non_baseline_rows(
+    items: list[dict[str, Any]], baseline_quantization: str
+) -> list[dict[str, Any]]:
+    return [row for row in items if row.get("quantization") != baseline_quantization]
+
+
+def _column_mean(rows: list[dict[str, Any]], key: str) -> float | None:
+    return _mean(row.get(key) for row in rows)
 
 
 def outcome_to_progress(outcome: CellOutcome) -> dict[str, Any]:
@@ -477,6 +526,14 @@ def dataset_payload(spec: DatasetSpec) -> dict[str, Any]:
     return payload
 
 
+def _set_allows(allowed: frozenset[str] | None, value: str) -> bool:
+    return allowed is None or value in allowed
+
+
+def _constraint_matches(expected: str | None, actual: str) -> bool:
+    return expected is None or expected == actual
+
+
 def _optional_set(values: list[str] | None) -> frozenset[str] | None:
     if values is None:
         return None
@@ -523,15 +580,14 @@ def _excluded(cell: MatrixCell, rules: list[MatrixExclude]) -> bool:
 
 
 def _exclude_matches(rule: MatrixExclude, cell: MatrixCell) -> bool:
-    if rule.model is not None and cell.model.name != rule.model:
-        return False
-    if rule.family is not None and cell.model.family != rule.family:
-        return False
-    if rule.quantization is not None and cell.quantization != rule.quantization:
-        return False
-    if rule.dataset is not None and cell.dataset.name != rule.dataset:
-        return False
-    return True
+    return all(
+        (
+            _constraint_matches(rule.model, cell.model.name),
+            _constraint_matches(rule.family, cell.model.family),
+            _constraint_matches(rule.quantization, cell.quantization),
+            _constraint_matches(rule.dataset, cell.dataset.name),
+        )
+    )
 
 
 def _parse_status(raw: Any) -> CellStatus:

@@ -156,6 +156,15 @@ class MatrixReport:
         }
 
 
+@dataclass(frozen=True)
+class MatrixRunOptions:
+    formats: list[str] | None = None
+    resume: bool = True
+    fail_fast: bool = False
+    run_id: str | None = None
+    seed: int | None = None
+
+
 class MatrixRunner:
     """Iterate a model × quant × dataset matrix and aggregate comparison reports."""
 
@@ -165,19 +174,16 @@ class MatrixRunner:
         output_dir: Path,
         *,
         executor: CellExecutor | None = None,
-        formats: list[str] | None = None,
-        resume: bool = True,
-        fail_fast: bool = False,
-        run_id: str | None = None,
-        seed: int | None = None,
+        options: MatrixRunOptions | None = None,
     ) -> None:
+        settings = options or MatrixRunOptions()
         self.matrix = matrix
         self.output_dir = Path(output_dir)
-        self.formats = _validate_formats(formats or ["json", "csv", "markdown"])
-        self.resume = resume
-        self.fail_fast = fail_fast
-        self.run_id = run_id or default_matrix_run_id()
-        self.seed = matrix.seed if seed is None else seed
+        self.formats = _validate_formats(settings.formats or ["json", "csv", "markdown"])
+        self.resume = settings.resume
+        self.fail_fast = settings.fail_fast
+        self.run_id = settings.run_id or default_matrix_run_id()
+        self.seed = matrix.seed if settings.seed is None else settings.seed
         base = matrix.config_path.parent if matrix.config_path is not None else Path(".")
         self.executor = executor or BenchmarkCellExecutor(base)
 
@@ -217,7 +223,8 @@ class MatrixRunner:
         stored = stored_cells.get(cell.cell_id)
         previous = _stored_status(stored)
         if not _should_execute(previous, resume=self.resume):
-            assert stored is not None
+            if stored is None:
+                raise MatrixError(f"missing stored progress for cell {cell.cell_id}")
             return outcome_from_progress(cell, stored)
 
         stored_cells[cell.cell_id] = outcome_to_progress(
@@ -331,33 +338,62 @@ def write_matrix_reports(
 ) -> dict[str, Path]:
     formats = _validate_formats(formats)
     written: dict[str, Path] = {}
-    payload = report.to_payload()
-    rid = report.run_id
-    if "json" in formats:
-        path = output_dir / "json" / f"{rid}.matrix.json"
-        write_json(path, payload)
-        written["json"] = path
-    if "csv" in formats:
-        if not report.cells:
-            raise MatrixError("no matrix cells to write to csv")
-        path = output_dir / "csv" / f"{rid}.matrix.csv"
-        write_csv(path, [_ordered_row(row, _CELL_COLUMNS) for row in report.cells])
-        written["csv"] = path
-        if report.by_family:
-            family_path = output_dir / "csv" / f"{rid}.matrix-family.csv"
-            write_csv(
-                family_path,
-                [_ordered_row(row, _FAMILY_COLUMNS) for row in report.by_family],
-            )
-            written["csv_family"] = family_path
-    if "markdown" in formats:
-        path = output_dir / "markdown" / f"{rid}.matrix.md"
-        ensure_dir(path.parent)
-        path.write_text(_render_markdown(report), encoding="utf-8")
-        written["markdown"] = path
+    _write_json_report(report, output_dir, formats, written)
+    _write_csv_reports(report, output_dir, formats, written)
+    _write_markdown_report(report, output_dir, formats, written)
     if not written:
         raise MatrixError("no report formats selected")
     return written
+
+
+def _write_json_report(
+    report: MatrixReport,
+    output_dir: Path,
+    formats: list[str],
+    written: dict[str, Path],
+) -> None:
+    if "json" not in formats:
+        return
+    path = output_dir / "json" / f"{report.run_id}.matrix.json"
+    write_json(path, report.to_payload())
+    written["json"] = path
+
+
+def _write_csv_reports(
+    report: MatrixReport,
+    output_dir: Path,
+    formats: list[str],
+    written: dict[str, Path],
+) -> None:
+    if "csv" not in formats:
+        return
+    if not report.cells:
+        raise MatrixError("no matrix cells to write to csv")
+    path = output_dir / "csv" / f"{report.run_id}.matrix.csv"
+    write_csv(path, [_ordered_row(row, _CELL_COLUMNS) for row in report.cells])
+    written["csv"] = path
+    if not report.by_family:
+        return
+    family_path = output_dir / "csv" / f"{report.run_id}.matrix-family.csv"
+    write_csv(
+        family_path,
+        [_ordered_row(row, _FAMILY_COLUMNS) for row in report.by_family],
+    )
+    written["csv_family"] = family_path
+
+
+def _write_markdown_report(
+    report: MatrixReport,
+    output_dir: Path,
+    formats: list[str],
+    written: dict[str, Path],
+) -> None:
+    if "markdown" not in formats:
+        return
+    path = output_dir / "markdown" / f"{report.run_id}.matrix.md"
+    ensure_dir(path.parent)
+    path.write_text(_render_markdown(report), encoding="utf-8")
+    written["markdown"] = path
 
 
 def _should_execute(status: CellStatus | None, *, resume: bool) -> bool:
@@ -426,7 +462,14 @@ def _ordered_row(row: dict[str, Any], columns: tuple[str, ...]) -> dict[str, Any
 
 
 def _render_markdown(report: MatrixReport) -> str:
-    lines = [
+    lines = _markdown_header(report)
+    lines.extend(_markdown_cell_table(report.cells))
+    lines.extend(_markdown_family_table(report.by_family))
+    return "\n".join(lines)
+
+
+def _markdown_header(report: MatrixReport) -> list[str]:
+    return [
         f"# Matrix comparison: {report.matrix_name}",
         "",
         f"- run_id: `{report.run_id}`",
@@ -434,59 +477,69 @@ def _render_markdown(report: MatrixReport) -> str:
         f"- cells: {len(report.cells)} "
         f"(completed={report.completed}, failed={report.failed}, skipped={report.skipped})",
         "",
+    ]
+
+
+def _markdown_cell_table(cells: list[dict[str, Any]]) -> list[str]:
+    lines = [
         "## Side-by-side cells",
         "",
         "| model | family | quant | dataset | acc | rel_drop | compress | tput_gain | vram_save |",
         "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
-    for row in report.cells:
-        lines.append(
-            "| "
-            + " | ".join(
-                (
-                    str(row["model"]),
-                    str(row["family"]),
-                    str(row["quantization"]),
-                    str(row["dataset"]),
-                    _md_num(row.get("accuracy")),
-                    _md_num(row.get("relative_accuracy_drop")),
-                    _md_num(row.get("compression_ratio")),
-                    _md_num(row.get("throughput_gain")),
-                    _md_num(row.get("vram_savings")),
-                )
-            )
-            + " |"
-        )
-    lines.extend(["", "## Family aggregates", ""])
-    if not report.by_family:
-        lines.append("No completed cells to aggregate.")
-        lines.append("")
-        return "\n".join(lines)
+    keys = (
+        "model",
+        "family",
+        "quantization",
+        "dataset",
+        "accuracy",
+        "relative_accuracy_drop",
+        "compression_ratio",
+        "throughput_gain",
+        "vram_savings",
+    )
+    for row in cells:
+        lines.append(_markdown_row(row, keys))
+    return lines
+
+
+def _markdown_family_table(families: list[dict[str, Any]]) -> list[str]:
+    lines = ["", "## Family aggregates", ""]
+    if not families:
+        lines.extend(["No completed cells to aggregate.", ""])
+        return lines
     lines.extend(
         [
             "| family | cells | models | mean_acc | mean_drop | mean_compress | mean_tput_gain | mean_vram_save |",
             "| --- | --- | --- | --- | --- | --- | --- | --- |",
         ]
     )
-    for row in report.by_family:
-        lines.append(
-            "| "
-            + " | ".join(
-                (
-                    str(row["family"]),
-                    str(row["cell_count"]),
-                    str(row["model_count"]),
-                    _md_num(row.get("mean_accuracy")),
-                    _md_num(row.get("mean_relative_accuracy_drop")),
-                    _md_num(row.get("mean_compression_ratio")),
-                    _md_num(row.get("mean_throughput_gain")),
-                    _md_num(row.get("mean_vram_savings")),
-                )
-            )
-            + " |"
-        )
+    keys = (
+        "family",
+        "cell_count",
+        "model_count",
+        "mean_accuracy",
+        "mean_relative_accuracy_drop",
+        "mean_compression_ratio",
+        "mean_throughput_gain",
+        "mean_vram_savings",
+    )
+    for row in families:
+        lines.append(_markdown_row(row, keys))
     lines.append("")
-    return "\n".join(lines)
+    return lines
+
+
+def _markdown_row(row: dict[str, Any], keys: tuple[str, ...]) -> str:
+    values: list[str] = []
+    identity = {"model", "family", "quantization", "dataset", "cell_count", "model_count"}
+    for key in keys:
+        value = row.get(key)
+        if key in identity:
+            values.append(str(value))
+        else:
+            values.append(_md_num(value))
+    return "| " + " | ".join(values) + " |"
 
 
 def _md_num(value: Any) -> str:
