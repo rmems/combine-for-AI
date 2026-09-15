@@ -113,6 +113,13 @@ def load_datasets(config: dict[str, Any], base_path: Path) -> list[LoadedDataset
     return datasets
 
 
+def _resolve_cache_root(raw: str, base_path: Path) -> str:
+    root = Path(raw).expanduser()
+    if not root.is_absolute():
+        root = (base_path / root).resolve()
+    return str(root)
+
+
 def _apply_dataset_cache_defaults(
     spec: DatasetSpec,
     cache_cfg: dict[str, Any],
@@ -122,14 +129,9 @@ def _apply_dataset_cache_defaults(
     if spec.cache_mode is None and cache_cfg.get("mode"):
         updates["cache_mode"] = cache_cfg["mode"]
     if spec.cache_root:
-        root = Path(spec.cache_root).expanduser()
-        if not root.is_absolute():
-            updates["cache_root"] = str((base_path / root).resolve())
+        updates["cache_root"] = _resolve_cache_root(spec.cache_root, base_path)
     elif cache_cfg.get("root"):
-        root = Path(str(cache_cfg["root"])).expanduser()
-        if not root.is_absolute():
-            root = (base_path / root).resolve()
-        updates["cache_root"] = str(root)
+        updates["cache_root"] = _resolve_cache_root(str(cache_cfg["root"]), base_path)
     if updates:
         return replace(spec, **updates)
     return spec

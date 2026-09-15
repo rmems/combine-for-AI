@@ -534,37 +534,12 @@ class DatasetCache:
         token = f"{os.getpid()}-{secrets.token_hex(8)}"
         staging = self.root / f".{key.digest()}.staging-{token}"
         staging.mkdir(parents=False)
-        manifest = CacheManifest(
-            cache_key=key.as_dict(),
-            cache_key_digest=key.digest(),
-            source_uri=fetched.source_uri,
-            resolved_revision=fetched.resolved_revision,
-            retrieved_at=utc_timestamp(),
-            checksum_sha256=checksum,
-            row_count=len(fetched.records),
-            upstream_license=normalize_license(fetched.upstream_license),
-            license_scope=LICENSE_SCOPE_DATASET_SOURCE,
-            loader_schema_version=key.schema_version,
-        )
+        manifest = _manifest_for_store(key, fetched, checksum)
+        live = self.entry_dir(key)
         try:
-            dir_fd = _open_dir_nofollow(staging)
-            try:
-                _write_in_dir(dir_fd, RECORDS_FILENAME, payload, staging)
-                _write_in_dir(
-                    dir_fd,
-                    MANIFEST_FILENAME,
-                    (
-                        json.dumps(manifest.to_dict(), indent=2, sort_keys=True) + "\n"
-                    ).encode("utf-8"),
-                    staging,
-                )
-            finally:
-                os.close(dir_fd)
-            live = self.entry_dir(key)
-            if _lstat_or_none(live) is not None:
-                self._quarantine(live, reason="replaced-by-new-store")
-            os.rename(staging, live)
-        except Exception:
+            _write_cache_files(staging, payload, manifest)
+            self._publish_staging(staging, live)
+        except (OSError, CacheValidationError):
             if _lstat_or_none(staging) is not None:
                 self._quarantine(staging, reason="incomplete-store")
             raise
@@ -574,6 +549,11 @@ class DatasetCache:
             cache_path=live,
             cache_hit=False,
         )
+
+    def _publish_staging(self, staging: Path, live: Path) -> None:
+        if _lstat_or_none(live) is not None:
+            self._quarantine(live, reason="replaced-by-new-store")
+        os.rename(staging, live)
 
     def _quarantine(self, entry: Path, *, reason: str) -> Path:
         dest_parent = self.root / QUARANTINE_DIRNAME
@@ -635,6 +615,31 @@ class DatasetCache:
         )
 
 
+def _manifest_for_store(key: CacheKey, fetched: FetchResult, checksum: str) -> CacheManifest:
+    return CacheManifest(
+        cache_key=key.as_dict(),
+        cache_key_digest=key.digest(),
+        source_uri=fetched.source_uri,
+        resolved_revision=fetched.resolved_revision,
+        retrieved_at=utc_timestamp(),
+        checksum_sha256=checksum,
+        row_count=len(fetched.records),
+        upstream_license=normalize_license(fetched.upstream_license),
+        license_scope=LICENSE_SCOPE_DATASET_SOURCE,
+        loader_schema_version=key.schema_version,
+    )
+
+
+def _write_cache_files(staging: Path, payload: bytes, manifest: CacheManifest) -> None:
+    dir_fd = _open_dir_nofollow(staging)
+    try:
+        _write_in_dir(dir_fd, RECORDS_FILENAME, payload, staging)
+        encoded = json.dumps(manifest.to_dict(), indent=2, sort_keys=True) + "\n"
+        _write_in_dir(dir_fd, MANIFEST_FILENAME, encoded.encode("utf-8"), staging)
+    finally:
+        os.close(dir_fd)
+
+
 def _parse_manifest(manifest_bytes: bytes, entry: Path) -> CacheManifest:
     try:
         raw_manifest = json.loads(manifest_bytes.decode("utf-8"))
@@ -653,33 +658,9 @@ def _records_if_valid(
     manifest: CacheManifest,
     payload: bytes,
 ) -> list[DatasetRecord]:
-    digest = checksum_bytes(payload)
-    if digest != manifest.checksum_sha256:
-        raise CacheValidationError(
-            f"checksum mismatch at {entry / RECORDS_FILENAME}",
-            path=entry,
-            reason=(
-                f"checksum-mismatch expected={manifest.checksum_sha256} actual={digest}"
-            ),
-        )
-    if manifest.loader_schema_version != key.schema_version:
-        raise CacheValidationError(
-            f"schema mismatch at {entry / MANIFEST_FILENAME}",
-            path=entry,
-            reason=(
-                "stale-schema "
-                f"entry={manifest.loader_schema_version} expected={key.schema_version}"
-            ),
-        )
-    if manifest.cache_key_digest != key.digest():
-        raise CacheValidationError(
-            f"cache key mismatch at {entry / MANIFEST_FILENAME}",
-            path=entry,
-            reason=(
-                "cache-key-mismatch "
-                f"entry={manifest.cache_key_digest} expected={key.digest()}"
-            ),
-        )
+    _require_checksum(entry, manifest, payload)
+    _require_schema(entry, key, manifest)
+    _require_cache_key(entry, key, manifest)
     records = _decode_records(payload, entry)
     if len(records) != manifest.row_count:
         raise CacheValidationError(
@@ -690,6 +671,42 @@ def _records_if_valid(
             ),
         )
     return records
+
+
+def _require_checksum(entry: Path, manifest: CacheManifest, payload: bytes) -> None:
+    digest = checksum_bytes(payload)
+    if digest != manifest.checksum_sha256:
+        raise CacheValidationError(
+            f"checksum mismatch at {entry / RECORDS_FILENAME}",
+            path=entry,
+            reason=(
+                f"checksum-mismatch expected={manifest.checksum_sha256} actual={digest}"
+            ),
+        )
+
+
+def _require_schema(entry: Path, key: CacheKey, manifest: CacheManifest) -> None:
+    if manifest.loader_schema_version != key.schema_version:
+        raise CacheValidationError(
+            f"schema mismatch at {entry / MANIFEST_FILENAME}",
+            path=entry,
+            reason=(
+                "stale-schema "
+                f"entry={manifest.loader_schema_version} expected={key.schema_version}"
+            ),
+        )
+
+
+def _require_cache_key(entry: Path, key: CacheKey, manifest: CacheManifest) -> None:
+    if manifest.cache_key_digest != key.digest():
+        raise CacheValidationError(
+            f"cache key mismatch at {entry / MANIFEST_FILENAME}",
+            path=entry,
+            reason=(
+                "cache-key-mismatch "
+                f"entry={manifest.cache_key_digest} expected={key.digest()}"
+            ),
+        )
 
 
 def _decode_records(payload: bytes, entry: Path) -> list[DatasetRecord]:

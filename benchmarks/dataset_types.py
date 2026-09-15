@@ -60,19 +60,37 @@ class LoadedDataset:
 
 
 def validate_dataset_record(record: DatasetRecord) -> None:
-    if not isinstance(record.prompt, str) or not record.prompt:
-        raise ValueError("dataset record prompt must be a non-empty string")
+    _require_text_field(record.prompt, "prompt")
     if record.reference is not None and not isinstance(record.reference, str):
         raise ValueError("dataset record reference must be a string")
+    _require_choice_fields(record)
+
+
+def _require_text_field(value: object, field: str) -> None:
+    if not isinstance(value, str) or not value:
+        raise ValueError(f"dataset record {field} must be a non-empty string")
+
+
+def _require_choice_fields(record: DatasetRecord) -> None:
     if record.choices is None:
         if record.answer_index is not None:
             raise ValueError("answer_index requires choices")
         return
+    _require_choice_list(record)
+
+
+def _require_choice_list(record: DatasetRecord) -> None:
     if not isinstance(record.choices, list) or not all(
         isinstance(choice, str) for choice in record.choices
     ):
         raise ValueError("dataset record choices must be a list of strings")
+    _require_answer_index(record)
+
+
+def _require_answer_index(record: DatasetRecord) -> None:
     if not isinstance(record.answer_index, int):
         raise ValueError("multiple-choice records require an integer answer_index")
-    if record.answer_index < 0 or record.answer_index >= len(record.choices):
+    if record.choices is None or record.answer_index < 0 or record.answer_index >= len(
+        record.choices
+    ):
         raise ValueError("answer_index is out of range")

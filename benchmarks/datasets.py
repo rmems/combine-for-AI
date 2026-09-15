@@ -37,42 +37,61 @@ class DatasetLoader(Protocol):
 
 class JsonlDatasetLoader:
     def load(self, spec: DatasetSpec) -> LoadedDataset:
-        if not spec.path:
-            raise ValueError(f"jsonl dataset '{spec.name}' is missing a path")
-
-        path = Path(spec.path)
-        if not path.exists():
-            raise FileNotFoundError(f"dataset file not found: {path}")
-
-        records: list[DatasetRecord] = []
-        with path.open("r", encoding="utf-8") as handle:
-            for line_number, line in enumerate(handle, start=1):
-                line = line.strip()
-                if not line:
-                    continue
-                if spec.max_samples is not None and len(records) >= spec.max_samples:
-                    break
-                try:
-                    payload = json.loads(line)
-                except json.JSONDecodeError as exc:
-                    raise ValueError(
-                        f"invalid json on line {line_number} in {path}"
-                    ) from exc
-
-                record = DatasetRecord(
-                    prompt=payload["prompt"],
-                    reference=payload.get("reference"),
-                    choices=payload.get("choices"),
-                    answer_index=payload.get("answer_index"),
-                )
-                validate_dataset_record(record)
-                records.append(record)
-
+        path = _jsonl_path(spec)
+        records = _read_jsonl_records(path, spec.max_samples)
         return LoadedDataset(
             spec=spec,
             records=records,
             metadata=jsonl_provenance_metadata(spec, path, len(records)),
         )
+
+
+def _jsonl_path(spec: DatasetSpec) -> Path:
+    if not spec.path:
+        raise ValueError(f"jsonl dataset '{spec.name}' is missing a path")
+    path = Path(spec.path)
+    if not path.exists():
+        raise FileNotFoundError(f"dataset file not found: {path}")
+    return path
+
+
+def _read_jsonl_records(path: Path, max_samples: int | None) -> list[DatasetRecord]:
+    records: list[DatasetRecord] = []
+    with path.open("r", encoding="utf-8") as handle:
+        for line_number, line in enumerate(handle, start=1):
+            record = _jsonl_record(path, line_number, line, max_samples, len(records))
+            if record is None:
+                continue
+            records.append(record)
+            if max_samples is not None and len(records) >= max_samples:
+                break
+    return records
+
+
+def _jsonl_record(
+    path: Path,
+    line_number: int,
+    line: str,
+    max_samples: int | None,
+    loaded: int,
+) -> DatasetRecord | None:
+    line = line.strip()
+    if not line:
+        return None
+    if max_samples is not None and loaded >= max_samples:
+        return None
+    try:
+        payload = json.loads(line)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"invalid json on line {line_number} in {path}") from exc
+    record = DatasetRecord(
+        prompt=payload["prompt"],
+        reference=payload.get("reference"),
+        choices=payload.get("choices"),
+        answer_index=payload.get("answer_index"),
+    )
+    validate_dataset_record(record)
+    return record
 
 
 class HuggingFaceDatasetLoader:
