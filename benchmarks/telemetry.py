@@ -8,6 +8,10 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
+from benchmarks.corinth_canal import CorinthCanalRun, load_corinth_canal, try_load_corinth_canal
+from benchmarks.jsonio import write_json
+from benchmarks.metrics import SaaqMetricOverlay
+
 
 @dataclass(frozen=True)
 class SystemSnapshot:
@@ -49,6 +53,12 @@ class RoutingMetrics:
     latent_stability: float | None = None
     dv_dt_reductions: float | None = None
     event_rate: float | None = None
+    firing_rate: float | None = None
+    membrane_pressure: float | None = None
+    saaq_delta_q: float | None = None
+    saaq_delta_q_last: float | None = None
+    saaq_delta_q_legacy: float | None = None
+    saaq_delta_q_v15: float | None = None
 
 
 @dataclass(frozen=True)
@@ -61,6 +71,11 @@ class TelemetrySnapshot:
     kernel_occupancy: float | None = None
     vram_bandwidth_gbps: float | None = None
     notes: str | None = None
+    saaq_rule: str | None = None
+    saaq_model_family: str | None = None
+    saaq_delta_q_trajectory: tuple[float, ...] | None = None
+    saaq_delta_q_legacy_trajectory: tuple[float, ...] | None = None
+    saaq_delta_q_v15_trajectory: tuple[float, ...] | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -274,6 +289,23 @@ class CorinthCanalArtifact:
     latent_stability: float | None = None
     dv_dt_reductions: float | None = None
     raw_path: str | None = None
+    firing_rate: float | None = None
+    membrane_pressure: float | None = None
+    membrane_dv_dt: float | None = None
+    saaq_delta_q: float | None = None
+    saaq_delta_q_last: float | None = None
+    saaq_delta_q_legacy: float | None = None
+    saaq_delta_q_v15: float | None = None
+    saaq_delta_q_trajectory: tuple[float, ...] = ()
+    saaq_delta_q_legacy_trajectory: tuple[float, ...] = ()
+    saaq_delta_q_v15_trajectory: tuple[float, ...] = ()
+    saaq_rule: str | None = None
+    saaq_primary_rule: str | None = None
+    model_family: str | None = None
+    model_slug: str | None = None
+    ticks_completed: int | None = None
+    latent_rows: int | None = None
+    skipped: tuple[str, ...] = ()
 
     @staticmethod
     def from_dict(raw: dict[str, Any]) -> "CorinthCanalArtifact":
@@ -286,13 +318,82 @@ class CorinthCanalArtifact:
             latent_stability=raw.get("latent_stability"),
             dv_dt_reductions=raw.get("dv_dt_reductions"),
             raw_path=raw.get("raw_path"),
+            firing_rate=raw.get("firing_rate"),
+            membrane_pressure=raw.get("membrane_pressure"),
+            membrane_dv_dt=raw.get("membrane_dv_dt"),
+            saaq_delta_q=raw.get("saaq_delta_q", raw.get("saaq_delta_q_mean")),
+            saaq_delta_q_last=raw.get("saaq_delta_q_last"),
+            saaq_delta_q_legacy=raw.get("saaq_delta_q_legacy"),
+            saaq_delta_q_v15=raw.get("saaq_delta_q_v15"),
+            saaq_delta_q_trajectory=_tuple_floats(
+                raw.get("delta_q_trajectory") or raw.get("saaq_delta_q_trajectory")
+            ),
+            saaq_delta_q_legacy_trajectory=_tuple_floats(raw.get("delta_q_legacy_trajectory")),
+            saaq_delta_q_v15_trajectory=_tuple_floats(raw.get("delta_q_v15_trajectory")),
+            saaq_rule=raw.get("saaq_rule"),
+            saaq_primary_rule=raw.get("saaq_primary_rule"),
+            model_family=raw.get("model_family"),
+            model_slug=raw.get("model_slug"),
+            ticks_completed=raw.get("ticks_completed"),
+            latent_rows=raw.get("latent_rows"),
+        )
+
+    @staticmethod
+    def from_run(run: CorinthCanalRun) -> "CorinthCanalArtifact":
+        return CorinthCanalArtifact(
+            artifact_version=run.artifact_version,
+            experiment_id=run.experiment_id,
+            routing_entropy=run.routing_entropy,
+            spike_density=run.spike_density,
+            event_rate=run.event_rate,
+            latent_stability=run.latent_stability,
+            dv_dt_reductions=run.dv_dt_reductions,
+            raw_path=run.raw_path,
+            firing_rate=run.firing_rate,
+            membrane_pressure=run.membrane_pressure,
+            membrane_dv_dt=run.membrane_dv_dt,
+            saaq_delta_q=run.saaq_delta_q,
+            saaq_delta_q_last=run.saaq_delta_q_last,
+            saaq_delta_q_legacy=run.saaq_delta_q_legacy,
+            saaq_delta_q_v15=run.saaq_delta_q_v15,
+            saaq_delta_q_trajectory=run.saaq_delta_q_trajectory,
+            saaq_delta_q_legacy_trajectory=run.saaq_delta_q_legacy_trajectory,
+            saaq_delta_q_v15_trajectory=run.saaq_delta_q_v15_trajectory,
+            saaq_rule=run.saaq_rule,
+            saaq_primary_rule=run.saaq_primary_rule,
+            model_family=run.model_family,
+            model_slug=run.model_slug,
+            ticks_completed=run.ticks_completed,
+            latent_rows=run.latent_rows,
+            skipped=run.skipped,
         )
 
     @staticmethod
     def from_file(path: Path) -> "CorinthCanalArtifact":
-        with path.open("r", encoding="utf-8") as handle:
-            raw = json.load(handle)
-        return CorinthCanalArtifact.from_dict(raw)
+        return CorinthCanalArtifact.from_path(path)
+
+    @staticmethod
+    def from_path(path: Path) -> "CorinthCanalArtifact":
+        return CorinthCanalArtifact.from_run(load_corinth_canal(path))
+
+    @staticmethod
+    def try_from_path(path: Path) -> "CorinthCanalArtifact | None":
+        run = try_load_corinth_canal(path)
+        if run is None:
+            return None
+        return CorinthCanalArtifact.from_run(run)
+
+    def to_saaq_overlay(self) -> SaaqMetricOverlay:
+        return SaaqMetricOverlay(
+            firing_rate=self.firing_rate,
+            membrane_pressure=self.membrane_pressure,
+            saaq_delta_q=self.saaq_delta_q,
+            saaq_delta_q_last=self.saaq_delta_q_last,
+            saaq_delta_q_legacy=self.saaq_delta_q_legacy,
+            saaq_delta_q_v15=self.saaq_delta_q_v15,
+            saaq_rule=self.saaq_rule,
+            spike_density=self.spike_density,
+        )
 
 
 @dataclass(frozen=True)
@@ -338,15 +439,38 @@ def merge_upstream_artifacts(
     myelin: MyelinAcceleratorArtifact | None = None,
 ) -> TelemetrySnapshot:
     routing = telemetry.routing
+    saaq_rule = telemetry.saaq_rule
+    saaq_model_family = telemetry.saaq_model_family
+    saaq_traj = telemetry.saaq_delta_q_trajectory
+    saaq_legacy_traj = telemetry.saaq_delta_q_legacy_trajectory
+    saaq_v15_traj = telemetry.saaq_delta_q_v15_trajectory
+    notes = telemetry.notes
     if corinth:
         base = routing or RoutingMetrics()
         routing = RoutingMetrics(
-            routing_entropy=corinth.routing_entropy if corinth.routing_entropy is not None else base.routing_entropy,
-            spike_density=corinth.spike_density if corinth.spike_density is not None else base.spike_density,
-            latent_stability=corinth.latent_stability if corinth.latent_stability is not None else base.latent_stability,
-            dv_dt_reductions=corinth.dv_dt_reductions if corinth.dv_dt_reductions is not None else base.dv_dt_reductions,
-            event_rate=corinth.event_rate if corinth.event_rate is not None else base.event_rate,
+            routing_entropy=_coalesce(corinth.routing_entropy, base.routing_entropy),
+            spike_density=_coalesce(corinth.spike_density, base.spike_density),
+            latent_stability=_coalesce(corinth.latent_stability, base.latent_stability),
+            dv_dt_reductions=_coalesce(corinth.dv_dt_reductions, base.dv_dt_reductions),
+            event_rate=_coalesce(corinth.event_rate, base.event_rate),
+            firing_rate=_coalesce(corinth.firing_rate, base.firing_rate),
+            membrane_pressure=_coalesce(corinth.membrane_pressure, base.membrane_pressure),
+            saaq_delta_q=_coalesce(corinth.saaq_delta_q, base.saaq_delta_q),
+            saaq_delta_q_last=_coalesce(corinth.saaq_delta_q_last, base.saaq_delta_q_last),
+            saaq_delta_q_legacy=_coalesce(corinth.saaq_delta_q_legacy, base.saaq_delta_q_legacy),
+            saaq_delta_q_v15=_coalesce(corinth.saaq_delta_q_v15, base.saaq_delta_q_v15),
         )
+        saaq_rule = _coalesce(corinth.saaq_rule, saaq_rule)
+        saaq_model_family = _coalesce(corinth.model_family, saaq_model_family)
+        if corinth.saaq_delta_q_trajectory:
+            saaq_traj = corinth.saaq_delta_q_trajectory
+        if corinth.saaq_delta_q_legacy_trajectory:
+            saaq_legacy_traj = corinth.saaq_delta_q_legacy_trajectory
+        if corinth.saaq_delta_q_v15_trajectory:
+            saaq_v15_traj = corinth.saaq_delta_q_v15_trajectory
+        if corinth.skipped:
+            skipped_note = "skipped corinth-canal artifacts: " + ", ".join(corinth.skipped)
+            notes = f"{notes}; {skipped_note}" if notes else skipped_note
 
     kernel_occupancy = telemetry.kernel_occupancy
     vram_bw = telemetry.vram_bandwidth_gbps
@@ -360,7 +484,12 @@ def merge_upstream_artifacts(
         routing=routing,
         kernel_occupancy=kernel_occupancy,
         vram_bandwidth_gbps=vram_bw,
-        notes=telemetry.notes,
+        notes=notes,
+        saaq_rule=saaq_rule,
+        saaq_model_family=saaq_model_family,
+        saaq_delta_q_trajectory=saaq_traj,
+        saaq_delta_q_legacy_trajectory=saaq_legacy_traj,
+        saaq_delta_q_v15_trajectory=saaq_v15_traj,
     )
 
 
@@ -376,11 +505,31 @@ def telemetry_to_dict(telemetry: TelemetrySnapshot) -> dict[str, Any]:
         d[f"sys_{k}"] = v
     if telemetry.gpu_metrics:
         d["gpu_metrics"] = [asdict(g) for g in telemetry.gpu_metrics]
-    d["routing_entropy"] = telemetry.routing.routing_entropy if telemetry.routing else None
-    d["spike_density"] = telemetry.routing.spike_density if telemetry.routing else None
-    d["latent_stability"] = telemetry.routing.latent_stability if telemetry.routing else None
-    d["dv_dt_reductions"] = telemetry.routing.dv_dt_reductions if telemetry.routing else None
-    d["event_rate"] = telemetry.routing.event_rate if telemetry.routing else None
+    routing = telemetry.routing
+    d["routing_entropy"] = routing.routing_entropy if routing else None
+    d["spike_density"] = routing.spike_density if routing else None
+    d["latent_stability"] = routing.latent_stability if routing else None
+    d["dv_dt_reductions"] = routing.dv_dt_reductions if routing else None
+    d["event_rate"] = routing.event_rate if routing else None
+    d["firing_rate"] = routing.firing_rate if routing else None
+    d["membrane_pressure"] = routing.membrane_pressure if routing else None
+    d["saaq_delta_q"] = routing.saaq_delta_q if routing else None
+    d["saaq_delta_q_last"] = routing.saaq_delta_q_last if routing else None
+    d["saaq_delta_q_legacy"] = routing.saaq_delta_q_legacy if routing else None
+    d["saaq_delta_q_v15"] = routing.saaq_delta_q_v15 if routing else None
+    d["saaq_rule"] = telemetry.saaq_rule
+    d["saaq_model_family"] = telemetry.saaq_model_family
+    d["saaq_delta_q_trajectory"] = (
+        list(telemetry.saaq_delta_q_trajectory) if telemetry.saaq_delta_q_trajectory else None
+    )
+    d["saaq_delta_q_legacy_trajectory"] = (
+        list(telemetry.saaq_delta_q_legacy_trajectory)
+        if telemetry.saaq_delta_q_legacy_trajectory
+        else None
+    )
+    d["saaq_delta_q_v15_trajectory"] = (
+        list(telemetry.saaq_delta_q_v15_trajectory) if telemetry.saaq_delta_q_v15_trajectory else None
+    )
     d["kernel_occupancy"] = telemetry.kernel_occupancy
     d["vram_bandwidth_gbps"] = telemetry.vram_bandwidth_gbps
     d["telemetry_notes"] = telemetry.notes
@@ -394,6 +543,20 @@ def write_telemetry_json(path: Path, telemetry: TelemetrySnapshot) -> None:
     can legitimately yield a non-finite reading, so it goes through the same
     guard as every other report rather than calling json.dump directly.
     """
-    from benchmarks.jsonio import write_json
-
     write_json(path, telemetry_to_dict(telemetry))
+
+
+def _coalesce(new: Any, old: Any) -> Any:
+    return new if new is not None else old
+
+
+def _tuple_floats(value: Any) -> tuple[float, ...]:
+    if not isinstance(value, (list, tuple)):
+        return ()
+    out: list[float] = []
+    for item in value:
+        try:
+            out.append(float(item))
+        except (TypeError, ValueError):
+            continue
+    return tuple(out)
