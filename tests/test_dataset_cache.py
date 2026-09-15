@@ -74,6 +74,7 @@ def _offline_cache(tmp_path: Path) -> DatasetCache:
 def test_cache_key_includes_name_config_split_revision_and_schema() -> None:
     key = cache_key_for(FIXTURE_SPEC)
     assert key.dataset_name == "fixture-cloze"
+    assert key.hf_id == "local/fixture-cloze"
     assert key.configuration == ""
     assert key.split == "validation"
     assert key.revision == "rev-1"
@@ -90,6 +91,16 @@ def test_cache_key_includes_name_config_split_revision_and_schema() -> None:
         )
     )
     assert other.digest() != key.digest()
+
+    other_source = cache_key_for(
+        DatasetSpec(
+            name="fixture-cloze",
+            hf_id="other/fixture-cloze",
+            split="validation",
+            revision="rev-1",
+        )
+    )
+    assert other_source.digest() != key.digest()
 
     subset = cache_key_for(
         DatasetSpec(
@@ -190,6 +201,17 @@ def test_checksum_mismatch_is_quarantined_not_deleted(tmp_path: Path) -> None:
     assert "Quarantined to" in str(error)
 
 
+def test_prefer_cache_refetches_after_quarantining_invalid_entry(tmp_path: Path) -> None:
+    cache = DatasetCache(root=tmp_path / "cache", mode=CacheMode.PREFER_CACHE)
+    _install_fixture(cache, FIXTURE_SPEC, "checksum-mismatch")
+    loaded = cache.load(FIXTURE_SPEC, fetch=_fetch_ok)
+    assert loaded.cache_hit is False
+    assert len(loaded.records) == 2
+    assert loaded.manifest.checksum_sha256 == checksum_bytes(
+        encode_records(loaded.records)
+    )
+
+
 def test_stale_schema_is_rejected_with_path_and_reason(tmp_path: Path) -> None:
     cache = _offline_cache(tmp_path)
     entry = _install_fixture(cache, FIXTURE_SPEC, "stale-schema")
@@ -281,6 +303,22 @@ def test_prefer_cache_miss_fetches_once(tmp_path: Path) -> None:
     assert len(second.records) == 1
     assert second.metadata["cache_hit"] is True
     assert second.metadata["row_count"] == 2
+
+
+def test_hf_loader_rejects_negative_max_samples(tmp_path: Path) -> None:
+    spec = DatasetSpec(
+        name="fixture-cloze",
+        source="hf",
+        hf_id="local/fixture-cloze",
+        split="validation",
+        revision="rev-1",
+        cache_mode="prefer-cache",
+        cache_root=str(tmp_path / "cache"),
+        max_samples=-1,
+    )
+    loader = HuggingFaceDatasetLoader(fetch=_fetch_ok)
+    with pytest.raises(ValueError, match="non-negative"):
+        loader.load(spec)
 
 
 def test_sample_manifest_fixture_is_machine_readable() -> None:

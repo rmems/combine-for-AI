@@ -2,11 +2,12 @@
   "cache_key": {
     "configuration": "",
     "dataset_name": "fixture-cloze",
+    "hf_id": "local/fixture-cloze",
     "revision": "rev-1",
     "schema_version": "0",
     "split": "validation"
   },
-  "cache_key_digest": "95f2c09bacb07e54c9c1382fbb1259cfe1792aa70334be4a8e9813700f3bb895",
+  "cache_key_digest": "680964f2dfa403f2387eae7a3249c8ab10bfed184997ebf12a42c7dcbf5739ef",
   "checksum_sha256": "c8e8dbed4ea7972e68be523e7f249ae619303ecac8092be186a8e30f18a0f7d6",
   "license_scope": "dataset_source_not_repository",
   "loader_schema_version": "0",

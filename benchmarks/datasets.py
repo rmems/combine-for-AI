@@ -81,6 +81,8 @@ class HuggingFaceDatasetLoader:
         loaded = cache.load(spec, fetch=self._fetch)
         records = loaded.records
         if spec.max_samples is not None:
+            if spec.max_samples < 0:
+                raise ValueError("max_samples must be non-negative")
             records = records[: spec.max_samples]
         metadata = loaded.metadata(source="hf")
         metadata["hf_id"] = spec.hf_id

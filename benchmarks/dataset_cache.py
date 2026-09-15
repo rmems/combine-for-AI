@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import secrets
 import stat
 import time
 from dataclasses import asdict, dataclass
@@ -71,6 +72,7 @@ class CacheValidationError(DatasetCacheError):
 @dataclass(frozen=True)
 class CacheKey:
     dataset_name: str
+    hf_id: str
     configuration: str
     split: str
     revision: str
@@ -80,6 +82,7 @@ class CacheKey:
         payload = {
             "configuration": self.configuration,
             "dataset_name": self.dataset_name,
+            "hf_id": self.hf_id,
             "revision": self.revision,
             "schema_version": self.schema_version,
             "split": self.split,
@@ -90,6 +93,7 @@ class CacheKey:
     def as_dict(self) -> dict[str, str]:
         return {
             "dataset_name": self.dataset_name,
+            "hf_id": self.hf_id,
             "configuration": self.configuration,
             "split": self.split,
             "revision": self.revision,
@@ -183,13 +187,12 @@ def default_cache_root() -> Path:
 
 
 def cache_key_for(spec: DatasetSpec, *, schema_version: str = LOADER_SCHEMA_VERSION) -> CacheKey:
-    configuration = spec.hf_subset or ""
-    revision = spec.revision or UNSPECIFIED_REVISION
     return CacheKey(
         dataset_name=spec.name,
-        configuration=configuration,
+        hf_id=spec.hf_id or "",
+        configuration=spec.hf_subset or "",
         split=spec.split,
-        revision=revision,
+        revision=spec.revision or UNSPECIFIED_REVISION,
         schema_version=schema_version,
     )
 
@@ -421,20 +424,42 @@ class DatasetCache:
     def load(self, spec: DatasetSpec, fetch: DatasetFetchFn) -> CacheLoad:
         key = self.key_for(spec)
         entry = self.entry_dir(key)
-        existing: CacheLoad | None = None
-        if _lstat_or_none(entry) is not None:
-            existing = self._try_read(entry, key)
-
+        existing = self._load_existing(entry, key)
         if existing is not None and self._use_existing_without_fetch():
             return existing
-
         if not self._may_fetch():
             raise CacheMissError(
                 self._miss_message(spec, key, entry),
                 path=entry,
                 reason="missing-artifact",
             )
+        return self._fetch_and_store(spec, key, entry, existing, fetch)
 
+    def _load_existing(self, entry: Path, key: CacheKey) -> CacheLoad | None:
+        if _lstat_or_none(entry) is None:
+            return None
+        try:
+            return self._read_valid(entry, key)
+        except CacheValidationError as exc:
+            quarantined = self._quarantine(entry, reason=exc.reason or str(exc))
+            if not self._may_fetch():
+                raise CacheValidationError(
+                    f"Rejected cache entry {entry}: {exc.reason}. "
+                    f"Quarantined to {quarantined} (original bytes were not deleted).",
+                    path=entry,
+                    reason=exc.reason,
+                    quarantined_to=quarantined,
+                ) from exc
+            return None
+
+    def _fetch_and_store(
+        self,
+        spec: DatasetSpec,
+        key: CacheKey,
+        entry: Path,
+        existing: CacheLoad | None,
+        fetch: DatasetFetchFn,
+    ) -> CacheLoad:
         fetched = fetch(spec)
         payload = encode_records(fetched.records)
         checksum = checksum_bytes(payload)
@@ -477,19 +502,6 @@ class DatasetCache:
                 unreachable: Never = self.mode
                 raise ValueError(f"unhandled cache mode: {unreachable}")
 
-    def _try_read(self, entry: Path, key: CacheKey) -> CacheLoad:
-        try:
-            return self._read_valid(entry, key)
-        except CacheValidationError as exc:
-            quarantined = self._quarantine(entry, reason=exc.reason or str(exc))
-            raise CacheValidationError(
-                f"Rejected cache entry {entry}: {exc.reason}. "
-                f"Quarantined to {quarantined} (original bytes were not deleted).",
-                path=entry,
-                reason=exc.reason,
-                quarantined_to=quarantined,
-            ) from exc
-
     def _read_valid(self, entry: Path, key: CacheKey) -> CacheLoad:
         dir_fd = _open_dir_nofollow(entry)
         try:
@@ -497,53 +509,8 @@ class DatasetCache:
             manifest_bytes = _read_in_dir(dir_fd, MANIFEST_FILENAME, entry)
         finally:
             os.close(dir_fd)
-        try:
-            raw_manifest = json.loads(manifest_bytes.decode("utf-8"))
-            manifest = CacheManifest.from_dict(raw_manifest)
-        except (json.JSONDecodeError, KeyError, TypeError, ValueError, UnicodeDecodeError) as exc:
-            raise CacheValidationError(
-                f"unreadable manifest at {entry / MANIFEST_FILENAME}: {exc}",
-                path=entry,
-                reason="unreadable-manifest",
-            ) from exc
-
-        digest = checksum_bytes(payload)
-        if digest != manifest.checksum_sha256:
-            raise CacheValidationError(
-                f"checksum mismatch at {entry / RECORDS_FILENAME}",
-                path=entry,
-                reason=(
-                    f"checksum-mismatch expected={manifest.checksum_sha256} actual={digest}"
-                ),
-            )
-        if manifest.loader_schema_version != key.schema_version:
-            raise CacheValidationError(
-                f"schema mismatch at {entry / MANIFEST_FILENAME}",
-                path=entry,
-                reason=(
-                    "stale-schema "
-                    f"entry={manifest.loader_schema_version} expected={key.schema_version}"
-                ),
-            )
-        if manifest.cache_key_digest != key.digest():
-            raise CacheValidationError(
-                f"cache key mismatch at {entry / MANIFEST_FILENAME}",
-                path=entry,
-                reason=(
-                    "cache-key-mismatch "
-                    f"entry={manifest.cache_key_digest} expected={key.digest()}"
-                ),
-            )
-
-        records = _decode_records(payload, entry)
-        if len(records) != manifest.row_count:
-            raise CacheValidationError(
-                f"row count mismatch at {entry / RECORDS_FILENAME}",
-                path=entry,
-                reason=(
-                    f"row-count-mismatch expected={manifest.row_count} actual={len(records)}"
-                ),
-            )
+        manifest = _parse_manifest(manifest_bytes, entry)
+        records = _records_if_valid(entry, key, manifest, payload)
         return CacheLoad(
             records=records,
             manifest=manifest,
@@ -566,9 +533,10 @@ class DatasetCache:
             self._quarantine(entry, reason="unsafe-symlink")
         self._ensure_real_directory(entry)
         dir_fd = _open_dir_nofollow(entry)
+        token = f"{os.getpid()}-{secrets.token_hex(8)}"
+        tmp_records = f".{RECORDS_FILENAME}.{token}.tmp"
+        tmp_manifest = f".{MANIFEST_FILENAME}.{token}.tmp"
         try:
-            tmp_records = f".{RECORDS_FILENAME}.tmp"
-            tmp_manifest = f".{MANIFEST_FILENAME}.tmp"
             _write_in_dir(dir_fd, tmp_records, payload, entry)
             manifest = CacheManifest(
                 cache_key=key.as_dict(),
@@ -661,9 +629,73 @@ class DatasetCache:
         )
 
 
+def _parse_manifest(manifest_bytes: bytes, entry: Path) -> CacheManifest:
+    try:
+        raw_manifest = json.loads(manifest_bytes.decode("utf-8"))
+        return CacheManifest.from_dict(raw_manifest)
+    except (json.JSONDecodeError, KeyError, TypeError, ValueError, UnicodeDecodeError) as exc:
+        raise CacheValidationError(
+            f"unreadable manifest at {entry / MANIFEST_FILENAME}: {exc}",
+            path=entry,
+            reason="unreadable-manifest",
+        ) from exc
+
+
+def _records_if_valid(
+    entry: Path,
+    key: CacheKey,
+    manifest: CacheManifest,
+    payload: bytes,
+) -> list[DatasetRecord]:
+    digest = checksum_bytes(payload)
+    if digest != manifest.checksum_sha256:
+        raise CacheValidationError(
+            f"checksum mismatch at {entry / RECORDS_FILENAME}",
+            path=entry,
+            reason=(
+                f"checksum-mismatch expected={manifest.checksum_sha256} actual={digest}"
+            ),
+        )
+    if manifest.loader_schema_version != key.schema_version:
+        raise CacheValidationError(
+            f"schema mismatch at {entry / MANIFEST_FILENAME}",
+            path=entry,
+            reason=(
+                "stale-schema "
+                f"entry={manifest.loader_schema_version} expected={key.schema_version}"
+            ),
+        )
+    if manifest.cache_key_digest != key.digest():
+        raise CacheValidationError(
+            f"cache key mismatch at {entry / MANIFEST_FILENAME}",
+            path=entry,
+            reason=(
+                "cache-key-mismatch "
+                f"entry={manifest.cache_key_digest} expected={key.digest()}"
+            ),
+        )
+    records = _decode_records(payload, entry)
+    if len(records) != manifest.row_count:
+        raise CacheValidationError(
+            f"row count mismatch at {entry / RECORDS_FILENAME}",
+            path=entry,
+            reason=(
+                f"row-count-mismatch expected={manifest.row_count} actual={len(records)}"
+            ),
+        )
+    return records
+
+
 def _decode_records(payload: bytes, entry: Path) -> list[DatasetRecord]:
     records: list[DatasetRecord] = []
-    text = payload.decode("utf-8")
+    try:
+        text = payload.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise CacheValidationError(
+            f"invalid utf-8 in {entry / RECORDS_FILENAME}",
+            path=entry,
+            reason="invalid-record encoding=utf-8",
+        ) from exc
     for line_number, line in enumerate(text.splitlines(), start=1):
         if not line.strip():
             continue
