@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 from pathlib import Path
 
@@ -332,3 +333,51 @@ def test_run_record_surfaces_dataset_license_not_repo_license(tmp_path: Path) ->
     assert row["dataset_upstream_license"] == UNKNOWN_LICENSE
     assert row["dataset_license_scope"] == LICENSE_SCOPE_DATASET_SOURCE
     assert "license" not in report["run"]
+
+
+def test_symlink_entry_is_rejected_without_moving_the_target(tmp_path: Path) -> None:
+    cache = _offline_cache(tmp_path)
+    outside = tmp_path / "outside-secrets"
+    shutil.copytree(FIXTURES / "hit", outside)
+    marker = outside / "do-not-move.txt"
+    marker.write_text("secret\n", encoding="utf-8")
+
+    entry = cache.entry_dir(cache.key_for(FIXTURE_SPEC))
+    entry.parent.mkdir(parents=True, exist_ok=True)
+    os.symlink(outside, entry)
+
+    with pytest.raises(CacheValidationError, match="unsafe-symlink") as excinfo:
+        cache.load(FIXTURE_SPEC, fetch=_network_must_not_run)
+
+    error = excinfo.value
+    assert error.reason == "unsafe-symlink"
+    assert not entry.exists()
+    assert not entry.is_symlink()
+    assert outside.is_dir()
+    assert marker.read_text(encoding="utf-8") == "secret\n"
+    assert (outside / "records.jsonl").exists()
+    assert error.quarantined_to is not None
+    assert (error.quarantined_to / "rejected-symlink").read_text(encoding="utf-8").strip() == str(
+        outside
+    )
+    assert not error.quarantined_to.is_symlink()
+
+
+def test_symlink_records_file_is_rejected_without_following(tmp_path: Path) -> None:
+    cache = _offline_cache(tmp_path)
+    outside = tmp_path / "outside-records.jsonl"
+    outside.write_text("not-dataset-bytes\n", encoding="utf-8")
+    entry = _install_fixture(cache, FIXTURE_SPEC, "hit")
+    records = entry / "records.jsonl"
+    records.unlink()
+    os.symlink(outside, records)
+
+    with pytest.raises(CacheValidationError, match="unsafe-symlink") as excinfo:
+        cache.load(FIXTURE_SPEC, fetch=_network_must_not_run)
+
+    assert excinfo.value.reason == "unsafe-symlink"
+    assert outside.read_text(encoding="utf-8") == "not-dataset-bytes\n"
+    assert not entry.exists()
+    assert excinfo.value.quarantined_to is not None
+    assert (excinfo.value.quarantined_to / "records.jsonl").is_symlink()
+

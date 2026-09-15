@@ -10,7 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import shutil
+import stat
 import time
 from dataclasses import asdict, dataclass
 from enum import Enum
@@ -255,6 +255,132 @@ def provenance_from_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _lstat_or_none(path: Path) -> os.stat_result | None:
+    try:
+        return path.lstat()
+    except FileNotFoundError:
+        return None
+
+
+def _is_symlink(st: os.stat_result) -> bool:
+    return stat.S_ISLNK(st.st_mode)
+
+
+def _is_directory(st: os.stat_result) -> bool:
+    return stat.S_ISDIR(st.st_mode)
+
+
+def _is_regular_file(st: os.stat_result) -> bool:
+    return stat.S_ISREG(st.st_mode)
+
+
+def _open_nofollow(path: Path, flags: int, mode: int = 0o644) -> int:
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    return os.open(path, flags, mode)
+
+
+def _write_bytes_nofollow(path: Path, payload: bytes) -> None:
+    try:
+        fd = _open_nofollow(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC)
+    except OSError as exc:
+        raise CacheValidationError(
+            f"cannot write {path}: {exc}",
+            path=path,
+            reason="unsafe-symlink",
+        ) from exc
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            fd = -1
+            handle.write(payload)
+    finally:
+        if fd >= 0:
+            os.close(fd)
+
+
+def _write_text_nofollow(path: Path, text: str) -> None:
+    _write_bytes_nofollow(path, text.encode("utf-8"))
+
+
+def _dir_open_flags() -> int:
+    flags = os.O_RDONLY
+    if hasattr(os, "O_DIRECTORY"):
+        flags |= os.O_DIRECTORY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    return flags
+
+
+def _open_dir_nofollow(path: Path) -> int:
+    try:
+        return os.open(path, _dir_open_flags())
+    except OSError as exc:
+        raise CacheValidationError(
+            f"cache entry is not a real directory: {path}",
+            path=path,
+            reason="unsafe-symlink",
+        ) from exc
+
+
+def _read_in_dir(dir_fd: int, name: str, entry: Path) -> bytes:
+    flags = os.O_RDONLY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        fd = os.open(name, flags, dir_fd=dir_fd)
+    except FileNotFoundError as exc:
+        raise CacheValidationError(
+            f"incomplete cache entry at {entry}",
+            path=entry,
+            reason="incomplete-entry",
+        ) from exc
+    except OSError as exc:
+        raise CacheValidationError(
+            f"cannot read {entry / name}: {exc}",
+            path=entry,
+            reason="unsafe-symlink",
+        ) from exc
+    try:
+        st = os.fstat(fd)
+        if not _is_regular_file(st):
+            raise CacheValidationError(
+                f"not a regular file: {entry / name}",
+                path=entry,
+                reason="not-a-regular-file",
+            )
+        with os.fdopen(fd, "rb") as handle:
+            fd = -1
+            return handle.read()
+    finally:
+        if fd >= 0:
+            os.close(fd)
+
+
+def _write_in_dir(dir_fd: int, name: str, payload: bytes, entry: Path) -> None:
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        fd = os.open(name, flags, 0o644, dir_fd=dir_fd)
+    except OSError as exc:
+        raise CacheValidationError(
+            f"cannot write {entry / name}: {exc}",
+            path=entry,
+            reason="unsafe-symlink",
+        ) from exc
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            fd = -1
+            handle.write(payload)
+    finally:
+        if fd >= 0:
+            os.close(fd)
+
+
+def _rename_in_dir(dir_fd: int, src: str, dst: str) -> None:
+    os.rename(src, dst, src_dir_fd=dir_fd, dst_dir_fd=dir_fd)
+
+
 def jsonl_provenance_metadata(spec: DatasetSpec, path: Path, row_count: int) -> dict[str, Any]:
     return {
         "source": "jsonl",
@@ -296,7 +422,7 @@ class DatasetCache:
         key = self.key_for(spec)
         entry = self.entry_dir(key)
         existing: CacheLoad | None = None
-        if entry.exists():
+        if _lstat_or_none(entry) is not None:
             existing = self._try_read(entry, key)
 
         if existing is not None and self._use_existing_without_fetch():
@@ -365,29 +491,26 @@ class DatasetCache:
             ) from exc
 
     def _read_valid(self, entry: Path, key: CacheKey) -> CacheLoad:
-        records_path = entry / RECORDS_FILENAME
-        manifest_path = entry / MANIFEST_FILENAME
-        if not records_path.is_file() or not manifest_path.is_file():
-            raise CacheValidationError(
-                f"incomplete cache entry at {entry}",
-                path=entry,
-                reason="incomplete-entry",
-            )
+        dir_fd = _open_dir_nofollow(entry)
         try:
-            raw_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            payload = _read_in_dir(dir_fd, RECORDS_FILENAME, entry)
+            manifest_bytes = _read_in_dir(dir_fd, MANIFEST_FILENAME, entry)
+        finally:
+            os.close(dir_fd)
+        try:
+            raw_manifest = json.loads(manifest_bytes.decode("utf-8"))
             manifest = CacheManifest.from_dict(raw_manifest)
-        except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
+        except (json.JSONDecodeError, KeyError, TypeError, ValueError, UnicodeDecodeError) as exc:
             raise CacheValidationError(
-                f"unreadable manifest at {manifest_path}: {exc}",
+                f"unreadable manifest at {entry / MANIFEST_FILENAME}: {exc}",
                 path=entry,
                 reason="unreadable-manifest",
             ) from exc
 
-        payload = records_path.read_bytes()
         digest = checksum_bytes(payload)
         if digest != manifest.checksum_sha256:
             raise CacheValidationError(
-                f"checksum mismatch at {records_path}",
+                f"checksum mismatch at {entry / RECORDS_FILENAME}",
                 path=entry,
                 reason=(
                     f"checksum-mismatch expected={manifest.checksum_sha256} actual={digest}"
@@ -395,7 +518,7 @@ class DatasetCache:
             )
         if manifest.loader_schema_version != key.schema_version:
             raise CacheValidationError(
-                f"schema mismatch at {manifest_path}",
+                f"schema mismatch at {entry / MANIFEST_FILENAME}",
                 path=entry,
                 reason=(
                     "stale-schema "
@@ -404,7 +527,7 @@ class DatasetCache:
             )
         if manifest.cache_key_digest != key.digest():
             raise CacheValidationError(
-                f"cache key mismatch at {manifest_path}",
+                f"cache key mismatch at {entry / MANIFEST_FILENAME}",
                 path=entry,
                 reason=(
                     "cache-key-mismatch "
@@ -415,7 +538,7 @@ class DatasetCache:
         records = _decode_records(payload, entry)
         if len(records) != manifest.row_count:
             raise CacheValidationError(
-                f"row count mismatch at {records_path}",
+                f"row count mismatch at {entry / RECORDS_FILENAME}",
                 path=entry,
                 reason=(
                     f"row-count-mismatch expected={manifest.row_count} actual={len(records)}"
@@ -436,28 +559,41 @@ class DatasetCache:
         checksum: str,
     ) -> CacheLoad:
         entry = self.entry_dir(key)
-        entry.mkdir(parents=True, exist_ok=True)
-        tmp_records = entry / f".{RECORDS_FILENAME}.tmp"
-        tmp_manifest = entry / f".{MANIFEST_FILENAME}.tmp"
-        tmp_records.write_bytes(payload)
-        manifest = CacheManifest(
-            cache_key=key.as_dict(),
-            cache_key_digest=key.digest(),
-            source_uri=fetched.source_uri,
-            resolved_revision=fetched.resolved_revision,
-            retrieved_at=utc_timestamp(),
-            checksum_sha256=checksum,
-            row_count=len(fetched.records),
-            upstream_license=normalize_license(fetched.upstream_license),
-            license_scope=LICENSE_SCOPE_DATASET_SOURCE,
-            loader_schema_version=key.schema_version,
-        )
-        tmp_manifest.write_text(
-            json.dumps(manifest.to_dict(), indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
-        )
-        os.replace(tmp_records, entry / RECORDS_FILENAME)
-        os.replace(tmp_manifest, entry / MANIFEST_FILENAME)
+        existing = _lstat_or_none(entry)
+        if existing is not None and (
+            _is_symlink(existing) or not _is_directory(existing)
+        ):
+            self._quarantine(entry, reason="unsafe-symlink")
+        self._ensure_real_directory(entry)
+        dir_fd = _open_dir_nofollow(entry)
+        try:
+            tmp_records = f".{RECORDS_FILENAME}.tmp"
+            tmp_manifest = f".{MANIFEST_FILENAME}.tmp"
+            _write_in_dir(dir_fd, tmp_records, payload, entry)
+            manifest = CacheManifest(
+                cache_key=key.as_dict(),
+                cache_key_digest=key.digest(),
+                source_uri=fetched.source_uri,
+                resolved_revision=fetched.resolved_revision,
+                retrieved_at=utc_timestamp(),
+                checksum_sha256=checksum,
+                row_count=len(fetched.records),
+                upstream_license=normalize_license(fetched.upstream_license),
+                license_scope=LICENSE_SCOPE_DATASET_SOURCE,
+                loader_schema_version=key.schema_version,
+            )
+            _write_in_dir(
+                dir_fd,
+                tmp_manifest,
+                (json.dumps(manifest.to_dict(), indent=2, sort_keys=True) + "\n").encode(
+                    "utf-8"
+                ),
+                entry,
+            )
+            _rename_in_dir(dir_fd, tmp_records, RECORDS_FILENAME)
+            _rename_in_dir(dir_fd, tmp_manifest, MANIFEST_FILENAME)
+        finally:
+            os.close(dir_fd)
         return CacheLoad(
             records=list(fetched.records),
             manifest=manifest,
@@ -466,28 +602,52 @@ class DatasetCache:
         )
 
     def _quarantine(self, entry: Path, *, reason: str) -> Path:
-        stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
         dest_parent = self.root / QUARANTINE_DIRNAME
-        dest_parent.mkdir(parents=True, exist_ok=True)
-        dest = dest_parent / f"{entry.name}-{stamp}"
-        suffix = 1
-        while dest.exists():
-            dest = dest_parent / f"{entry.name}-{stamp}-{suffix}"
-            suffix += 1
-        if entry.exists():
-            shutil.move(str(entry), str(dest))
+        self._ensure_real_directory(dest_parent)
+        dest = self._unused_quarantine_path(dest_parent, entry.name)
+        source = _lstat_or_none(entry)
+        if source is None:
+            dest.mkdir(parents=True, exist_ok=True)
+        elif _is_symlink(source):
+            # Move only the link inode. Never follow it into another tree, and
+            # never write quarantine notes through the link target.
+            dest.mkdir(parents=True, exist_ok=True)
+            _write_text_nofollow(dest / "rejected-symlink", os.readlink(entry) + "\n")
+            entry.unlink()
+        elif _is_directory(source):
+            os.rename(entry, dest)
         else:
-            dest.mkdir(parents=True)
+            dest.mkdir(parents=True, exist_ok=True)
+            os.rename(entry, dest / entry.name)
         note = {
             "reason": reason,
             "original_path": str(entry),
             "quarantined_at": utc_timestamp(),
         }
-        (dest / "quarantine.json").write_text(
+        _write_text_nofollow(
+            dest / "quarantine.json",
             json.dumps(note, indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
         )
         return dest
+
+    def _unused_quarantine_path(self, dest_parent: Path, entry_name: str) -> Path:
+        stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+        dest = dest_parent / f"{entry_name}-{stamp}"
+        suffix = 1
+        while _lstat_or_none(dest) is not None:
+            dest = dest_parent / f"{entry_name}-{stamp}-{suffix}"
+            suffix += 1
+        return dest
+
+    def _ensure_real_directory(self, path: Path) -> None:
+        path.mkdir(parents=True, exist_ok=True)
+        st = path.lstat()
+        if _is_symlink(st) or not _is_directory(st):
+            raise CacheValidationError(
+                f"cache path is not a real directory: {path}",
+                path=path,
+                reason="unsafe-symlink",
+            )
 
     def _miss_message(self, spec: DatasetSpec, key: CacheKey, entry: Path) -> str:
         return (
