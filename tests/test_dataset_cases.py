@@ -15,6 +15,7 @@ from benchmarks.cases import (
     load_family_records,
     load_sample_cases,
     normalize_family_name,
+    parse_case,
     record_to_case,
 )
 from benchmarks.datasets import DatasetRecord, DatasetSpec, JsonlDatasetLoader
@@ -158,3 +159,26 @@ def test_jsonl_loader_ignores_example_id_field() -> None:
 def test_unknown_family_fails_clearly() -> None:
     with pytest.raises(DatasetCaseError, match="unknown dataset family"):
         load_sample_cases("not-a-dataset")
+
+
+def test_max_samples_zero_returns_empty() -> None:
+    assert load_sample_cases("lambada", max_samples=0) == []
+
+
+def test_max_samples_negative_fails() -> None:
+    with pytest.raises(DatasetCaseError, match="non-negative"):
+        load_sample_cases("lambada", max_samples=-1)
+
+
+def test_whitespace_identity_is_rejected() -> None:
+    with pytest.raises(DatasetCaseError, match="example_id"):
+        parse_case(
+            {
+                "example_id": "   ",
+                "dataset": "lambada",
+                "split": "validation",
+                "prompt": "The quick brown fox jumps over the lazy",
+                "task": "cloze",
+                "expected": "dog",
+            }
+        )

@@ -5,13 +5,15 @@ import re
 import unicodedata
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any, Callable, Iterable, Mapping, Never, Sequence
 
-from benchmarks.cases import DatasetCase, DatasetCaseError, TaskKind
+from benchmarks.cases import DatasetCase, DatasetCaseError, TaskKind, parse_case
 
 _WS = re.compile(r"\s+")
-_NUMBER = re.compile(r"-?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?")
-_TRAILING_PUNCT = ".,;:!?\"'`)]}"
+_NUMBER = re.compile(
+    r"-?(?:\d+(?:,\d{3})*(?:\.\d+)?|\.\d+)(?:[eE][+-]?\d+)?"
+)
+_EDGE_PUNCT = ".,;:!?\"'`()[]{}<>«»“”‘’"
 
 
 class ScorerError(DatasetCaseError):
@@ -46,17 +48,15 @@ def normalize_cloze(text: str) -> str:
     """Case-fold, collapse whitespace, and strip edge punctuation."""
     folded = unicodedata.normalize("NFC", text).strip().lower()
     folded = _WS.sub(" ", folded)
-    folded = folded.strip(_TRAILING_PUNCT + " ")
+    folded = folded.strip(_EDGE_PUNCT + " ")
     return _WS.sub(" ", folded).strip()
 
 
-def extract_math_answer(text: str) -> str | None:
+def extract_math_answer(text: str | None) -> str | None:
     """GSM8K-style: prefer the token after the last ``####``, else the last number."""
     if text is None:
         return None
-    candidate = text
-    if "####" in text:
-        candidate = text.rsplit("####", 1)[-1]
+    candidate = text.rsplit("####", 1)[-1] if "####" in text else text
     matches = _NUMBER.findall(candidate)
     if matches:
         return matches[-1]
@@ -82,7 +82,14 @@ def canonicalize_math(token: str | None) -> str | None:
     return rendered
 
 
-def _require_finite(value: float, *, dataset: str, example_id: str, expected: Any, observed: Any) -> float:
+def _require_finite(
+    value: float,
+    *,
+    dataset: str | None,
+    example_id: str | None,
+    expected: Any,
+    observed: Any,
+) -> float:
     if not math.isfinite(value):
         raise ScorerError(
             "non-finite metric value",
@@ -103,6 +110,23 @@ def _require_task(case: DatasetCase, metric: TaskKind) -> None:
             expected=metric.value,
             observed=case.task.value,
         )
+
+
+def _index_from_choice_string(case: DatasetCase, prediction: str) -> int:
+    choices = case.choices or []
+    if prediction in choices:
+        return choices.index(prediction)
+    normalized = normalize_cloze(prediction)
+    for index, choice in enumerate(choices):
+        if normalize_cloze(choice) == normalized:
+            return index
+    raise ScorerError(
+        "classification prediction does not match any choice",
+        dataset=case.dataset,
+        example_id=case.example_id,
+        expected=list(choices),
+        observed=prediction,
+    )
 
 
 def _choice_prediction(case: DatasetCase, prediction: str | int) -> int:
@@ -132,19 +156,7 @@ def _choice_prediction(case: DatasetCase, prediction: str | int) -> int:
                 observed=prediction,
             )
         return prediction
-    if prediction in case.choices:
-        return case.choices.index(prediction)
-    normalized = normalize_cloze(prediction)
-    for index, choice in enumerate(case.choices):
-        if normalize_cloze(choice) == normalized:
-            return index
-    raise ScorerError(
-        "classification prediction does not match any choice",
-        dataset=case.dataset,
-        example_id=case.example_id,
-        expected=list(case.choices),
-        observed=prediction,
-    )
+    return _index_from_choice_string(case, prediction)
 
 
 def score_classification(case: DatasetCase, prediction: str | int) -> ScoreResult:
@@ -152,12 +164,13 @@ def score_classification(case: DatasetCase, prediction: str | int) -> ScoreResul
     observed_index = _choice_prediction(case, prediction)
     expected_index = case.answer_index
     value = 1.0 if observed_index == expected_index else 0.0
+    observed_label = case.choices[observed_index] if case.choices else None
     return ScoreResult(
         dataset=case.dataset,
         example_id=case.example_id,
         metric=TaskKind.CLASSIFICATION.value,
         expected={"index": expected_index, "label": case.target},
-        observed={"index": observed_index, "label": case.choices[observed_index] if case.choices else None},
+        observed={"index": observed_index, "label": observed_label},
         value=value,
         passed=value == 1.0,
         tolerance=0.0,
@@ -239,6 +252,31 @@ def _as_logprobs(logprobs: Sequence[float], *, dataset: str, example_id: str) ->
     return values
 
 
+def _perplexity_from_mean(
+    mean_logprob: float,
+    *,
+    dataset: str,
+    example_id: str,
+) -> float:
+    try:
+        value = math.exp(-mean_logprob)
+    except OverflowError as exc:
+        raise ScorerError(
+            "non-finite metric value",
+            dataset=dataset,
+            example_id=example_id,
+            expected="finite perplexity",
+            observed=mean_logprob,
+        ) from exc
+    return _require_finite(
+        value,
+        dataset=dataset,
+        example_id=example_id,
+        expected="finite perplexity",
+        observed=mean_logprob,
+    )
+
+
 def score_perplexity(
     case: DatasetCase,
     logprobs: Sequence[float],
@@ -249,12 +287,10 @@ def score_perplexity(
     _require_task(case, TaskKind.PERPLEXITY)
     values = _as_logprobs(logprobs, dataset=case.dataset, example_id=case.example_id)
     mean_logprob = sum(values) / len(values)
-    perplexity = _require_finite(
-        math.exp(-mean_logprob),
+    perplexity = _perplexity_from_mean(
+        mean_logprob,
         dataset=case.dataset,
         example_id=case.example_id,
-        expected="finite perplexity",
-        observed=None,
     )
     return ScoreResult(
         dataset=case.dataset,
@@ -292,16 +328,23 @@ def score_perplexity_corpus(
         )
     token_logprobs: list[float] = []
     for case, group in zip(cases, logprobs_by_case, strict=True):
+        _require_task(case, TaskKind.PERPLEXITY)
         token_logprobs.extend(
             _as_logprobs(group, dataset=case.dataset, example_id=case.example_id)
         )
+    if not token_logprobs:
+        raise ScorerError(
+            "missing logprobs",
+            dataset=cases[0].dataset,
+            example_id="corpus",
+            expected="at least one logprob value",
+            observed=0,
+        )
     mean_logprob = sum(token_logprobs) / len(token_logprobs)
-    perplexity = _require_finite(
-        math.exp(-mean_logprob),
+    perplexity = _perplexity_from_mean(
+        mean_logprob,
         dataset=cases[0].dataset,
         example_id="corpus",
-        expected="finite perplexity",
-        observed=None,
     )
     return ScoreResult(
         dataset=cases[0].dataset,
@@ -315,51 +358,66 @@ def score_perplexity_corpus(
     )
 
 
+def _unhandled_task(task: Never) -> Never:
+    raise ScorerError(
+        "task mismatch",
+        dataset=None,
+        example_id=None,
+        expected="known task",
+        observed=task,
+    )
+
+
+def _score_with_prediction(
+    case: DatasetCase,
+    prediction: str | int | None,
+    expected: str,
+    scorer: Callable[[DatasetCase, str | int], ScoreResult],
+) -> ScoreResult:
+    if prediction is None:
+        raise ScorerError(
+            "missing prediction",
+            dataset=case.dataset,
+            example_id=case.example_id,
+            expected=expected,
+            observed=None,
+        )
+    return scorer(case, prediction)
+
+
 def score_case(
     case: DatasetCase,
     *,
     prediction: str | int | None = None,
     logprobs: Sequence[float] | None = None,
 ) -> ScoreResult:
-    if case.task is TaskKind.CLASSIFICATION:
-        if prediction is None:
-            raise ScorerError(
-                "missing prediction",
-                dataset=case.dataset,
-                example_id=case.example_id,
-                expected="choice index or label",
-                observed=None,
-            )
-        return score_classification(case, prediction)
-    if case.task is TaskKind.CLOZE:
-        if prediction is None:
-            raise ScorerError(
-                "missing prediction",
-                dataset=case.dataset,
-                example_id=case.example_id,
-                expected="cloze string",
-                observed=None,
-            )
-        return score_cloze(case, str(prediction))
-    if case.task is TaskKind.EXACT_MATCH_MATH:
-        if prediction is None:
-            raise ScorerError(
-                "missing prediction",
-                dataset=case.dataset,
-                example_id=case.example_id,
-                expected="math answer string",
-                observed=None,
-            )
-        return score_exact_match_math(case, str(prediction))
-    if logprobs is None:
-        raise ScorerError(
-            "missing logprobs",
-            dataset=case.dataset,
-            example_id=case.example_id,
-            expected="finite logprobs",
-            observed=None,
+    task = case.task
+    if task is TaskKind.CLASSIFICATION:
+        return _score_with_prediction(
+            case, prediction, "choice index or label", score_classification
         )
-    return score_perplexity(case, logprobs)
+    if task is TaskKind.CLOZE:
+        return _score_with_prediction(
+            case, prediction, "cloze string", lambda c, p: score_cloze(c, str(p))
+        )
+    if task is TaskKind.EXACT_MATCH_MATH:
+        return _score_with_prediction(
+            case,
+            prediction,
+            "math answer string",
+            lambda c, p: score_exact_match_math(c, str(p)),
+        )
+    if task is TaskKind.PERPLEXITY:
+        if logprobs is None:
+            raise ScorerError(
+                "missing logprobs",
+                dataset=case.dataset,
+                example_id=case.example_id,
+                expected="finite logprobs",
+                observed=None,
+            )
+        return score_perplexity(case, logprobs)
+    return _unhandled_task(task)
 
 
 def mean_score(results: Sequence[ScoreResult]) -> float:
@@ -401,6 +459,21 @@ def assert_score(
         expected=expected_value,
         observed=result.value,
     )
+    _require_finite(
+        float(expected_value),
+        dataset=result.dataset,
+        example_id=result.example_id,
+        expected="finite expected score",
+        observed=expected_value,
+    )
+    if allowed < 0 or not math.isfinite(allowed):
+        raise ScorerError(
+            "invalid tolerance",
+            dataset=result.dataset,
+            example_id=result.example_id,
+            expected="non-negative finite tolerance",
+            observed=allowed,
+        )
     if abs(result.value - expected_value) > allowed:
         raise ScorerError(
             "score mismatch",
@@ -415,7 +488,7 @@ def results_from_fixture(entries: Iterable[Mapping[str, Any]]) -> list[dict[str,
     """Replay a golden fixture of inputs and return scorer outputs."""
     outputs: list[dict[str, Any]] = []
     for entry in entries:
-        case = DatasetCase.model_validate(entry["case"])
+        case = parse_case(entry["case"])
         result = score_case(
             case,
             prediction=entry.get("prediction"),

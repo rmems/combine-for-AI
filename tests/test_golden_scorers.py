@@ -151,13 +151,33 @@ def test_normalize_cloze_edge_cases() -> None:
     assert normalize_cloze("  Dog. ") == "dog"
     assert normalize_cloze("AIR") == "air"
     assert normalize_cloze("the   store") == "the store"
+    assert normalize_cloze("(dog)") == "dog"
 
 
 def test_math_extraction_edge_cases() -> None:
     assert canonicalize_math(extract_math_answer("#### 72")) == "72"
     assert canonicalize_math(extract_math_answer("The total is 1,000.")) == "1000"
     assert canonicalize_math(extract_math_answer("72.0")) == "72"
+    assert canonicalize_math(extract_math_answer(".5")) == "0.5"
+    assert canonicalize_math(extract_math_answer("1e3")) == "1000"
     assert extract_math_answer("no numbers") == "no numbers"
+
+
+def test_corpus_rejects_non_perplexity_cases() -> None:
+    case = DatasetCase.model_validate(
+        _load_golden()["metric_families"]["cloze"]["items"][0]["case"]
+    )
+    with pytest.raises(ScorerError, match="task mismatch"):
+        score_perplexity_corpus([case], [[-0.5]])
+
+
+def test_assert_score_rejects_nan_expected() -> None:
+    case = DatasetCase.model_validate(
+        _load_golden()["metric_families"]["cloze"]["items"][0]["case"]
+    )
+    result = score_case(case, prediction="dog")
+    with pytest.raises(ScorerError, match="non-finite"):
+        assert_score(result, float("nan"))
 
 
 def test_golden_output_artifact_matches_fixture() -> None:
