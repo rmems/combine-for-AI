@@ -42,7 +42,7 @@ def _first_present(mapping: Mapping[str, Any], *keys: str) -> Any:
     return None
 
 
-def _coalesce[T](primary: T | None, fallback: T | None) -> T | None:
+def _coalesce(primary: Any, fallback: Any) -> Any:
     return fallback if primary is None else primary
 
 

@@ -23,10 +23,11 @@ from __future__ import annotations
 import json
 import re
 import shutil
-import subprocess
+import subprocess  # nosec B404
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from enum import Enum
+from pathlib import Path
 from typing import Any
 
 
@@ -80,15 +81,33 @@ def ignore_probe_error(exc: BaseException) -> None:
     _ = (type(exc).__name__, str(exc))
 
 
+_ALLOWED_PROBES = frozenset(
+    {"ioreg", "powermetrics", "rocm-smi", "sysctl", "system_profiler"}
+)
+
+
+def _resolved_probe(name: str) -> str | None:
+    if name not in _ALLOWED_PROBES:
+        return None
+    found = shutil.which(name)
+    if found is None:
+        return None
+    path = Path(found)
+    if not path.is_absolute():
+        return None
+    return str(path)
+
+
 def _run_command(command: list[str], *, timeout: float = 5.0) -> str | None:
     if not command:
         return None
-    resolved = shutil.which(command[0])
+    resolved = _resolved_probe(command[0])
     if resolved is None:
         return None
     argv = [resolved, *command[1:]]
     try:
-        return subprocess.check_output(  # nosec B603
+        # Absolute argv[0], shell=False, allowlisted probe names only.
+        return subprocess.check_output(  # nosec B603  # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit
             argv,
             text=True,
             stderr=subprocess.DEVNULL,

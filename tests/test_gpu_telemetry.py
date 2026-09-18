@@ -535,3 +535,18 @@ def test_run_command_resolves_executable_absolutely(monkeypatch: pytest.MonkeyPa
     assert _run_command(["rocm-smi", "--json"]) == "{}"
     assert recorded == [[str(probe), "--json"]]
     assert _run_command(["missing-tool"]) is None
+
+
+def test_run_command_rejects_relative_or_unknown_probes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from benchmarks.gpu_telemetry_common import _run_command
+
+    monkeypatch.setattr(
+        "benchmarks.gpu_telemetry_common.shutil.which", lambda name: f"./bin/{name}"
+    )
+    assert _run_command(["rocm-smi", "--json"]) is None
+    monkeypatch.setattr(
+        "benchmarks.gpu_telemetry_common.shutil.which", lambda name: "/tmp/curl"
+    )
+    assert _run_command(["curl", "https://example.test"]) is None
