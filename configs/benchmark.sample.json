@@ -15,37 +15,44 @@
   "datasets": [
     {
       "name": "lambada",
-      "source": "jsonl",
+      "source": "lambada",
       "path": "datasets/lambada.sample.jsonl",
-      "split": "validation",
+      "split": "test",
       "max_samples": 2
     },
     {
       "name": "wikitext2",
-      "source": "jsonl",
+      "source": "wikitext2",
       "path": "datasets/wikitext2.sample.jsonl",
       "split": "validation",
       "max_samples": 2
     },
     {
       "name": "hellaswag",
-      "source": "jsonl",
+      "source": "hellaswag",
       "path": "datasets/hellaswag.sample.jsonl",
       "split": "validation",
       "max_samples": 2
     },
     {
       "name": "piqa",
-      "source": "jsonl",
+      "source": "piqa",
       "path": "datasets/piqa.sample.jsonl",
       "split": "validation",
       "max_samples": 2
     },
     {
-      "name": "arc-easy",
-      "source": "jsonl",
+      "name": "arc_easy",
+      "source": "arc_easy",
       "path": "datasets/arc_easy.sample.jsonl",
       "split": "validation",
+      "max_samples": 2
+    },
+    {
+      "name": "gsm8k",
+      "source": "gsm8k",
+      "path": "datasets/gsm8k.sample.jsonl",
+      "split": "test",
       "max_samples": 2
     }
   ]
