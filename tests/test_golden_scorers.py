@@ -163,6 +163,16 @@ def test_math_extraction_edge_cases() -> None:
     assert extract_math_answer("no numbers") == "no numbers"
 
 
+def test_positive_logprobs_are_rejected() -> None:
+    case = DatasetCase.model_validate(
+        _load_golden()["metric_families"]["perplexity"]["items"][0]["case"]
+    )
+    with pytest.raises(ScorerError, match="positive token log-probability") as exc_info:
+        score_case(case, logprobs=[1.0])
+    assert exc_info.value.expected == "non-positive logprobs"
+    assert exc_info.value.observed == 1.0
+
+
 def test_corpus_rejects_non_perplexity_cases() -> None:
     case = DatasetCase.model_validate(
         _load_golden()["metric_families"]["cloze"]["items"][0]["case"]

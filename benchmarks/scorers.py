@@ -248,6 +248,14 @@ def _as_logprobs(logprobs: Sequence[float], *, dataset: str, example_id: str) ->
                 expected="finite logprobs",
                 observed=number,
             )
+        if number > 0:
+            raise ScorerError(
+                "positive token log-probability",
+                dataset=dataset,
+                example_id=example_id,
+                expected="non-positive logprobs",
+                observed=number,
+            )
         values.append(number)
     return values
 
@@ -304,12 +312,10 @@ def score_perplexity(
     )
 
 
-def score_perplexity_corpus(
+def _corpus_token_logprobs(
     cases: Sequence[DatasetCase],
     logprobs_by_case: Sequence[Sequence[float]],
-    *,
-    tolerance: float = 1e-12,
-) -> ScoreResult:
+) -> tuple[str, list[float]]:
     if len(cases) != len(logprobs_by_case):
         raise ScorerError(
             "logprob groups must align with cases",
@@ -340,14 +346,24 @@ def score_perplexity_corpus(
             expected="at least one logprob value",
             observed=0,
         )
+    return cases[0].dataset, token_logprobs
+
+
+def score_perplexity_corpus(
+    cases: Sequence[DatasetCase],
+    logprobs_by_case: Sequence[Sequence[float]],
+    *,
+    tolerance: float = 1e-12,
+) -> ScoreResult:
+    dataset, token_logprobs = _corpus_token_logprobs(cases, logprobs_by_case)
     mean_logprob = sum(token_logprobs) / len(token_logprobs)
     perplexity = _perplexity_from_mean(
         mean_logprob,
-        dataset=cases[0].dataset,
+        dataset=dataset,
         example_id="corpus",
     )
     return ScoreResult(
-        dataset=cases[0].dataset,
+        dataset=dataset,
         example_id="corpus",
         metric=TaskKind.PERPLEXITY.value,
         expected={"token_count": len(token_logprobs)},
