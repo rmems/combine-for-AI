@@ -31,6 +31,13 @@ class DatasetSpec:
 
 @dataclass(frozen=True)
 class DatasetRecord:
+    """Loader output row.
+
+    The canonical scored unit is ``benchmarks.cases.DatasetCase``. Adapt with
+    ``record_to_case`` / ``case_to_record`` / ``cases_from_loaded`` so existing
+    runner and metrics callers keep working unchanged.
+    """
+
     prompt: str
     reference: str | None = None
     choices: list[str] | None = None
