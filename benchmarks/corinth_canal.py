@@ -217,73 +217,81 @@ def classify_json_artifact(raw: dict[str, Any]) -> ArtifactKind:
     return "legacy"
 
 
+@dataclass
+class _LatentCsvColumns:
+    firing_rates: list[float]
+    membrane_dv_dts: list[float]
+    membrane_pressures: list[float]
+    activity_pressures: list[float]
+    routing_entropies: list[float]
+    delta_q: list[float]
+    delta_q_legacy: list[float]
+    delta_q_v15: list[float]
+    timestamps: list[int]
+
+
+def _empty_csv_columns() -> _LatentCsvColumns:
+    return _LatentCsvColumns(
+        firing_rates=[],
+        membrane_dv_dts=[],
+        membrane_pressures=[],
+        activity_pressures=[],
+        routing_entropies=[],
+        delta_q=[],
+        delta_q_legacy=[],
+        delta_q_v15=[],
+        timestamps=[],
+    )
+
+
+def _append_if(values: list[Any], parsed: Any) -> None:
+    if parsed is not None:
+        values.append(parsed)
+
+
+def _ingest_csv_row(columns: _LatentCsvColumns, row: dict[str, str | None]) -> None:
+    _append_if(columns.timestamps, _parse_int(_cell(row, "timestamp_ms")))
+    rate = _parse_float(_cell(row, "avg_pop_firing_rate_hz"))
+    _append_if(columns.firing_rates, rate)
+    if rate is not None:
+        columns.activity_pressures.append(activity_pressure(rate))
+    dv_dt = _parse_float(_cell(row, "membrane_dv_dt"))
+    _append_if(columns.membrane_dv_dts, dv_dt)
+    if dv_dt is not None:
+        columns.membrane_pressures.append(membrane_pressure(dv_dt))
+    _append_if(columns.routing_entropies, _parse_float(_cell(row, "routing_entropy")))
+    _append_if(columns.delta_q, _parse_float(_cell(row, "saaq_delta_q_target")))
+    _append_if(columns.delta_q_legacy, _parse_float(_cell(row, "saaq_delta_q_legacy_target")))
+    _append_if(columns.delta_q_v15, _parse_float(_cell(row, "saaq_delta_q_v15_target")))
+
+
 def parse_latent_telemetry_csv(path: Path) -> LatentTelemetrySeries:
     """Parse dual-SAAQ ``latent_telemetry.csv``. Missing columns are ignored."""
-
-    firing_rates: list[float] = []
-    membrane_dv_dts: list[float] = []
-    membrane_pressures: list[float] = []
-    activity_pressures: list[float] = []
-    routing_entropies: list[float] = []
-    delta_q: list[float] = []
-    delta_q_legacy: list[float] = []
-    delta_q_v15: list[float] = []
-    timestamps: list[int] = []
-
+    columns = _empty_csv_columns()
     with path.open("r", encoding="utf-8-sig", newline="") as handle:
-        reader = csv.DictReader(handle)
-        for row in reader:
-            ts = _parse_int(_cell(row, "timestamp_ms"))
-            if ts is not None:
-                timestamps.append(ts)
-
-            rate = _parse_float(_cell(row, "avg_pop_firing_rate_hz"))
-            if rate is not None:
-                firing_rates.append(rate)
-                activity_pressures.append(activity_pressure(rate))
-
-            dv_dt = _parse_float(_cell(row, "membrane_dv_dt"))
-            if dv_dt is not None:
-                membrane_dv_dts.append(dv_dt)
-                membrane_pressures.append(membrane_pressure(dv_dt))
-
-            entropy = _parse_float(_cell(row, "routing_entropy"))
-            if entropy is not None:
-                routing_entropies.append(entropy)
-
-            primary = _parse_float(_cell(row, "saaq_delta_q_target"))
-            if primary is not None:
-                delta_q.append(primary)
-
-            legacy = _parse_float(_cell(row, "saaq_delta_q_legacy_target"))
-            if legacy is not None:
-                delta_q_legacy.append(legacy)
-
-            v15 = _parse_float(_cell(row, "saaq_delta_q_v15_target"))
-            if v15 is not None:
-                delta_q_v15.append(v15)
-
+        for row in csv.DictReader(handle):
+            _ingest_csv_row(columns, row)
     return LatentTelemetrySeries(
         row_count=max(
-            len(firing_rates),
-            len(delta_q),
-            len(timestamps),
-            len(delta_q_legacy),
-            len(delta_q_v15),
+            len(columns.firing_rates),
+            len(columns.delta_q),
+            len(columns.timestamps),
+            len(columns.delta_q_legacy),
+            len(columns.delta_q_v15),
         ),
-        firing_rate_mean=_mean(firing_rates),
-        membrane_dv_dt_mean=_mean(membrane_dv_dts),
-        membrane_pressure_mean=_mean(membrane_pressures),
-        activity_pressure_mean=_mean(activity_pressures),
-        routing_entropy_mean=_mean(routing_entropies),
-        delta_q_mean=_mean(delta_q),
-        delta_q_last=delta_q[-1] if delta_q else None,
-        delta_q_legacy_mean=_mean(delta_q_legacy),
-        delta_q_v15_mean=_mean(delta_q_v15),
-        delta_q_trajectory=tuple(delta_q),
-        delta_q_legacy_trajectory=tuple(delta_q_legacy),
-        delta_q_v15_trajectory=tuple(delta_q_v15),
-        timestamps_ms=tuple(timestamps),
+        firing_rate_mean=_mean(columns.firing_rates),
+        membrane_dv_dt_mean=_mean(columns.membrane_dv_dts),
+        membrane_pressure_mean=_mean(columns.membrane_pressures),
+        activity_pressure_mean=_mean(columns.activity_pressures),
+        routing_entropy_mean=_mean(columns.routing_entropies),
+        delta_q_mean=_mean(columns.delta_q),
+        delta_q_last=columns.delta_q[-1] if columns.delta_q else None,
+        delta_q_legacy_mean=_mean(columns.delta_q_legacy),
+        delta_q_v15_mean=_mean(columns.delta_q_v15),
+        delta_q_trajectory=tuple(columns.delta_q),
+        delta_q_legacy_trajectory=tuple(columns.delta_q_legacy),
+        delta_q_v15_trajectory=tuple(columns.delta_q_v15),
+        timestamps_ms=tuple(columns.timestamps),
     )
 
 
@@ -406,6 +414,54 @@ def _run_from_legacy(raw: dict[str, Any], *, raw_path: str) -> CorinthCanalRun:
     )
 
 
+def _first_str(*values: Any) -> str | None:
+    for value in values:
+        parsed = _as_str(value)
+        if parsed is not None:
+            return parsed
+    return None
+
+
+def _overlay_from_series(series: LatentTelemetrySeries | None) -> LatentTelemetrySeries:
+    if series is not None:
+        return series
+    return LatentTelemetrySeries(row_count=0)
+
+
+def _run_identity(
+    summary: dict[str, Any] | None,
+    manifest: dict[str, Any] | None,
+    fallback: str,
+) -> tuple[str, str | None, str | None, str | None, str | None, bool | None]:
+    summary = summary or {}
+    manifest = manifest or {}
+    experiment_id = _first_str(summary.get("run_id"), manifest.get("run_id")) or fallback
+    saaq_rule = _first_str(summary.get("saaq_rule"), manifest.get("saaq_rule"))
+    return (
+        experiment_id,
+        saaq_rule,
+        _first_str(summary.get("model_family"), manifest.get("model_family")),
+        _first_str(summary.get("model_slug"), manifest.get("model_slug")),
+        _first_str(summary.get("projection_mode"), manifest.get("projection_mode")),
+        _as_bool(manifest.get("saaq_dual_emit")),
+    )
+
+
+def _run_counts(
+    summary: dict[str, Any] | None,
+    series: LatentTelemetrySeries,
+    ticks: TickTelemetrySeries | None,
+) -> tuple[int | None, int | None]:
+    metrics = _summary_metrics(summary)
+    ticks_completed = _as_int(metrics.get("ticks_completed"))
+    if ticks_completed is None and ticks is not None:
+        ticks_completed = ticks.tick_count
+    latent_rows = _as_int(metrics.get("latent_rows"))
+    if latent_rows is None and series.row_count:
+        latent_rows = series.row_count
+    return ticks_completed, latent_rows
+
+
 def _merge_run(
     *,
     series: LatentTelemetrySeries | None,
@@ -416,53 +472,34 @@ def _merge_run(
     raw_path: str,
     skipped: tuple[str, ...],
 ) -> CorinthCanalRun:
-    summary_metrics = _summary_metrics(summary)
-    experiment_id = (
-        _as_str((summary or {}).get("run_id"))
-        or _as_str((manifest or {}).get("run_id"))
-        or experiment_id_fallback
+    overlay = _overlay_from_series(series)
+    experiment_id, saaq_rule, family, slug, projection, dual_emit = _run_identity(
+        summary, manifest, experiment_id_fallback
     )
-    saaq_rule = _as_str((summary or {}).get("saaq_rule")) or _as_str(
-        (manifest or {}).get("saaq_rule")
-    )
-    firing_rate = series.firing_rate_mean if series is not None else None
-    routing_entropy = series.routing_entropy_mean if series is not None else None
-    spike_density = series.activity_pressure_mean if series is not None else None
-    event_rate = firing_rate
-    ticks_completed = _as_int(summary_metrics.get("ticks_completed"))
-    if ticks_completed is None and ticks is not None:
-        ticks_completed = ticks.tick_count
-    latent_rows = _as_int(summary_metrics.get("latent_rows"))
-    if latent_rows is None and series is not None:
-        latent_rows = series.row_count
-
+    ticks_completed, latent_rows = _run_counts(summary, overlay, ticks)
+    primary_rule = _as_str((manifest or {}).get("saaq_primary_rule")) or saaq_rule
     return CorinthCanalRun(
         experiment_id=experiment_id,
         artifact_version=SAAQ_ARTIFACT_VERSION,
-        routing_entropy=routing_entropy,
-        spike_density=spike_density,
-        event_rate=event_rate,
-        firing_rate=firing_rate,
-        membrane_pressure=series.membrane_pressure_mean if series is not None else None,
-        membrane_dv_dt=series.membrane_dv_dt_mean if series is not None else None,
-        saaq_delta_q=series.delta_q_mean if series is not None else None,
-        saaq_delta_q_last=series.delta_q_last if series is not None else None,
-        saaq_delta_q_legacy=series.delta_q_legacy_mean if series is not None else None,
-        saaq_delta_q_v15=series.delta_q_v15_mean if series is not None else None,
-        saaq_delta_q_trajectory=series.delta_q_trajectory if series is not None else (),
-        saaq_delta_q_legacy_trajectory=(
-            series.delta_q_legacy_trajectory if series is not None else ()
-        ),
-        saaq_delta_q_v15_trajectory=series.delta_q_v15_trajectory if series is not None else (),
+        routing_entropy=overlay.routing_entropy_mean,
+        spike_density=overlay.activity_pressure_mean,
+        event_rate=overlay.firing_rate_mean,
+        firing_rate=overlay.firing_rate_mean,
+        membrane_pressure=overlay.membrane_pressure_mean,
+        membrane_dv_dt=overlay.membrane_dv_dt_mean,
+        saaq_delta_q=overlay.delta_q_mean,
+        saaq_delta_q_last=overlay.delta_q_last,
+        saaq_delta_q_legacy=overlay.delta_q_legacy_mean,
+        saaq_delta_q_v15=overlay.delta_q_v15_mean,
+        saaq_delta_q_trajectory=overlay.delta_q_trajectory,
+        saaq_delta_q_legacy_trajectory=overlay.delta_q_legacy_trajectory,
+        saaq_delta_q_v15_trajectory=overlay.delta_q_v15_trajectory,
         saaq_rule=saaq_rule,
-        saaq_primary_rule=_as_str((manifest or {}).get("saaq_primary_rule")) or saaq_rule,
-        saaq_dual_emit=_as_bool((manifest or {}).get("saaq_dual_emit")),
-        model_family=_as_str((summary or {}).get("model_family"))
-        or _as_str((manifest or {}).get("model_family")),
-        model_slug=_as_str((summary or {}).get("model_slug"))
-        or _as_str((manifest or {}).get("model_slug")),
-        projection_mode=_as_str((summary or {}).get("projection_mode"))
-        or _as_str((manifest or {}).get("projection_mode")),
+        saaq_primary_rule=primary_rule,
+        saaq_dual_emit=dual_emit,
+        model_family=family,
+        model_slug=slug,
+        projection_mode=projection,
         ticks_completed=ticks_completed,
         latent_rows=latent_rows,
         raw_path=raw_path,
