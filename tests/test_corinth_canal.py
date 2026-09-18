@@ -327,3 +327,60 @@ def test_missing_corinth_dir_does_not_break_benchmark(tmp_path: Path) -> None:
     assert report["run"]["telemetry"]["firing_rate"] is None
     assert report["results"][0]["firing_rate"] is None
     assert report["results"][0]["accuracy"] is not None
+
+
+def test_header_only_csv_has_zero_rows(tmp_path: Path) -> None:
+    path = tmp_path / "empty.csv"
+    path.write_text(LATENT_CSV_HEADER + "\n", encoding="utf-8")
+    series = parse_latent_telemetry_csv(path)
+    assert series.row_count == 0
+    assert series.delta_q_mean is None
+
+
+def test_non_finite_csv_cells_are_skipped(tmp_path: Path) -> None:
+    path = tmp_path / "nan.csv"
+    path.write_text(
+        "timestamp_ms,avg_pop_firing_rate_hz,membrane_dv_dt,routing_entropy,"
+        "saaq_delta_q_target,saaq_delta_q_legacy_target,saaq_delta_q_v15_target\n"
+        "1,nan,0.1,0.2,inf,0.3,-inf\n",
+        encoding="utf-8",
+    )
+    series = parse_latent_telemetry_csv(path)
+    assert series.row_count == 1
+    assert series.firing_rate_mean is None
+    assert series.delta_q_mean is None
+    assert series.membrane_dv_dt_mean == pytest.approx(0.1)
+    assert series.delta_q_legacy_mean == pytest.approx(0.3)
+
+
+def test_invalid_tick_value_is_skipped(tmp_path: Path) -> None:
+    path = tmp_path / "ticks.txt"
+    path.write_text(
+        "tick= best_walker=1 elapsed_us=2\n"
+        "tick=3 best_walker=1 elapsed_us=4\n",
+        encoding="utf-8",
+    )
+    ticks = parse_tick_telemetry(path)
+    assert ticks.tick_count == 1
+    assert ticks.mean_elapsed_us == pytest.approx(4.0)
+
+
+def test_legacy_json_accepts_serialized_aliases(tmp_path: Path) -> None:
+    path = tmp_path / "legacy.json"
+    path.write_text(
+        json.dumps(
+            {
+                "experiment_id": "x",
+                "saaq_delta_q_legacy_trajectory": [0.1, 0.2],
+                "saaq_delta_q_v15_trajectory": [0.3],
+                "saaq_model_family": "Olmoe",
+                "saaq_primary_rule": "SaaqV1_5SqrtRate",
+            }
+        ),
+        encoding="utf-8",
+    )
+    run = load_corinth_canal(path)
+    assert run.saaq_delta_q_legacy_trajectory == (0.1, 0.2)
+    assert run.saaq_delta_q_v15_trajectory == (0.3,)
+    assert run.model_family == "Olmoe"
+    assert run.saaq_primary_rule == "SaaqV1_5SqrtRate"

@@ -19,6 +19,20 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, Never
 
+from benchmarks.corinth_canal_values import (
+    _as_bool,
+    _as_float,
+    _as_int,
+    _as_str,
+    _cell,
+    _first_float,
+    _first_str,
+    _float_tuple,
+    _mean,
+    _parse_float,
+    _parse_int,
+)
+
 # Matches ``src/latent.rs`` in rmems/corinth-canal.
 LATENT_CSV_HEADER = (
     "timestamp_ms,avg_pop_firing_rate_hz,membrane_dv_dt,routing_entropy,"
@@ -128,11 +142,7 @@ def try_load_corinth_canal(path: Path) -> CorinthCanalRun | None:
 def load_corinth_canal(path: Path) -> CorinthCanalRun:
     """Load a corinth-canal artifact path (run directory, CSV, or JSON)."""
 
-    resolved = path.expanduser()
-    if not resolved.is_absolute():
-        resolved = resolved.resolve()
-    else:
-        resolved = resolved.resolve()
+    resolved = path.expanduser().resolve()
 
     if resolved.is_dir():
         return load_run_directory(resolved)
@@ -268,17 +278,13 @@ def _ingest_csv_row(columns: _LatentCsvColumns, row: dict[str, str | None]) -> N
 def parse_latent_telemetry_csv(path: Path) -> LatentTelemetrySeries:
     """Parse dual-SAAQ ``latent_telemetry.csv``. Missing columns are ignored."""
     columns = _empty_csv_columns()
+    row_count = 0
     with path.open("r", encoding="utf-8-sig", newline="") as handle:
         for row in csv.DictReader(handle):
             _ingest_csv_row(columns, row)
+            row_count += 1
     return LatentTelemetrySeries(
-        row_count=max(
-            len(columns.firing_rates),
-            len(columns.delta_q),
-            len(columns.timestamps),
-            len(columns.delta_q_legacy),
-            len(columns.delta_q_v15),
-        ),
+        row_count=row_count,
         firing_rate_mean=_mean(columns.firing_rates),
         membrane_dv_dt_mean=_mean(columns.membrane_dv_dts),
         membrane_pressure_mean=_mean(columns.membrane_pressures),
@@ -381,8 +387,12 @@ def _run_from_manifest(raw: dict[str, Any], *, raw_path: str) -> CorinthCanalRun
 
 def _run_from_legacy(raw: dict[str, Any], *, raw_path: str) -> CorinthCanalRun:
     trajectory = _float_tuple(raw.get("delta_q_trajectory") or raw.get("saaq_delta_q_trajectory"))
-    legacy_traj = _float_tuple(raw.get("delta_q_legacy_trajectory"))
-    v15_traj = _float_tuple(raw.get("delta_q_v15_trajectory"))
+    legacy_traj = _float_tuple(
+        raw.get("delta_q_legacy_trajectory") or raw.get("saaq_delta_q_legacy_trajectory")
+    )
+    v15_traj = _float_tuple(
+        raw.get("delta_q_v15_trajectory") or raw.get("saaq_delta_q_v15_trajectory")
+    )
     firing_rate = _as_float(raw.get("firing_rate"))
     membrane = _as_float(raw.get("membrane_pressure"))
     return CorinthCanalRun(
@@ -405,21 +415,13 @@ def _run_from_legacy(raw: dict[str, Any], *, raw_path: str) -> CorinthCanalRun:
         saaq_delta_q_v15_trajectory=v15_traj,
         saaq_rule=_as_str(raw.get("saaq_rule")),
         saaq_primary_rule=_as_str(raw.get("saaq_primary_rule")),
-        model_family=_as_str(raw.get("model_family")),
+        model_family=_first_str(raw.get("model_family"), raw.get("saaq_model_family")),
         model_slug=_as_str(raw.get("model_slug")),
         ticks_completed=_as_int(raw.get("ticks_completed")),
         latent_rows=_as_int(raw.get("latent_rows")),
         raw_path=str(raw.get("raw_path") or raw_path),
         skipped=(),
     )
-
-
-def _first_str(*values: Any) -> str | None:
-    for value in values:
-        parsed = _as_str(value)
-        if parsed is not None:
-            return parsed
-    return None
 
 
 def _overlay_from_series(series: LatentTelemetrySeries | None) -> LatentTelemetrySeries:
@@ -436,7 +438,12 @@ def _run_identity(
     summary = summary or {}
     manifest = manifest or {}
     experiment_id = _first_str(summary.get("run_id"), manifest.get("run_id")) or fallback
-    saaq_rule = _first_str(summary.get("saaq_rule"), manifest.get("saaq_rule"))
+    saaq_rule = _first_str(
+        summary.get("saaq_rule"),
+        manifest.get("saaq_rule"),
+        manifest.get("saaq_primary_rule"),
+        summary.get("saaq_primary_rule"),
+    )
     return (
         experiment_id,
         saaq_rule,
@@ -524,14 +531,6 @@ def _read_json_object(path: Path) -> dict[str, Any]:
     return raw
 
 
-def _cell(row: dict[str, str | None], key: str) -> str | None:
-    value = row.get(key)
-    if value is None:
-        return None
-    stripped = value.strip()
-    return stripped or None
-
-
 def _parse_tick_line(line: str) -> tuple[int | None, float | None] | None:
     stripped = line.strip()
     if not stripped or stripped.startswith("#"):
@@ -542,80 +541,6 @@ def _parse_tick_line(line: str) -> tuple[int | None, float | None] | None:
             continue
         key, _, value = token.partition("=")
         fields[key] = value
-    if "tick" not in fields:
+    if _parse_int(fields.get("tick")) is None:
         return None
     return _parse_int(fields.get("best_walker")), _parse_float(fields.get("elapsed_us"))
-
-
-def _mean(values: list[float]) -> float | None:
-    if not values:
-        return None
-    return sum(values) / len(values)
-
-
-def _parse_float(raw: str | None) -> float | None:
-    if raw is None:
-        return None
-    try:
-        return float(raw)
-    except ValueError:
-        return None
-
-
-def _parse_int(raw: str | None) -> int | None:
-    if raw is None:
-        return None
-    try:
-        return int(raw)
-    except ValueError:
-        return None
-
-
-def _as_float(value: Any) -> float | None:
-    if value is None:
-        return None
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return None
-
-
-def _as_int(value: Any) -> int | None:
-    if value is None:
-        return None
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return None
-
-
-def _as_str(value: Any) -> str | None:
-    if value is None:
-        return None
-    text = str(value).strip()
-    return text or None
-
-
-def _as_bool(value: Any) -> bool | None:
-    if isinstance(value, bool):
-        return value
-    return None
-
-
-def _first_float(*values: Any) -> float | None:
-    for value in values:
-        parsed = _as_float(value)
-        if parsed is not None:
-            return parsed
-    return None
-
-
-def _float_tuple(value: Any) -> tuple[float, ...]:
-    if not isinstance(value, (list, tuple)):
-        return ()
-    out: list[float] = []
-    for item in value:
-        parsed = _as_float(item)
-        if parsed is not None:
-            out.append(parsed)
-    return tuple(out)

@@ -145,7 +145,7 @@ def _resolve_corinth_source(
     raw = telemetry_cfg.get("corinth_canal_dir") or telemetry_cfg.get("corinth_canal_path")
     if not raw:
         return None
-    path = Path(raw)
+    path = Path(raw).expanduser()
     if not path.is_absolute():
         path = base_path / path
     return path
