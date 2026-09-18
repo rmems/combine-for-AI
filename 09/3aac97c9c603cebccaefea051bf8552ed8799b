@@ -1,0 +1,21 @@
+benchmarks/corinth_canal.py
+  s_e6754969e02c90::t_eea75ed8a7874b 417-464,475-477,479-480,484-496,498-502
+  s_e6754969e02c90::t_3821e12e9471d1 220-244,247-250,252-273,276-280,282-287
+  s_e6754969e02c90::t_17964017b74ed6 288-294
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "093aac97c9c603cebccaefea051bf8552ed8799b",
+  "prompts": {},
+  "sessions": {
+    "s_e6754969e02c90": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "ad319b83-a19e-4f68-a954-6e31c5e402a2",
+        "model": "grok-4.6"
+      },
+      "human_author": "Raul Cardenas Montoya <montoyaraul34@gmail.com>"
+    }
+  }
+}
