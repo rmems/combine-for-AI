@@ -1,0 +1,32 @@
+benchmarks/gpu_telemetry_common.py
+  s_661d72e35f1323::t_69b2fc053cc6d3 26,30
+  s_661d72e35f1323::t_57f6a3589cfe02 84-100,104,109-110
+tests/test_gpu_telemetry.py
+  s_661d72e35f1323::t_86715ce579b683 538-552
+benchmarks/gpu_telemetry_apple.py
+  s_e6754969e02c90::t_c794359e804464 45
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "ecbfb0a2b0ed1443430dbdf299d3618b814446ef",
+  "prompts": {},
+  "sessions": {
+    "s_661d72e35f1323": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "e86c51e3-ae6b-4f5a-b539-64376b1e0300",
+        "model": "grok-4.6"
+      },
+      "human_author": "Raul Cardenas Montoya <montoyaraul34@gmail.com>"
+    },
+    "s_e6754969e02c90": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "ad319b83-a19e-4f68-a954-6e31c5e402a2",
+        "model": "grok-4.6"
+      },
+      "human_author": "Raul Cardenas Montoya <montoyaraul34@gmail.com>"
+    }
+  }
+}
