@@ -54,6 +54,18 @@ Manifest-driven artifact smoke (GGUF / HF / AWQ / GPTQ / **GOZ1**):
 
 Reports land under `reports/json` and `reports/csv` by default.
 
+## GPU telemetry
+
+The harness snapshots GPU metrics at run start (`benchmarks/gpu_telemetry.py`). Platform detection is automatic:
+
+| Backend | Devices | Required package / tool |
+|---------|---------|-------------------------|
+| NVIDIA | NVML GPUs (RTX, Hopper, Blackwell, …) | `nvidia-ml-py` |
+| AMD ROCm | MI300X, MI250X, RX 7900 XTX | `amdsmi` or `rocm-smi` |
+| Apple Metal | M3 Max, M4 Ultra (unified memory) | macOS `ioreg`; optional `powermetrics` |
+
+If none of those backends are present, GPU fields are omitted and a warning is emitted. All three collectors write the same `GPUMetrics` schema; Apple adds `memory_bandwidth_gbps` and documents unified-memory field meanings in `telemetry_notes`.
+
 ## GOZ1 / MoE-SNN metrics
 
 Beyond accuracy/perplexity, the report schema supports (nullable) fields used by grok-ozempic science:

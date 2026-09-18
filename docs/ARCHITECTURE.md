@@ -117,7 +117,21 @@ Payload includes `benchmark_linkage.grok_ozempic_report_path` and optional decis
 
 ## Telemetry
 
-See `benchmarks/telemetry.py`: `SystemSnapshot`, `GPUMetrics` (optional `pynvml`), `RoutingMetrics`, upstream merge for corinth-canal / myelin-accelerator.
+See `benchmarks/telemetry.py` and `benchmarks/gpu_telemetry.py`.
+
+`collect_gpu_metrics()` auto-detects a backend in order: **Apple Silicon → NVIDIA → AMD → none**. Missing libraries or CLIs emit `GPUTelemetryUnavailableWarning` and omit GPU fields; they do not fail the run.
+
+| Platform | Collector | Shared `GPUMetrics` fields | Packages / tools |
+|----------|-----------|----------------------------|------------------|
+| NVIDIA | `NVIDIAGPUTelemetryCollector` | util, VRAM, temp, power, SM/mem clocks | `nvidia-ml-py` (`pynvml`) |
+| AMD ROCm | `AMDGPUTelemetryCollector` | util, VRAM, temp, power, GFX/sclk + mem clocks | `amdsmi` (preferred) or `rocm-smi` CLI |
+| Apple Metal | `AppleMetalTelemetryCollector` | GPU util, unified memory, power, GPU core clock; `memory_bandwidth_gbps` is Apple-specific | `ioreg`; optional `powermetrics` |
+
+Supported targets: NVIDIA NVML devices; AMD Instinct **MI300X** / **MI250X** and Radeon **RX 7900 XTX**; Apple **M3 Max** / **M4 Ultra** (unified memory). Other devices that speak the same tools are accepted.
+
+On Apple Silicon, `memory_used_mb` / `memory_total_mb` are unified memory, `clock_sm_mhz` is the GPU core clock, and `temperature_c` is typically unset. Snapshot `notes` records those mappings.
+
+Upstream merge for corinth-canal / myelin-accelerator is unchanged (`RoutingMetrics`, kernel occupancy, VRAM bandwidth overlay).
 
 ## Quantization registry
 
