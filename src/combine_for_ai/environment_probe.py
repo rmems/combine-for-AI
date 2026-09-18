@@ -41,12 +41,14 @@ def discover_repo_root() -> Path:
     return Path(output)
 
 
-def probe_git(repo_root: Path | None) -> tuple[str | None, bool | None, str | None]:
+def probe_git(
+    repo_root: Path | None,
+) -> tuple[str | None, bool | None, str | None, str | None]:
     commit = git_rev_parse_head(repo_root)
     porcelain = git_status_porcelain(repo_root)
     if porcelain is None:
-        return commit, None, None
-    return commit, bool(porcelain), porcelain or None
+        return commit, None, None, None
+    return commit, bool(porcelain), porcelain or None, git_diff_head(repo_root)
 
 
 def probe_accelerator() -> tuple[str, tuple[str, ...], str | None, str | None]:
@@ -73,6 +75,10 @@ def git_show_toplevel() -> str | None:
 
 def git_status_porcelain(cwd: Path | None) -> str | None:
     return _run_probe("git", "status", "--porcelain", cwd=cwd, timeout=_GIT_TIMEOUT_S)
+
+
+def git_diff_head(cwd: Path | None) -> str | None:
+    return _run_probe("git", "diff", "HEAD", cwd=cwd, timeout=_GIT_TIMEOUT_S)
 
 
 def cuda_runtime_version() -> str | None:
@@ -196,23 +202,34 @@ def _decode_nvml(value: Any) -> str:
     return str(value)
 
 
+def _visible_cuda_device(devices: tuple[str, ...], token: str) -> str | None:
+    if not token:
+        return None
+    if token.isdigit():
+        index = int(token)
+        if 0 <= index < len(devices):
+            return devices[index]
+        return None
+    lowered = token.lower()
+    for device in devices:
+        name = device.lower()
+        if name == lowered or lowered in name:
+            return device
+    return None
+
+
 def _apply_cuda_visibility(devices: tuple[str, ...]) -> tuple[str, ...]:
     raw = os.environ.get("CUDA_VISIBLE_DEVICES")
     if raw is None:
         return devices
     stripped = raw.strip()
-    if stripped == "":
-        return devices
-    if stripped == "-1":
+    if stripped in {"", "-1"}:
         return ()
-    selected: list[str] = []
-    for part in stripped.split(","):
-        token = part.strip()
-        if not token.isdigit():
-            continue
-        index = int(token)
-        if 0 <= index < len(devices):
-            selected.append(devices[index])
+    selected = [
+        name
+        for token in stripped.split(",")
+        if (name := _visible_cuda_device(devices, token.strip()))
+    ]
     return tuple(selected)
 
 

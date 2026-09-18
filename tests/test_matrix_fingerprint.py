@@ -26,6 +26,7 @@ def _snapshot(**overrides: object) -> EnvironmentSnapshot:
         "git_commit": "c" * 40,
         "git_dirty": False,
         "git_porcelain": None,
+        "git_diff": None,
         "python_version": "3.14.0",
         "python_implementation": "CPython",
         "lock_kind": "uv.lock",

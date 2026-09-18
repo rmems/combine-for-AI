@@ -110,6 +110,7 @@ class EnvironmentSnapshot:
     git_commit: str | None
     git_dirty: bool | None
     git_porcelain: str | None
+    git_diff: str | None
     python_version: str
     python_implementation: str
     lock_kind: str | None
@@ -261,7 +262,7 @@ def probe_environment(
     repo_root: Path | None = None,
 ) -> EnvironmentSnapshot:
     root = repo_root if repo_root is not None else discover_repo_root()
-    commit, dirty, porcelain = probe_git(root)
+    commit, dirty, porcelain, diff = probe_git(root)
     lock_kind, lock_bytes = _probe_lock(root)
     backend_name, devices, driver, runtime = probe_accelerator()
     match backend_name:
@@ -279,6 +280,7 @@ def probe_environment(
         git_commit=commit,
         git_dirty=dirty,
         git_porcelain=porcelain,
+        git_diff=diff,
         python_version=platform.python_version(),
         python_implementation=platform.python_implementation(),
         lock_kind=lock_kind,
@@ -414,11 +416,14 @@ def _sanitize_commit(commit: str | None) -> str | None:
 
 
 def _worktree_digest(snapshot: EnvironmentSnapshot) -> str | None:
-    if not snapshot.git_dirty or not snapshot.git_porcelain:
+    if not snapshot.git_dirty:
         return None
-    redacted = redact_text(
-        snapshot.git_porcelain, home=snapshot.home, username=snapshot.username
+    material = "\n".join(
+        part for part in (snapshot.git_porcelain, snapshot.git_diff) if part
     )
+    if not material:
+        return None
+    redacted = redact_text(material, home=snapshot.home, username=snapshot.username)
     return sha256_hex(redacted.encode("utf-8"))
 
 

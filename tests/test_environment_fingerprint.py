@@ -29,6 +29,7 @@ def _cpu_snapshot(**overrides: object) -> EnvironmentSnapshot:
         "git_commit": "c" * 40,
         "git_dirty": False,
         "git_porcelain": None,
+        "git_diff": None,
         "python_version": "3.14.0",
         "python_implementation": "CPython",
         "lock_kind": "uv.lock",
@@ -267,10 +268,18 @@ def test_nested_semantic_host_is_kept_in_config_digest() -> None:
 def test_dirty_worktrees_with_different_porcelain_differ() -> None:
     clean = fingerprint_from_snapshot(_cpu_snapshot())
     first = fingerprint_from_snapshot(
-        _cpu_snapshot(git_dirty=True, git_porcelain=" M src/combine_for_ai/environment.py")
+        _cpu_snapshot(
+            git_dirty=True,
+            git_porcelain=" M src/combine_for_ai/environment.py",
+            git_diff="diff --git a/src/combine_for_ai/environment.py b/src/combine_for_ai/environment.py\n+one",
+        )
     )
     second = fingerprint_from_snapshot(
-        _cpu_snapshot(git_dirty=True, git_porcelain=" M tests/test_environment_fingerprint.py")
+        _cpu_snapshot(
+            git_dirty=True,
+            git_porcelain=" M src/combine_for_ai/environment.py",
+            git_diff="diff --git a/src/combine_for_ai/environment.py b/src/combine_for_ai/environment.py\n+two",
+        )
     )
     assert first.digest() != clean.digest()
     assert first.digest() != second.digest()
@@ -298,6 +307,10 @@ def test_cuda_visibility_filters_enumerated_devices(
     assert _apply_cuda_visibility(devices) == ("GPU-2", "GPU-0")
     monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "-1")
     assert _apply_cuda_visibility(devices) == ()
+    monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "")
+    assert _apply_cuda_visibility(devices) == ()
+    monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "GPU-1")
+    assert _apply_cuda_visibility(devices) == ("GPU-1",)
 
 
 def test_run_probe_rejects_relative_or_unknown_executables(
