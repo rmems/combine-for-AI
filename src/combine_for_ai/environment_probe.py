@@ -216,7 +216,12 @@ def _apply_cuda_visibility(devices: tuple[str, ...]) -> tuple[str, ...]:
     return tuple(selected)
 
 
+_ALLOWED_PROBES = frozenset({"git", "nvcc", "nvidia-smi", "rocminfo"})
+
+
 def _resolved_executable(name: str) -> str | None:
+    if name not in _ALLOWED_PROBES:
+        return None
     found = shutil.which(name)
     if not found:
         return None
@@ -236,7 +241,8 @@ def _run_probe(
     if executable is None:
         return None
     try:
-        completed = subprocess.run(  # nosec B603
+        # Absolute argv[0], shell=False, allowlisted probe names only.
+        completed = subprocess.run(  # nosec B603  # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit
             [executable, *args],
             cwd=cwd,
             check=False,

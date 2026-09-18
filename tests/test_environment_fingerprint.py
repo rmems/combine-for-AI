@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from combine_for_ai.environment_probe import _apply_cuda_visibility
+from combine_for_ai.environment_probe import _apply_cuda_visibility, _run_probe
 from combine_for_ai.environment import (
     REDACTED,
     REDACTED_USER,
@@ -298,6 +298,19 @@ def test_cuda_visibility_filters_enumerated_devices(
     assert _apply_cuda_visibility(devices) == ("GPU-2", "GPU-0")
     monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "-1")
     assert _apply_cuda_visibility(devices) == ()
+
+
+def test_run_probe_rejects_relative_or_unknown_executables(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "combine_for_ai.environment_probe.shutil.which", lambda name: f"./bin/{name}"
+    )
+    assert _run_probe("git", "rev-parse", "HEAD", timeout=1.0) is None
+    monkeypatch.setattr(
+        "combine_for_ai.environment_probe.shutil.which", lambda name: "/tmp/curl"
+    )
+    assert _run_probe("curl", "https://example.test", timeout=1.0) is None
 
 
 def test_digest_resolved_config_ignores_volatile_process_fields() -> None:
