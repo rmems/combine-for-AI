@@ -3,6 +3,9 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 
+import pytest
+
+from combine_for_ai.environment_probe import _apply_cuda_visibility
 from combine_for_ai.environment import (
     REDACTED,
     REDACTED_USER,
@@ -25,6 +28,7 @@ def _cpu_snapshot(**overrides: object) -> EnvironmentSnapshot:
     values: dict[str, object] = {
         "git_commit": "c" * 40,
         "git_dirty": False,
+        "git_porcelain": None,
         "python_version": "3.14.0",
         "python_implementation": "CPython",
         "lock_kind": "uv.lock",
@@ -32,6 +36,7 @@ def _cpu_snapshot(**overrides: object) -> EnvironmentSnapshot:
         "os_system": "Linux",
         "os_release": "6.12.0-generic",
         "os_machine": "x86_64",
+        "os_processor": None,
         "accelerator_backend": AcceleratorBackend.CPU,
         "accelerator_devices": (),
         "driver_version": "545.23.08",
@@ -234,6 +239,65 @@ def test_sample_fixtures_match_frozen_snapshots() -> None:
     assert cpu_fixture.read_bytes().rstrip(b"\r\n") == cpu.canonical_json()
     assert cuda_fixture.read_bytes().rstrip(b"\r\n") == cuda.canonical_json()
     assert cpu.digest() != cuda.digest()
+
+
+def test_nested_semantic_host_is_kept_in_config_digest() -> None:
+    home = "/home/alice"
+    username = "alice"
+    one = digest_resolved_config(
+        {"service": {"host": "one", "port": 9}},
+        home=home,
+        username=username,
+    )
+    two = digest_resolved_config(
+        {"service": {"host": "two", "port": 9}},
+        home=home,
+        username=username,
+    )
+    assert one != two
+    sanitized = sanitize_mapping(
+        {"service": {"host": "one", "user": "svc"}},
+        home=home,
+        username=username,
+    )
+    assert sanitized["service"]["host"] == "one"
+    assert sanitized["service"]["user"] == "svc"
+
+
+def test_dirty_worktrees_with_different_porcelain_differ() -> None:
+    clean = fingerprint_from_snapshot(_cpu_snapshot())
+    first = fingerprint_from_snapshot(
+        _cpu_snapshot(git_dirty=True, git_porcelain=" M src/combine_for_ai/environment.py")
+    )
+    second = fingerprint_from_snapshot(
+        _cpu_snapshot(git_dirty=True, git_porcelain=" M tests/test_environment_fingerprint.py")
+    )
+    assert first.digest() != clean.digest()
+    assert first.digest() != second.digest()
+    assert first.to_canonical_dict()["repository"]["worktree_digest"]
+    assert first.to_canonical_dict()["repository"]["worktree_digest"] != (
+        second.to_canonical_dict()["repository"]["worktree_digest"]
+    )
+    assert "repository.worktree_digest" in differing_material_fields(first, second)
+
+
+def test_cpu_processor_is_material() -> None:
+    intel = fingerprint_from_snapshot(_cpu_snapshot(os_processor="Intel Xeon"))
+    amd = fingerprint_from_snapshot(_cpu_snapshot(os_processor="AMD EPYC"))
+    assert intel.digest() != amd.digest()
+    assert "os.processor" in differing_material_fields(intel, amd)
+
+
+def test_cuda_visibility_filters_enumerated_devices(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    devices = ("GPU-0", "GPU-1", "GPU-2")
+    monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
+    assert _apply_cuda_visibility(devices) == devices
+    monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "2,0")
+    assert _apply_cuda_visibility(devices) == ("GPU-2", "GPU-0")
+    monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "-1")
+    assert _apply_cuda_visibility(devices) == ()
 
 
 def test_digest_resolved_config_ignores_volatile_process_fields() -> None:

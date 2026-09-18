@@ -72,6 +72,7 @@ class AcceleratorBackend(str, Enum):
 class RepositoryIdentity:
     commit: str | None
     dirty: bool | None
+    worktree_digest: str | None
 
 
 @dataclass(frozen=True)
@@ -91,6 +92,7 @@ class OsIdentity:
     system: str
     release: str
     machine: str
+    processor: str | None
 
 
 @dataclass(frozen=True)
@@ -107,6 +109,7 @@ class EnvironmentSnapshot:
 
     git_commit: str | None
     git_dirty: bool | None
+    git_porcelain: str | None
     python_version: str
     python_implementation: str
     lock_kind: str | None
@@ -114,6 +117,7 @@ class EnvironmentSnapshot:
     os_system: str
     os_release: str
     os_machine: str
+    os_processor: str | None
     accelerator_backend: AcceleratorBackend
     accelerator_devices: tuple[str, ...]
     driver_version: str | None
@@ -149,6 +153,7 @@ class EnvironmentFingerprint:
             },
             "os": {
                 "machine": self.os.machine,
+                "processor": self.os.processor,
                 "release": self.os.release,
                 "system": self.os.system,
             },
@@ -159,6 +164,7 @@ class EnvironmentFingerprint:
             "repository": {
                 "commit": self.repository.commit,
                 "dirty": self.repository.dirty,
+                "worktree_digest": self.repository.worktree_digest,
             },
             "schema": self.schema,
             "version": self.version,
@@ -209,6 +215,7 @@ def fingerprint_from_snapshot(snapshot: EnvironmentSnapshot) -> EnvironmentFinge
         repository=RepositoryIdentity(
             commit=_sanitize_commit(snapshot.git_commit),
             dirty=snapshot.git_dirty,
+            worktree_digest=_worktree_digest(snapshot),
         ),
         python=PythonIdentity(
             version=redact_text(snapshot.python_version, home=home, username=username),
@@ -224,6 +231,7 @@ def fingerprint_from_snapshot(snapshot: EnvironmentSnapshot) -> EnvironmentFinge
             system=redact_text(snapshot.os_system, home=home, username=username),
             release=redact_text(snapshot.os_release, home=home, username=username),
             machine=redact_text(snapshot.os_machine, home=home, username=username),
+            processor=_optional_redact(snapshot.os_processor, home=home, username=username),
         ),
         accelerator=AcceleratorIdentity(
             backend=backend,
@@ -253,7 +261,7 @@ def probe_environment(
     repo_root: Path | None = None,
 ) -> EnvironmentSnapshot:
     root = repo_root if repo_root is not None else discover_repo_root()
-    commit, dirty = probe_git(root)
+    commit, dirty, porcelain = probe_git(root)
     lock_kind, lock_bytes = _probe_lock(root)
     backend_name, devices, driver, runtime = probe_accelerator()
     match backend_name:
@@ -270,6 +278,7 @@ def probe_environment(
     return EnvironmentSnapshot(
         git_commit=commit,
         git_dirty=dirty,
+        git_porcelain=porcelain,
         python_version=platform.python_version(),
         python_implementation=platform.python_implementation(),
         lock_kind=lock_kind,
@@ -277,6 +286,7 @@ def probe_environment(
         os_system=platform.system(),
         os_release=platform.release(),
         os_machine=platform.machine(),
+        os_processor=platform.processor() or None,
         accelerator_backend=backend,
         accelerator_devices=devices,
         driver_version=driver,
@@ -353,12 +363,14 @@ def material_fingerprint_fields(fingerprint: EnvironmentFingerprint) -> dict[str
         "dependencies.digest": dependencies["digest"],
         "dependencies.kind": dependencies["kind"],
         "os.machine": os_info["machine"],
+        "os.processor": os_info["processor"],
         "os.release": os_info["release"],
         "os.system": os_info["system"],
         "python.implementation": python["implementation"],
         "python.version": python["version"],
         "repository.commit": repository["commit"],
         "repository.dirty": repository["dirty"],
+        "repository.worktree_digest": repository["worktree_digest"],
     }
 
 
@@ -374,7 +386,9 @@ def differing_material_fields(
 
 def _sanitize_value(value: Any, *, home: str, username: str) -> Any:
     if isinstance(value, Mapping):
-        return sanitize_mapping(value, home=home, username=username)
+        return sanitize_mapping(
+            value, home=home, username=username, drop_volatile=False
+        )
     if isinstance(value, Path):
         return redact_text(str(value), home=home, username=username)
     if isinstance(value, (list, tuple)):
@@ -397,6 +411,15 @@ def _sanitize_commit(commit: str | None) -> str | None:
         return None
     text = commit.strip()
     return text or None
+
+
+def _worktree_digest(snapshot: EnvironmentSnapshot) -> str | None:
+    if not snapshot.git_dirty or not snapshot.git_porcelain:
+        return None
+    redacted = redact_text(
+        snapshot.git_porcelain, home=snapshot.home, username=snapshot.username
+    )
+    return sha256_hex(redacted.encode("utf-8"))
 
 
 def _cpu_safe_backend(

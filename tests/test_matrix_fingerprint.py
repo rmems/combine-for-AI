@@ -25,6 +25,7 @@ def _snapshot(**overrides: object) -> EnvironmentSnapshot:
     values: dict[str, object] = {
         "git_commit": "c" * 40,
         "git_dirty": False,
+        "git_porcelain": None,
         "python_version": "3.14.0",
         "python_implementation": "CPython",
         "lock_kind": "uv.lock",
@@ -32,6 +33,7 @@ def _snapshot(**overrides: object) -> EnvironmentSnapshot:
         "os_system": "Linux",
         "os_release": "6.12.0-generic",
         "os_machine": "x86_64",
+        "os_processor": None,
         "accelerator_backend": AcceleratorBackend.CPU,
         "accelerator_devices": (),
         "driver_version": None,
