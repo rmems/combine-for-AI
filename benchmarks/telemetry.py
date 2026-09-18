@@ -9,12 +9,8 @@ from pathlib import Path
 from typing import Any
 
 from benchmarks.gpu_telemetry import (
-    AMDGPUTelemetryCollector as AMDGPUTelemetryCollector,
-    AppleMetalTelemetryCollector as AppleMetalTelemetryCollector,
     GPUMetrics,
     GPUPlatform,
-    GPUTelemetryUnavailableWarning as GPUTelemetryUnavailableWarning,
-    NVIDIAGPUTelemetryCollector as NVIDIAGPUTelemetryCollector,
     apple_snapshot_notes,
     bandwidth_from_metrics,
     collect_gpu_info,

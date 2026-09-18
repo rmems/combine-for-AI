@@ -73,6 +73,7 @@ def _ioreg_plist() -> str:
                 "Device Utilization %": 42,
                 "In use system memory": 12 * 1024 * 1024 * 1024,
                 "Alloc system memory": 128 * 1024 * 1024 * 1024,
+                "vramTotalBytes": 128 * 1024 * 1024 * 1024,
             },
         }
     ]
@@ -315,6 +316,97 @@ def test_apple_unavailable_on_linux() -> None:
     assert collector.available() is False
 
 
+def test_nvidia_zero_devices_is_unavailable() -> None:
+    class _EmptyNvml(_FakeNvml):
+        def nvmlDeviceGetCount(self) -> int:
+            return 0
+
+    assert NVIDIAGPUTelemetryCollector(nvml=_EmptyNvml()).available() is False
+
+
+def test_apple_preserves_idle_zero_utilization() -> None:
+    payload = [
+        {
+            "model": "Apple M3 Max",
+            "PerformanceStatistics": {
+                "Device Utilization %": 0,
+                "In use system memory": 0,
+                "vramTotalBytes": 64 * 1024 * 1024 * 1024,
+            },
+        }
+    ]
+
+    def runner(command: list[str], *, timeout: float = 5.0) -> str | None:
+        if command and command[0] == "ioreg":
+            return plistlib.dumps(payload).decode("utf-8")
+        return None
+
+    collector = AppleMetalTelemetryCollector(runner=runner, system="Darwin", machine="arm64")
+    metrics = collector.collect_metrics()
+    assert metrics is not None
+    assert metrics[0].utilization_percent == 0.0
+    assert metrics[0].memory_used_mb == 0
+    assert metrics[0].memory_total_mb == 64 * 1024
+
+
+def test_apple_does_not_treat_alloc_system_memory_as_capacity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    payload = [
+        {
+            "model": "Apple M3 Max",
+            "PerformanceStatistics": {
+                "Device Utilization %": 10,
+                "In use system memory": 2 * 1024 * 1024 * 1024,
+                "Alloc system memory": 8 * 1024 * 1024 * 1024,
+            },
+        }
+    ]
+
+    def runner(command: list[str], *, timeout: float = 5.0) -> str | None:
+        if command and command[0] == "ioreg":
+            return plistlib.dumps(payload).decode("utf-8")
+        return None
+
+    class _Mem:
+        total = 96 * 1024 * 1024 * 1024
+
+    import sys
+    import types
+
+    monkeypatch.setitem(
+        sys.modules, "psutil", types.SimpleNamespace(virtual_memory=lambda: _Mem())
+    )
+    collector = AppleMetalTelemetryCollector(runner=runner, system="Darwin", machine="arm64")
+    metrics = collector.collect_metrics()
+    assert metrics is not None
+    assert metrics[0].memory_used_mb == 2 * 1024
+    assert metrics[0].memory_total_mb == 96 * 1024
+
+
+def test_apple_available_under_rosetta() -> None:
+    def runner(command: list[str], *, timeout: float = 5.0) -> str | None:
+        if command[:3] == ["sysctl", "-n", "sysctl.proc_translated"]:
+            return "1\n"
+        return None
+
+    collector = AppleMetalTelemetryCollector(
+        runner=runner, system="Darwin", machine="x86_64"
+    )
+    assert collector.available() is True
+
+
+def test_collect_gpu_metrics_warns_when_collector_empty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "benchmarks.gpu_telemetry.detect_gpu_platform", lambda: GPUPlatform.AMD
+    )
+    monkeypatch.setattr(AMDGPUTelemetryCollector, "collect_metrics", lambda self: None)
+    with pytest.warns(GPUTelemetryUnavailableWarning, match="returned no metrics"):
+        assert collect_gpu_metrics() is None
+
+
 def test_detect_prefers_apple_then_nvidia_then_amd() -> None:
     apple = _Probe(GPUPlatform.APPLE, True)
     nvidia = _Probe(GPUPlatform.NVIDIA, True)
@@ -409,9 +501,11 @@ def test_collect_gpu_metrics_warns_without_backend(monkeypatch: pytest.MonkeyPat
 
 
 def test_collectors_do_not_crash_when_tools_missing() -> None:
-    assert NVIDIAGPUTelemetryCollector().collect_metrics() is None
-    assert AMDGPUTelemetryCollector().collect_metrics() in (None, [])
+    nvidia = NVIDIAGPUTelemetryCollector().collect_metrics()
+    amd = AMDGPUTelemetryCollector().collect_metrics()
     linux_apple = AppleMetalTelemetryCollector(system="Linux", machine="x86_64")
+    assert nvidia is None or isinstance(nvidia, list)
+    assert amd is None or isinstance(amd, list)
     assert linux_apple.collect_metrics() is None
 
 
@@ -420,3 +514,24 @@ def test_amd_rocm_smi_garbage_returns_none() -> None:
         return "not json at all"
 
     assert AMDGPUTelemetryCollector(runner=runner).collect_metrics() is None
+
+
+def test_run_command_resolves_executable_absolutely(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    from benchmarks.gpu_telemetry_common import _run_command
+
+    recorded: list[list[str]] = []
+    probe = tmp_path / "rocm-smi"
+    probe.write_text("#!/bin/sh\n")
+
+    def fake_which(name: str) -> str | None:
+        return str(probe) if name == "rocm-smi" else None
+
+    def fake_check_output(argv: list[str], **kwargs: object) -> str:
+        recorded.append(list(argv))
+        return "{}"
+
+    monkeypatch.setattr("benchmarks.gpu_telemetry_common.shutil.which", fake_which)
+    monkeypatch.setattr("benchmarks.gpu_telemetry_common.subprocess.check_output", fake_check_output)
+    assert _run_command(["rocm-smi", "--json"]) == "{}"
+    assert recorded == [[str(probe), "--json"]]
+    assert _run_command(["missing-tool"]) is None
