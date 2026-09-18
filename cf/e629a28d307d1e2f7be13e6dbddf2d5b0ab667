@@ -1,0 +1,44 @@
+benchmarks/gpu_telemetry_amd.py
+  s_e6754969e02c90::t_9789bfab447911 1-90,99,107,109-133,135-138,140-141,151,153-370
+  s_e6754969e02c90::t_09cab9f91b9f1a 91-98,100-106,108
+  s_e6754969e02c90::t_39dff47219f956 134,139,142-150,152
+benchmarks/gpu_telemetry_nvidia.py
+  s_e6754969e02c90::t_d4fbdc7227b753 1-80,82-130
+  s_e6754969e02c90::t_723302acf45ebb 81
+benchmarks/gpu_telemetry_common.py
+  s_e6754969e02c90::t_9ab6c4e5b6eae8 1-26,28-29,31-211
+  s_e6754969e02c90::t_5753ecbacd7d9d 27,30
+benchmarks/gpu_telemetry_apple.py
+  s_e6754969e02c90::t_edacc1a31f0f93 102-103
+  s_e6754969e02c90::t_260110a466410f 193-201
+  s_e6754969e02c90::t_dd6bdd5c8ecc74 45-48
+  s_e6754969e02c90::t_de334ea819c051 1-44,49-101,104-192,202-212,214,217-222,225-233,235-240,243-265,267-269,271-272
+  s_e6754969e02c90::t_8a258ed257b9c5 213,215-216,223-224
+  s_e6754969e02c90::t_552d898a8db026 234,241-242
+  s_e6754969e02c90::t_58d2551cb03128 266,270,273
+benchmarks/gpu_telemetry.py
+  s_e6754969e02c90::t_11b57c99fe2b3a 24-38,47-48,50
+  s_e6754969e02c90::t_499e2500541607 119,127-134
+tests/test_gpu_telemetry.py
+  s_e6754969e02c90::t_56b30eb7fea3f4 76
+  s_e6754969e02c90::t_54c332c186a139 319-374,376,380-409
+  s_e6754969e02c90::t_1c241ac6977020 504-505,507-508
+  s_e6754969e02c90::t_e1c6826769a579 517-537
+  s_e6754969e02c90::t_2f5806533a5c1f 375,377-379
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "cfe629a28d307d1e2f7be13e6dbddf2d5b0ab667",
+  "prompts": {},
+  "sessions": {
+    "s_e6754969e02c90": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "ad319b83-a19e-4f68-a954-6e31c5e402a2",
+        "model": "grok-4.6"
+      },
+      "human_author": "Raul Cardenas Montoya <montoyaraul34@gmail.com>"
+    }
+  }
+}
