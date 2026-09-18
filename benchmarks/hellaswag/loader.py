@@ -11,25 +11,30 @@ from benchmarks.dataset_support import (
 from benchmarks.dataset_types import DatasetRecord
 
 
+def _hellaswag_prompt(row: dict[str, Any]) -> str:
+    ctx = row.get("ctx")
+    if ctx:
+        return str(ctx).strip()
+    ctx_a = str(row.get("ctx_a") or "").strip()
+    ctx_b = str(row.get("ctx_b") or "").strip()
+    return f"{ctx_a} {ctx_b}".strip()
+
+
 def map_hellaswag_row(row: dict[str, Any]) -> DatasetRecord | None:
     record = canonical_record(row)
     if record is not None:
         return record
 
-    ctx = row.get("ctx")
-    if not ctx:
-        ctx_a = str(row.get("ctx_a") or "").strip()
-        ctx_b = str(row.get("ctx_b") or "").strip()
-        ctx = f"{ctx_a} {ctx_b}".strip()
+    prompt = _hellaswag_prompt(row)
     endings = row.get("endings")
     label = row.get("label")
-    if not ctx or endings is None or label is None:
+    if not prompt or endings is None or label is None:
         return None
     choices = [str(ending) for ending in endings]
     if len(choices) < 2:
         return None
     return DatasetRecord(
-        prompt=str(ctx).strip(),
+        prompt=prompt,
         choices=choices,
         answer_index=int(label),
     )

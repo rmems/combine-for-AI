@@ -68,5 +68,21 @@ def test_map_arc_easy_unknown_key() -> None:
         )
 
 
+def test_map_arc_easy_rejects_mismatched_choice_lengths() -> None:
+    assert (
+        map_arc_easy_row(
+            {
+                "question": "Q?",
+                "choices": {
+                    "text": ["a", "b", "c", "d"],
+                    "label": ["A", "B"],
+                },
+                "answerKey": "2",
+            }
+        )
+        is None
+    )
+
+
 def test_score_arc_easy() -> None:
     assert score_arc_easy([0, 2], [0, 2]) == 1.0

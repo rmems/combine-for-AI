@@ -9,6 +9,8 @@ from benchmarks.dataset_support import (
     CATALOG,
     HuggingFaceDatasetLoader,
     JsonlDatasetLoader,
+    mapper_for,
+    normalized_cache_path,
     sample_path_for,
     validate_loaded,
 )
@@ -216,6 +218,18 @@ def test_dataset_spec_from_dict_reads_optional_fields() -> None:
 def test_unknown_source_is_rejected() -> None:
     with pytest.raises(ValueError, match="not registered"):
         default_dataset_registry().loader_for("nope")
+
+
+def test_row_mappers_cover_catalog_aliases() -> None:
+    default_dataset_registry()
+    assert mapper_for("wikitext") is mapper_for("wikitext2")
+    assert mapper_for("arc-easy") is mapper_for("arc_easy")
+
+
+def test_normalized_cache_path_uses_full_sha256(tmp_path: Path) -> None:
+    path = normalized_cache_path(tmp_path, "lambada", "org/name", None, "test")
+    assert len(path.stem) == 64
+    assert path.suffix == ".jsonl"
 
 
 def test_catalog_task_kinds_cover_all_named_datasets() -> None:

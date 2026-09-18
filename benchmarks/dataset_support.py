@@ -195,6 +195,27 @@ def mapper_for(name: str) -> Callable[[dict[str, Any]], DatasetRecord | None]:
     return ROW_MAPPERS.get(name, require_canonical_record)
 
 
+def _map_jsonl_row(
+    map_row: Callable[[dict[str, Any]], DatasetRecord | None],
+    payload: dict[str, Any],
+    *,
+    line_number: int,
+    path: Path,
+) -> DatasetRecord | None:
+    try:
+        return map_row(payload)
+    except ValueError as exc:
+        raise ValueError(f"{exc} on line {line_number} in {path}") from exc
+
+
+def _normalized_max_samples(max_samples: int | None) -> int | None:
+    if max_samples is None:
+        return None
+    if max_samples < 0:
+        raise ValueError("max_samples must be non-negative")
+    return max_samples
+
+
 def records_from_jsonl(
     path: Path,
     map_row: Callable[[dict[str, Any]], DatasetRecord | None],
@@ -202,21 +223,19 @@ def records_from_jsonl(
 ) -> list[DatasetRecord]:
     if not path.exists():
         raise FileNotFoundError(f"dataset file not found: {path}")
-    if max_samples is not None and max_samples < 0:
-        raise ValueError("max_samples must be non-negative")
-    if max_samples == 0:
+    limit = _normalized_max_samples(max_samples)
+    if limit == 0:
         return []
 
     records: list[DatasetRecord] = []
     for line_number, payload in iter_jsonl_payloads(path):
-        try:
-            record = map_row(payload)
-        except ValueError as exc:
-            raise ValueError(f"{exc} on line {line_number} in {path}") from exc
+        record = _map_jsonl_row(
+            map_row, payload, line_number=line_number, path=path
+        )
         if record is None:
             continue
         records.append(record)
-        if max_samples is not None and len(records) >= max_samples:
+        if limit is not None and len(records) >= limit:
             break
     return records
 
@@ -233,7 +252,7 @@ def normalized_cache_path(
     cache_dir: Path, name: str, hf_id: str, subset: str | None, split: str
 ) -> Path:
     key = f"{hf_id}\0{subset or ''}\0{split}"
-    digest = hashlib.sha256(key.encode("utf-8")).hexdigest()[:20]
+    digest = hashlib.sha256(key.encode("utf-8")).hexdigest()
     return cache_dir / "normalized" / name / split / f"{digest}.jsonl"
 
 
@@ -375,6 +394,16 @@ def _fallback_jsonl(
     return records, _jsonl_metadata(fallback_path, fallback=str(exc))
 
 
+def _hf_request(
+    spec: DatasetSpec, entry: CatalogEntry | None
+) -> tuple[str | None, str | None, str, Path]:
+    hf_id = spec.hf_id or (entry.hf_id if entry else None)
+    hf_subset = spec.hf_subset
+    if hf_subset is None and entry is not None:
+        hf_subset = entry.hf_subset
+    return hf_id, hf_subset, resolve_hf_split(spec, entry), resolve_cache_dir(spec)
+
+
 def load_with_fallback(
     spec: DatasetSpec,
     *,
@@ -398,13 +427,7 @@ def load_with_fallback(
             missing_message=f"dataset file not found: {spec.path}",
         )
 
-    hf_id = spec.hf_id or (entry.hf_id if entry else None)
-    hf_subset = spec.hf_subset
-    if hf_subset is None and entry is not None:
-        hf_subset = entry.hf_subset
-    split = resolve_hf_split(spec, entry)
-    cache_dir = resolve_cache_dir(spec)
-
+    hf_id, hf_subset, split, cache_dir = _hf_request(spec, entry)
     if not hf_id:
         return _fallback_jsonl(
             spec,
@@ -445,22 +468,40 @@ def _validate_multiple_choice(record: DatasetRecord, label: str) -> None:
         )
 
 
+def _validate_reference(record: DatasetRecord, label: str) -> None:
+    if record.reference is None or not str(record.reference).strip():
+        raise ValueError(f"{label} is missing a reference")
+
+
+def _validate_generic(record: DatasetRecord, label: str) -> None:
+    if record.choices is not None or record.answer_index is not None:
+        _validate_multiple_choice(record, label)
+
+
 def _validate_record(record: DatasetRecord, task: TaskKind, label: str) -> None:
     if not str(record.prompt).strip():
         raise ValueError(f"{label} has an empty prompt")
     match task:
         case TaskKind.CLOZE | TaskKind.MATH:
-            if record.reference is None or not str(record.reference).strip():
-                raise ValueError(f"{label} is missing a reference")
+            _validate_reference(record, label)
         case TaskKind.MULTIPLE_CHOICE:
             _validate_multiple_choice(record, label)
         case TaskKind.LANGUAGE_MODELING:
             return
         case TaskKind.GENERIC:
-            if record.choices is not None or record.answer_index is not None:
-                _validate_multiple_choice(record, label)
+            _validate_generic(record, label)
         case _:
             _assert_never(task)
+
+
+def _required_min_samples(spec: DatasetSpec, entry: CatalogEntry | None) -> int:
+    if spec.max_samples == 0:
+        return 0
+    if spec.min_samples is not None:
+        return spec.min_samples
+    if entry is None:
+        return 0
+    return entry.min_samples
 
 
 def validate_loaded(loaded: LoadedDataset, entry: CatalogEntry | None) -> None:
@@ -471,10 +512,7 @@ def validate_loaded(loaded: LoadedDataset, entry: CatalogEntry | None) -> None:
         raise ValueError("min_samples must be non-negative")
 
     task = entry.task if entry is not None else TaskKind.GENERIC
-    default_min = entry.min_samples if entry is not None else 0
-    min_samples = default_min if spec.min_samples is None else spec.min_samples
-    if spec.max_samples == 0:
-        min_samples = 0
+    min_samples = _required_min_samples(spec, entry)
     if len(loaded.records) < min_samples:
         raise ValueError(
             f"{spec.name}: expected at least {min_samples} samples, "
