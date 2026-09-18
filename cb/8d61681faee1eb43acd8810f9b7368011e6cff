@@ -1,0 +1,33 @@
+benchmarks/arc_easy/loader.py
+  s_661d72e35f1323::t_d060a3c631d805 45-47,49-50,53-56,63,65,67
+  s_661d72e35f1323::t_f3b8f66daa4cd1 33-44,48,51-52
+tests/test_arc_easy.py
+  s_661d72e35f1323::t_9ac3566f479521 71-86
+benchmarks/dataset_support.py
+  s_661d72e35f1323::t_66a7ad451dd5d6 471-480,486,492,497-506,515
+  s_661d72e35f1323::t_80d046d65b6ff2 198-210,232-234
+  s_661d72e35f1323::t_efdcf4c267acc3 211-218,226-227,238
+  s_661d72e35f1323::t_d6e0647f5da302 255
+  s_661d72e35f1323::t_a43161d81b0bda 397-406,430
+tests/test_dataset_loaders.py
+  s_661d72e35f1323::t_bf0e30ac9dfa6f 223-234
+  s_661d72e35f1323::t_210f5bbc4e3e86 12-13
+benchmarks/hellaswag/loader.py
+  s_661d72e35f1323::t_dec8b3e6d1932d 14-22,28,31,37
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "cb8d61681faee1eb43acd8810f9b7368011e6cff",
+  "prompts": {},
+  "sessions": {
+    "s_661d72e35f1323": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "e86c51e3-ae6b-4f5a-b539-64376b1e0300",
+        "model": "grok-4.6"
+      },
+      "human_author": "Raul Cardenas Montoya <montoyaraul34@gmail.com>"
+    }
+  }
+}
