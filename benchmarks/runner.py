@@ -110,21 +110,45 @@ def _load_upstream_telemetry(
     config: dict[str, Any],
     base_path: Path,
     telemetry: TelemetrySnapshot,
-) -> TelemetrySnapshot:
-    """Load optional upstream telemetry artifacts referenced by the config."""
+    corinth_canal_dir: Path | None = None,
+) -> tuple[TelemetrySnapshot, CorinthCanalArtifact | None]:
+    """Load optional upstream telemetry artifacts referenced by the config or CLI.
+
+    Missing SAAQ / myelin files are skipped so a GOZ1-only run still completes.
+    """
     corinth = None
     myelin = None
 
     telemetry_cfg = config.get("telemetry") or {}
-    corinth_path = telemetry_cfg.get("corinth_canal_path")
-    if corinth_path:
-        corinth = CorinthCanalArtifact.from_file(base_path / corinth_path)
+    corinth_source = _resolve_corinth_source(telemetry_cfg, base_path, corinth_canal_dir)
+    if corinth_source is not None:
+        corinth = CorinthCanalArtifact.try_from_path(corinth_source)
 
     myelin_path = telemetry_cfg.get("myelin_accelerator_path")
     if myelin_path:
-        myelin = MyelinAcceleratorArtifact.from_file(base_path / myelin_path)
+        myelin_resolved = Path(myelin_path)
+        if not myelin_resolved.is_absolute():
+            myelin_resolved = base_path / myelin_resolved
+        if myelin_resolved.exists():
+            myelin = MyelinAcceleratorArtifact.from_file(myelin_resolved)
 
-    return merge_upstream_artifacts(telemetry, corinth=corinth, myelin=myelin)
+    return merge_upstream_artifacts(telemetry, corinth=corinth, myelin=myelin), corinth
+
+
+def _resolve_corinth_source(
+    telemetry_cfg: dict[str, Any],
+    base_path: Path,
+    corinth_canal_dir: Path | None,
+) -> Path | None:
+    if corinth_canal_dir is not None:
+        return corinth_canal_dir
+    raw = telemetry_cfg.get("corinth_canal_dir") or telemetry_cfg.get("corinth_canal_path")
+    if not raw:
+        return None
+    path = Path(raw).expanduser()
+    if not path.is_absolute():
+        path = base_path / path
+    return path
 
 
 def run_benchmarks(
@@ -132,6 +156,7 @@ def run_benchmarks(
     output_dir: Path,
     formats: list[str],
     seed_override: int | None = None,
+    corinth_canal_dir: Path | None = None,
 ) -> RunMetadata:
     config = load_config(config_path)
     run_name = config.get("run_name", "benchmark-run")
@@ -139,10 +164,11 @@ def run_benchmarks(
     metadata = build_metadata(run_name, seed)
 
     # Optionally enrich telemetry with upstream artifacts
-    telemetry = _load_upstream_telemetry(
+    telemetry, corinth = _load_upstream_telemetry(
         config,
         config_path.parent,
         metadata.telemetry,
+        corinth_canal_dir=corinth_canal_dir,
     )
     metadata = RunMetadata(
         run_id=metadata.run_id,
@@ -173,6 +199,8 @@ def run_benchmarks(
             scoped = scoped_seed(seed, model_spec.name, quant_name, dataset.spec.name)
             rng = random.Random(scoped)
             accumulator = MetricsAccumulator()
+            if corinth is not None:
+                accumulator.apply_saaq(corinth.to_saaq_overlay())
 
             for record in dataset.records:
                 prediction = adapter.predict(record, rng)

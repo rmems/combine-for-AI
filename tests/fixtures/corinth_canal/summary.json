@@ -1,0 +1,24 @@
+{
+  "run_id": "saaq-lambda-001",
+  "run_tag": "fixture",
+  "model_slug": "olmoe_baseline",
+  "model_family": "Olmoe",
+  "telemetry_source": "synthetic",
+  "repeat_idx": 0,
+  "repeat_count": 1,
+  "saaq_rule": "SaaqV1_5SqrtRate",
+  "projection_mode": "spiking_ternary",
+  "validation_status": "completed",
+  "run_dir": "tests/fixtures/corinth_canal",
+  "manifest_path": "tests/fixtures/corinth_canal/run_manifest.json",
+  "tick_telemetry_path": "tests/fixtures/corinth_canal/tick_telemetry.txt",
+  "latent_telemetry_path": "tests/fixtures/corinth_canal/latent_telemetry.csv",
+  "metrics": {
+    "ticks_completed": 4,
+    "latent_rows": 4,
+    "mean_tick_elapsed_us": 42.5,
+    "first_timestamp_ms": 1,
+    "last_timestamp_ms": 4
+  },
+  "repeat_determinism": "matched"
+}

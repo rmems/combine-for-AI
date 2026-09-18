@@ -1,0 +1,4 @@
+tick=1 best_walker=3 elapsed_us=41 gpu_temp_c=65.000 gpu_power_w=250.000 cpu_tctl_c=70.000 cpu_package_power_w=45.000
+tick=2 best_walker=1 elapsed_us=44 gpu_temp_c=66.000 gpu_power_w=255.000 cpu_tctl_c=71.000 cpu_package_power_w=46.000
+tick=3 best_walker=2 elapsed_us=43 gpu_temp_c=67.000 gpu_power_w=260.000 cpu_tctl_c=72.000 cpu_package_power_w=47.000
+tick=4 best_walker=3 elapsed_us=42 gpu_temp_c=66.500 gpu_power_w=252.000 cpu_tctl_c=71.500 cpu_package_power_w=45.500

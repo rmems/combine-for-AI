@@ -2,10 +2,24 @@ from __future__ import annotations
 
 import math
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from benchmarks.datasets import DatasetRecord
 from benchmarks.models import Prediction
+
+
+@dataclass(frozen=True)
+class SaaqMetricOverlay:
+    """SAAQ scalars mapped from corinth-canal telemetry into a metrics summary."""
+
+    firing_rate: float | None = None
+    membrane_pressure: float | None = None
+    saaq_delta_q: float | None = None
+    saaq_delta_q_last: float | None = None
+    saaq_delta_q_legacy: float | None = None
+    saaq_delta_q_v15: float | None = None
+    saaq_rule: str | None = None
+    spike_density: float | None = None
 
 
 @dataclass(frozen=True)
@@ -27,6 +41,13 @@ class MetricsSummary:
     scale_source: str | None = None
     goz1_version: int | None = None
     sparsity: float | None = None
+    firing_rate: float | None = None
+    membrane_pressure: float | None = None
+    saaq_delta_q: float | None = None
+    saaq_delta_q_last: float | None = None
+    saaq_delta_q_legacy: float | None = None
+    saaq_delta_q_v15: float | None = None
+    saaq_rule: str | None = None
 
 
 class MetricsAccumulator:
@@ -36,6 +57,12 @@ class MetricsAccumulator:
         self._logprob_sum = 0.0
         self._token_count = 0
         self._choice_counts: Counter[str] = Counter()
+        self._saaq: SaaqMetricOverlay | None = None
+
+    def apply_saaq(self, overlay: SaaqMetricOverlay) -> None:
+        """Attach SAAQ telemetry so ``summary()`` emits it beside traditional metrics."""
+
+        self._saaq = overlay
 
     def add(self, record: DatasetRecord, prediction: Prediction) -> None:
         self._total += 1
@@ -62,7 +89,7 @@ class MetricsAccumulator:
         latency_ms = (total_time_s / self._total * 1000.0) if self._total else 0.0
 
         routing_entropy = entropy_from_counts(self._choice_counts)
-        return MetricsSummary(
+        summary = MetricsSummary(
             accuracy=accuracy,
             perplexity=perplexity,
             throughput=throughput,
@@ -80,10 +107,27 @@ class MetricsAccumulator:
             goz1_version=None,
             sparsity=None,
         )
+        if self._saaq is None:
+            return summary
+        return replace(
+            summary,
+            spike_density=_coalesce(self._saaq.spike_density, summary.spike_density),
+            firing_rate=self._saaq.firing_rate,
+            membrane_pressure=self._saaq.membrane_pressure,
+            saaq_delta_q=self._saaq.saaq_delta_q,
+            saaq_delta_q_last=self._saaq.saaq_delta_q_last,
+            saaq_delta_q_legacy=self._saaq.saaq_delta_q_legacy,
+            saaq_delta_q_v15=self._saaq.saaq_delta_q_v15,
+            saaq_rule=self._saaq.saaq_rule,
+        )
 
     @property
     def token_count(self) -> int:
         return self._token_count
+
+
+def _coalesce(new: float | None, old: float | None) -> float | None:
+    return new if new is not None else old
 
 
 def entropy_from_counts(counts: Counter[str]) -> float:

@@ -7,7 +7,27 @@ from typing import Any
 
 from benchmarks.jsonio import ensure_dir, json_safe, write_json
 from benchmarks.metrics import MetricsSummary
-from benchmarks.telemetry import TelemetrySnapshot
+from benchmarks.telemetry import RoutingMetrics, SystemSnapshot, TelemetrySnapshot
+
+
+_TELEMETRY_SCALAR_KEYS = (
+    "routing_entropy",
+    "spike_density",
+    "latent_stability",
+    "dv_dt_reductions",
+    "event_rate",
+    "firing_rate",
+    "membrane_pressure",
+    "saaq_delta_q",
+    "saaq_delta_q_last",
+    "saaq_delta_q_legacy",
+    "saaq_delta_q_v15",
+    "kernel_occupancy",
+    "vram_bandwidth_gbps",
+    "notes",
+    "saaq_rule",
+    "saaq_model_family",
+)
 
 
 def write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
@@ -30,39 +50,36 @@ def metrics_to_row(metrics: MetricsSummary) -> dict[str, Any]:
 def telemetry_to_row(telemetry: TelemetrySnapshot | None) -> dict[str, Any]:
     """Flatten telemetry into prefixed CSV/JSON-safe fields."""
     if telemetry is None:
-        return {
-            "telemetry_sys_cpu_count_logical": None,
-            "telemetry_sys_cpu_count_physical": None,
-            "telemetry_sys_memory_total_gb": None,
-            "telemetry_sys_memory_available_gb": None,
-            "telemetry_sys_gpu_count": None,
-            "telemetry_sys_gpu_names": None,
-            "telemetry_sys_gpu_driver_version": None,
-            "telemetry_sys_cuda_version": None,
-            "telemetry_sys_platform": None,
-            "telemetry_sys_python_version": None,
-            "telemetry_routing_entropy": None,
-            "telemetry_spike_density": None,
-            "telemetry_latent_stability": None,
-            "telemetry_dv_dt_reductions": None,
-            "telemetry_event_rate": None,
-            "telemetry_kernel_occupancy": None,
-            "telemetry_vram_bandwidth_gbps": None,
-            "telemetry_notes": None,
-        }
+        return _empty_telemetry_row()
     d: dict[str, Any] = {}
     sys_dict = asdict(telemetry.system)
     for k, v in sys_dict.items():
         d[f"telemetry_sys_{k}"] = v
-    d["telemetry_routing_entropy"] = telemetry.routing.routing_entropy if telemetry.routing else None
-    d["telemetry_spike_density"] = telemetry.routing.spike_density if telemetry.routing else None
-    d["telemetry_latent_stability"] = telemetry.routing.latent_stability if telemetry.routing else None
-    d["telemetry_dv_dt_reductions"] = telemetry.routing.dv_dt_reductions if telemetry.routing else None
-    d["telemetry_event_rate"] = telemetry.routing.event_rate if telemetry.routing else None
+    routing = telemetry.routing or RoutingMetrics()
+    d["telemetry_routing_entropy"] = routing.routing_entropy
+    d["telemetry_spike_density"] = routing.spike_density
+    d["telemetry_latent_stability"] = routing.latent_stability
+    d["telemetry_dv_dt_reductions"] = routing.dv_dt_reductions
+    d["telemetry_event_rate"] = routing.event_rate
+    d["telemetry_firing_rate"] = routing.firing_rate
+    d["telemetry_membrane_pressure"] = routing.membrane_pressure
+    d["telemetry_saaq_delta_q"] = routing.saaq_delta_q
+    d["telemetry_saaq_delta_q_last"] = routing.saaq_delta_q_last
+    d["telemetry_saaq_delta_q_legacy"] = routing.saaq_delta_q_legacy
+    d["telemetry_saaq_delta_q_v15"] = routing.saaq_delta_q_v15
     d["telemetry_kernel_occupancy"] = telemetry.kernel_occupancy
     d["telemetry_vram_bandwidth_gbps"] = telemetry.vram_bandwidth_gbps
     d["telemetry_notes"] = telemetry.notes
+    d["telemetry_saaq_rule"] = telemetry.saaq_rule
+    d["telemetry_saaq_model_family"] = telemetry.saaq_model_family
     return d
+
+
+def _empty_telemetry_row() -> dict[str, Any]:
+    row = {f"telemetry_sys_{key}": None for key in SystemSnapshot.__dataclass_fields__}
+    for key in _TELEMETRY_SCALAR_KEYS:
+        row[f"telemetry_{key}"] = None
+    return row
 
 
 __all__ = [

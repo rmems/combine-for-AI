@@ -119,6 +119,34 @@ Payload includes `benchmark_linkage.grok_ozempic_report_path` and optional decis
 
 See `benchmarks/telemetry.py`: `SystemSnapshot`, `GPUMetrics` (optional `pynvml`), `RoutingMetrics`, upstream merge for corinth-canal / myelin-accelerator.
 
+### corinth-canal SAAQ ingest
+
+`benchmarks/corinth_canal.py` parses a validation run directory (or a single artifact) and overlays SAAQ scalars onto combine metrics/reports.
+
+Canonical filenames from `saaq_latent_calibration`:
+
+| File | Role |
+|------|------|
+| `latent_telemetry.csv` | Dual-SAAQ trajectory (`saaq_delta_q_{legacy,v15}_{prev,target}` plus primary compatibility columns) |
+| `summary.json` | `ExperimentSummary` (rule, family, tick/row counts) |
+| `run_manifest.json` | Full `ExperimentManifest` |
+| `tick_telemetry.txt` | Per-tick `tick=… elapsed_us=…` lines |
+
+Config:
+
+```json
+"telemetry": {
+  "corinth_canal_dir": "/path/to/corinth-canal/run",
+  "corinth_canal_path": "optional/legacy-or-summary.json"
+}
+```
+
+CLI: `--corinth-canal-dir PATH` overrides the config. Missing files are skipped; a GOZ1-only run is unaffected.
+
+Mapped report fields (JSON + CSV): `firing_rate`, `membrane_pressure`, `saaq_delta_q`, `saaq_delta_q_last`, `saaq_delta_q_legacy`, `saaq_delta_q_v15`, `saaq_rule`. JSON `run.telemetry` also carries the dual Δq trajectories.
+
+`membrane_pressure` uses the SAAQ 1.0 scale `clamp(membrane_dv_dt / 12, -1, 1)`.
+
 ## Quantization registry
 
 Supported profiles today: `fp16`, `awq`, `gptq`, `gguf`, **`ternary`**, **`saaq`** (GOZ1 path).
