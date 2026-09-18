@@ -1,0 +1,31 @@
+tests/test_corinth_canal.py
+  s_661d72e35f1323::t_6510a356bd54d1 330-386
+benchmarks/runner.py
+  s_661d72e35f1323::t_c414f9e543e57a 148
+benchmarks/corinth_canal_values.py
+  s_661d72e35f1323::t_b9c6bc3616f2cc 1-101
+benchmarks/corinth_canal.py
+  s_661d72e35f1323::t_af10e074c25d2e 22-35
+  s_661d72e35f1323::t_a17282226dcb58 281,285,287
+  s_661d72e35f1323::t_3cb6a7e5f5177d 418
+  s_661d72e35f1323::t_1e12642bfe97ba 441-446
+  s_661d72e35f1323::t_d530ee699306eb 544
+  s_661d72e35f1323::t_87a86b8dcc2d15 390-395
+  s_661d72e35f1323::t_2dc26aa8961082 145
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "6313101cad2826189cf4a7ea57aa0df05ca0f746",
+  "prompts": {},
+  "sessions": {
+    "s_661d72e35f1323": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "e86c51e3-ae6b-4f5a-b539-64376b1e0300",
+        "model": "grok-4.6"
+      },
+      "human_author": "Raul Cardenas Montoya <montoyaraul34@gmail.com>"
+    }
+  }
+}
