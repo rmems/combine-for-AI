@@ -1,0 +1,22 @@
+tests/test_environment_fingerprint.py
+  s_661d72e35f1323::t_b7cfe1e93828b5 303-315
+  s_661d72e35f1323::t_a2ccbfa56b2517 8
+src/combine_for_ai/environment_probe.py
+  s_661d72e35f1323::t_e2a62e084ac737 219-221,223-224,244-245
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "01ccc7f9ed1e5c00c6f12b6b263e59dbcd344237",
+  "prompts": {},
+  "sessions": {
+    "s_661d72e35f1323": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "e86c51e3-ae6b-4f5a-b539-64376b1e0300",
+        "model": "grok-4.6"
+      },
+      "human_author": "Raul Cardenas Montoya <montoyaraul34@gmail.com>"
+    }
+  }
+}
