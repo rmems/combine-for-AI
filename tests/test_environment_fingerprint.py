@@ -5,7 +5,9 @@ from pathlib import Path
 
 import pytest
 
-from combine_for_ai.environment_probe import _apply_cuda_visibility, _run_probe
+import subprocess
+
+from combine_for_ai.environment_probe import _apply_cuda_visibility, git_rev_parse_head
 from combine_for_ai.environment import (
     REDACTED,
     REDACTED_USER,
@@ -313,17 +315,19 @@ def test_cuda_visibility_filters_enumerated_devices(
     assert _apply_cuda_visibility(devices) == ("GPU-1",)
 
 
-def test_run_probe_rejects_relative_or_unknown_executables(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_git_probe_invokes_literal_argv(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: list[list[str]] = []
+
+    def fake_run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        captured.append(list(argv))
+        return subprocess.CompletedProcess(argv, 0, stdout="deadbeef\n", stderr="")
+
     monkeypatch.setattr(
-        "combine_for_ai.environment_probe.shutil.which", lambda name: f"./bin/{name}"
+        "combine_for_ai.environment_probe.subprocess.run",
+        fake_run,
     )
-    assert _run_probe("git", "rev-parse", "HEAD", timeout=1.0) is None
-    monkeypatch.setattr(
-        "combine_for_ai.environment_probe.shutil.which", lambda name: "/tmp/curl"
-    )
-    assert _run_probe("curl", "https://example.test", timeout=1.0) is None
+    assert git_rev_parse_head(None) == "deadbeef"
+    assert captured == [["git", "rev-parse", "HEAD"]]
 
 
 def test_digest_resolved_config_ignores_volatile_process_fields() -> None:

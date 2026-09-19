@@ -1,14 +1,12 @@
 """Host probes for environment fingerprints.
 
-Each subprocess invocation uses a resolved absolute argv so scanners can see
-there is no shell interpolation and no relative executable. Failures degrade
-to ``None`` rather than raising.
+Each subprocess invocation uses a literal argv (no shell, no dynamic executable).
+Failures degrade to ``None`` rather than raising.
 """
 
 from __future__ import annotations
 
 import os
-import shutil
 import subprocess  # nosec B404
 from pathlib import Path
 from typing import Any
@@ -66,29 +64,29 @@ def probe_accelerator() -> tuple[str, tuple[str, ...], str | None, str | None]:
 
 
 def git_rev_parse_head(cwd: Path | None) -> str | None:
-    return _run_probe("git", "rev-parse", "HEAD", cwd=cwd, timeout=_GIT_TIMEOUT_S)
+    return _run_git_rev_parse_head(cwd, _GIT_TIMEOUT_S)
 
 
 def git_show_toplevel() -> str | None:
-    return _run_probe("git", "rev-parse", "--show-toplevel", timeout=_GIT_TIMEOUT_S)
+    return _run_git_show_toplevel(_GIT_TIMEOUT_S)
 
 
 def git_status_porcelain(cwd: Path | None) -> str | None:
-    return _run_probe("git", "status", "--porcelain", cwd=cwd, timeout=_GIT_TIMEOUT_S)
+    return _run_git_status_porcelain(cwd, _GIT_TIMEOUT_S)
 
 
 def git_diff_head(cwd: Path | None) -> str | None:
-    return _run_probe("git", "diff", "HEAD", cwd=cwd, timeout=_GIT_TIMEOUT_S)
+    return _run_git_diff_head(cwd, _GIT_TIMEOUT_S)
 
 
 def cuda_runtime_version() -> str | None:
-    nvcc = _run_probe("nvcc", "--version", timeout=_ACCEL_TIMEOUT_S)
+    nvcc = _run_nvcc_version(_ACCEL_TIMEOUT_S)
     release = _text_after("release ", nvcc)
     if release:
         token = release.split(",", maxsplit=1)
         if token:
             return token[0].strip()
-    smi = _run_probe("nvidia-smi", timeout=_ACCEL_TIMEOUT_S)
+    smi = _run_nvidia_smi(_ACCEL_TIMEOUT_S)
     tail = _text_after("CUDA Version:", smi)
     if tail:
         token = tail.split()
@@ -98,19 +96,14 @@ def cuda_runtime_version() -> str | None:
 
 
 def nvidia_smi_devices_and_driver() -> tuple[tuple[str, ...], str | None]:
-    names_text = _run_probe(
-        "nvidia-smi",
-        "--query-gpu=name",
-        "--format=csv,noheader",
-        timeout=_ACCEL_TIMEOUT_S,
-    )
+    names_text = _run_nvidia_smi_gpu_names(_ACCEL_TIMEOUT_S)
     if not names_text:
         return (), None
     names = tuple(line.strip() for line in names_text.splitlines() if line.strip())
     if not names:
         return (), None
     driver = None
-    smi = _run_probe("nvidia-smi", timeout=_ACCEL_TIMEOUT_S)
+    smi = _run_nvidia_smi(_ACCEL_TIMEOUT_S)
     tail = _text_after("Driver Version:", smi)
     if tail:
         token = tail.split()
@@ -120,7 +113,7 @@ def nvidia_smi_devices_and_driver() -> tuple[tuple[str, ...], str | None]:
 
 
 def rocm_devices_and_driver() -> tuple[tuple[str, ...], str | None]:
-    output = _run_probe("rocminfo", timeout=_ACCEL_TIMEOUT_S)
+    output = _run_rocminfo(_ACCEL_TIMEOUT_S)
     if not output:
         return (), None
     names: list[str] = []
@@ -233,35 +226,118 @@ def _apply_cuda_visibility(devices: tuple[str, ...]) -> tuple[str, ...]:
     return tuple(selected)
 
 
-_ALLOWED_PROBES = frozenset({"git", "nvcc", "nvidia-smi", "rocminfo"})
-
-
-def _resolved_executable(name: str) -> str | None:
-    if name not in _ALLOWED_PROBES:
-        return None
-    found = shutil.which(name)
-    if not found:
-        return None
-    path = Path(found)
-    if not path.is_absolute():
-        return None
-    return str(path)
-
-
-def _run_probe(
-    name: str,
-    *args: str,
-    cwd: Path | None = None,
-    timeout: float,
-) -> str | None:
-    executable = _resolved_executable(name)
-    if executable is None:
-        return None
+def _run_git_rev_parse_head(cwd: Path | None, timeout: float) -> str | None:
     try:
-        # Absolute argv[0], shell=False, allowlisted probe names only.
-        completed = subprocess.run(  # nosec B603  # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit
-            [executable, *args],
+        completed = subprocess.run(  # nosec B603
+            ["git", "rev-parse", "HEAD"],
             cwd=cwd,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            shell=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return _ok_stdout(completed)
+
+
+def _run_git_show_toplevel(timeout: float) -> str | None:
+    try:
+        completed = subprocess.run(  # nosec B603
+            ["git", "rev-parse", "--show-toplevel"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            shell=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return _ok_stdout(completed)
+
+
+def _run_git_status_porcelain(cwd: Path | None, timeout: float) -> str | None:
+    try:
+        completed = subprocess.run(  # nosec B603
+            ["git", "status", "--porcelain"],
+            cwd=cwd,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            shell=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return _ok_stdout(completed)
+
+
+def _run_git_diff_head(cwd: Path | None, timeout: float) -> str | None:
+    try:
+        completed = subprocess.run(  # nosec B603
+            ["git", "diff", "HEAD"],
+            cwd=cwd,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            shell=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return _ok_stdout(completed)
+
+
+def _run_nvcc_version(timeout: float) -> str | None:
+    try:
+        completed = subprocess.run(  # nosec B603
+            ["nvcc", "--version"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            shell=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return _ok_stdout(completed)
+
+
+def _run_nvidia_smi(timeout: float) -> str | None:
+    try:
+        completed = subprocess.run(  # nosec B603
+            ["nvidia-smi"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            shell=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return _ok_stdout(completed)
+
+
+def _run_nvidia_smi_gpu_names(timeout: float) -> str | None:
+    try:
+        completed = subprocess.run(  # nosec B603
+            ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            shell=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return _ok_stdout(completed)
+
+
+def _run_rocminfo(timeout: float) -> str | None:
+    try:
+        completed = subprocess.run(  # nosec B603
+            ["rocminfo"],
             check=False,
             capture_output=True,
             text=True,
