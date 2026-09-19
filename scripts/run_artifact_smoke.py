@@ -8,7 +8,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.append(str(REPO_ROOT))
 sys.path.append(str(REPO_ROOT / "src"))
 
-from benchmarks.artifact_smoke import run_artifact_smoke
+from benchmarks.artifact_smoke import run_artifact_smoke  # noqa: E402
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:

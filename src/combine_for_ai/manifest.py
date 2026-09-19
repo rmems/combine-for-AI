@@ -225,12 +225,12 @@ def _validate_goz1_header_fields(
     meta_count: int,
 ) -> Goz1HeaderInfo:
     """Validate unpacked GOZ1 header fields (fail-closed)."""
-    common = dict(
-        version=version,
-        tensor_count=tensor_count,
-        meta_count=meta_count,
-        file_size=file_size,
-    )
+    common = {
+        "version": version,
+        "tensor_count": tensor_count,
+        "meta_count": meta_count,
+        "file_size": file_size,
+    }
     if magic_u32 != GOZ1_MAGIC:
         return _goz1_header_fail(
             path_s,
