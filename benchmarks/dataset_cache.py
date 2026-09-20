@@ -11,10 +11,15 @@ import json
 import os
 import secrets
 import time
+from dataclasses import replace
 from pathlib import Path
 from typing import Never
 
-from benchmarks.dataset_cache_hf import fetch_huggingface_dataset, huggingface_source_uri
+from benchmarks.dataset_cache_hf import (
+    fetch_huggingface_dataset,
+    huggingface_source_uri,
+    resolve_huggingface_revision,
+)
 from benchmarks.dataset_cache_io import (
     destination_occupied_by_live_entry,
     is_directory,
@@ -114,8 +119,10 @@ class DatasetCache:
         root = Path(root_raw).expanduser() if root_raw else default_cache_root()
         return DatasetCache(root=root, mode=parse_cache_mode(mode_raw))
 
-    def key_for(self, spec: DatasetSpec) -> CacheKey:
-        return cache_key_for(spec)
+    def key_for(
+        self, spec: DatasetSpec, *, resolved_revision: str | None = None
+    ) -> CacheKey:
+        return cache_key_for(spec, resolved_revision=resolved_revision)
 
     def entry_dir(self, key: CacheKey) -> Path:
         return self.root / key.digest()
@@ -132,7 +139,18 @@ class DatasetCache:
                 path=entry,
                 reason="missing-artifact",
             )
-        return self._fetch_and_store(spec, key, entry, existing, fetch)
+        resolved_spec = spec
+        if spec.hf_id:
+            resolved_revision = resolve_huggingface_revision(spec)
+            resolved_spec = replace(spec, revision=resolved_revision)
+            resolved_key = self.key_for(spec, resolved_revision=resolved_revision)
+            if resolved_key != key:
+                key = resolved_key
+                entry = self.entry_dir(key)
+                existing = self._load_existing(entry, key)
+                if existing is not None and self._use_existing_without_fetch():
+                    return existing
+        return self._fetch_and_store(resolved_spec, key, entry, existing, fetch)
 
     def _load_existing(self, entry: Path, key: CacheKey) -> CacheLoad | None:
         if lstat_or_none(entry) is None:
@@ -228,7 +246,9 @@ class DatasetCache:
         live = self.entry_dir(key)
         try:
             write_cache_files(staging, payload, manifest)
-            self._publish_staging(staging, live)
+            published = self._publish_staging(staging, live)
+            if not published:
+                return self._read_valid(live, key)
         except (OSError, CacheValidationError):
             if lstat_or_none(staging) is not None:
                 self._quarantine(staging, reason="incomplete-store")
@@ -240,7 +260,7 @@ class DatasetCache:
             cache_hit=False,
         )
 
-    def _publish_staging(self, staging: Path, live: Path) -> None:
+    def _publish_staging(self, staging: Path, live: Path) -> bool:
         try:
             os.rename(staging, live)
         except OSError as exc:
@@ -248,6 +268,8 @@ class DatasetCache:
                 raise
             if lstat_or_none(staging) is not None:
                 self._quarantine(staging, reason="lost-publish-race")
+            return False
+        return True
 
     def _ensure_writable_root(self) -> None:
         self.root.mkdir(parents=True, exist_ok=True)

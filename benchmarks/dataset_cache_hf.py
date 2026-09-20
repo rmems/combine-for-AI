@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from benchmarks.dataset_cache_models import (
@@ -15,6 +16,34 @@ try:
     from datasets import load_dataset as hf_load_dataset
 except ImportError:
     hf_load_dataset = None
+
+try:
+    from huggingface_hub import HfApi
+except ImportError:
+    HfApi = None
+
+
+_COMMIT_SHA = re.compile(r"[0-9a-f]{40}", re.IGNORECASE)
+
+
+def resolve_huggingface_revision(spec: DatasetSpec) -> str:
+    revision = requested_revision(spec)
+    if _COMMIT_SHA.fullmatch(revision):
+        return revision
+    if HfApi is None:
+        raise ImportError(
+            "huggingface_hub is required to resolve Hugging Face revisions; "
+            "install with `pip install datasets`"
+        )
+    if not spec.hf_id:
+        raise ValueError(f"hf dataset {spec.name!r} is missing hf_id")
+    resolved = HfApi().dataset_info(spec.hf_id, revision=revision).sha
+    if not resolved or not _COMMIT_SHA.fullmatch(resolved):
+        raise ValueError(
+            f"Hugging Face returned an invalid commit SHA for {spec.hf_id!r}: "
+            f"{resolved!r}"
+        )
+    return resolved
 
 
 def huggingface_source_uri(spec: DatasetSpec) -> str:

@@ -85,13 +85,35 @@ def dir_open_flags() -> int:
 
 def open_dir_nofollow(path: Path) -> int:
     try:
+        if is_symlink(path.lstat()):
+            raise CacheValidationError(
+                f"cache entry is an unsafe symlink: {path}",
+                path=path,
+                reason="unsafe-symlink",
+            )
+    except CacheValidationError:
+        raise
+    except OSError as exc:
+        raise CacheValidationError(
+            f"cannot inspect cache entry directory {path}: {exc}",
+            path=path,
+            reason=_dir_open_error_reason(exc),
+        ) from exc
+    try:
         return os.open(path, dir_open_flags())
     except OSError as exc:
         raise CacheValidationError(
-            f"cache entry is not a real directory: {path}",
+            f"cannot open cache entry directory {path}: {exc}",
             path=path,
-            reason="unsafe-symlink",
+            reason=_dir_open_error_reason(exc),
         ) from exc
+
+
+def _dir_open_error_reason(exc: OSError) -> str:
+    return {
+        errno.ELOOP: "unsafe-symlink",
+        errno.ENOTDIR: "not-a-directory",
+    }.get(exc.errno, "unreadable-entry")
 
 
 def read_in_dir(dir_fd: int, name: str, entry: Path) -> bytes:

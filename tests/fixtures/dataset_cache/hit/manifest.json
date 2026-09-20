@@ -3,17 +3,17 @@
     "configuration": "",
     "dataset_name": "fixture-cloze",
     "hf_id": "local/fixture-cloze",
-    "revision": "rev-1",
+    "revision": "1111111111111111111111111111111111111111",
     "schema_version": "1",
     "split": "validation"
   },
-  "cache_key_digest": "680964f2dfa403f2387eae7a3249c8ab10bfed184997ebf12a42c7dcbf5739ef",
+  "cache_key_digest": "0c0047925fe2ef08b3d65606c0dcdd2a5f22ed511f42069f56c89260ddd31e94",
   "checksum_sha256": "c8e8dbed4ea7972e68be523e7f249ae619303ecac8092be186a8e30f18a0f7d6",
   "license_scope": "dataset_source_not_repository",
   "loader_schema_version": "1",
-  "resolved_revision": "rev-1",
+  "resolved_revision": "1111111111111111111111111111111111111111",
   "retrieved_at": "2026-09-15T00:00:00Z",
   "row_count": 2,
-  "source_uri": "hf://datasets/local/fixture-cloze@rev-1",
+  "source_uri": "hf://datasets/local/fixture-cloze@1111111111111111111111111111111111111111",
   "upstream_license": "cc-by-4.0"
 }

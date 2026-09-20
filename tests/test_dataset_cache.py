@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
+import errno
 import json
 import os
 import shutil
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
+import benchmarks.dataset_cache as dataset_cache_module
+import benchmarks.dataset_cache_hf as dataset_cache_hf
+import benchmarks.dataset_cache_io as dataset_cache_io
 from benchmarks.dataset_cache import (
     DEFAULT_HF_REVISION,
     LICENSE_SCOPE_DATASET_SOURCE,
@@ -23,20 +28,24 @@ from benchmarks.dataset_cache import (
     cache_key_for,
     checksum_bytes,
     encode_records,
+    fetch_huggingface_dataset,
     parse_cache_mode,
     requested_revision,
 )
+from benchmarks.dataset_cache_io import open_dir_nofollow
+from benchmarks.dataset_types import validate_dataset_record
 from benchmarks.datasets import DatasetRecord, DatasetSpec, HuggingFaceDatasetLoader, JsonlDatasetLoader
 from benchmarks.runner import _apply_dataset_cache_defaults, run_benchmarks
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "dataset_cache"
+FIXTURE_REVISION = "1" * 40
 
 FIXTURE_SPEC = DatasetSpec(
     name="fixture-cloze",
     source="hf",
     hf_id="local/fixture-cloze",
     split="validation",
-    revision="rev-1",
+    revision=FIXTURE_REVISION,
 )
 
 
@@ -48,7 +57,7 @@ def _fetch_ok(
     spec: DatasetSpec,
     *,
     license_id: str = "cc-by-4.0",
-    revision: str = "rev-1",
+    revision: str = FIXTURE_REVISION,
 ) -> FetchResult:
     return FetchResult(
         records=[
@@ -79,7 +88,7 @@ def test_cache_key_includes_name_config_split_revision_and_schema() -> None:
     assert key.hf_id == "local/fixture-cloze"
     assert key.configuration == ""
     assert key.split == "validation"
-    assert key.revision == "rev-1"
+    assert key.revision == FIXTURE_REVISION
     assert key.schema_version == LOADER_SCHEMA_VERSION
     again = cache_key_for(FIXTURE_SPEC)
     assert key.digest() == again.digest()
@@ -89,7 +98,7 @@ def test_cache_key_includes_name_config_split_revision_and_schema() -> None:
             name="fixture-cloze",
             hf_id="local/fixture-cloze",
             split="validation",
-            revision="rev-2",
+            revision="2" * 40,
         )
     )
     assert other.digest() != key.digest()
@@ -99,7 +108,7 @@ def test_cache_key_includes_name_config_split_revision_and_schema() -> None:
             name="fixture-cloze",
             hf_id="other/fixture-cloze",
             split="validation",
-            revision="rev-1",
+            revision=FIXTURE_REVISION,
         )
     )
     assert other_source.digest() != key.digest()
@@ -110,7 +119,7 @@ def test_cache_key_includes_name_config_split_revision_and_schema() -> None:
             hf_id="local/fixture-cloze",
             hf_subset="plain_text",
             split="validation",
-            revision="rev-1",
+            revision=FIXTURE_REVISION,
         )
     )
     assert subset.configuration == "plain_text"
@@ -248,7 +257,7 @@ def test_hf_loader_offline_hit_skips_injected_client(tmp_path: Path) -> None:
         source="hf",
         hf_id="local/fixture-cloze",
         split="validation",
-        revision="rev-1",
+        revision=FIXTURE_REVISION,
         cache_mode="offline",
         cache_root=str(tmp_path / "cache"),
     )
@@ -270,7 +279,7 @@ def test_hf_loader_offline_miss_skips_injected_client(tmp_path: Path) -> None:
         source="hf",
         hf_id="local/fixture-cloze",
         split="validation",
-        revision="rev-1",
+        revision=FIXTURE_REVISION,
         cache_mode="offline",
         cache_root=str(tmp_path / "cache"),
     )
@@ -285,7 +294,7 @@ def test_prefer_cache_miss_fetches_once(tmp_path: Path) -> None:
         source="hf",
         hf_id="local/fixture-cloze",
         split="validation",
-        revision="rev-1",
+        revision=FIXTURE_REVISION,
         cache_mode="prefer-cache",
         cache_root=str(tmp_path / "cache"),
         max_samples=1,
@@ -317,6 +326,18 @@ def test_hf_loader_rejects_negative_max_samples() -> None:
         )
 
 
+def test_dataset_spec_rejects_boolean_max_samples() -> None:
+    with pytest.raises(ValueError, match="integer"):
+        DatasetSpec(name="fixture-cloze", max_samples=False)
+
+
+def test_dataset_record_rejects_boolean_answer_index() -> None:
+    with pytest.raises(ValueError, match="integer answer_index"):
+        validate_dataset_record(
+            DatasetRecord(prompt="question", choices=["no", "yes"], answer_index=True)
+        )
+
+
 def test_unpinned_hf_revision_defaults_to_main() -> None:
     spec = DatasetSpec(name="fixture-cloze", hf_id="local/fixture-cloze")
     assert requested_revision(spec) == DEFAULT_HF_REVISION
@@ -341,7 +362,7 @@ def test_explicit_license_override_on_cache_hit(tmp_path: Path) -> None:
         source="hf",
         hf_id="local/fixture-cloze",
         split="validation",
-        revision="rev-1",
+        revision=FIXTURE_REVISION,
         cache_mode="offline",
         cache_root=str(tmp_path / "cache"),
         upstream_license="cc-by-4.0",
@@ -457,6 +478,54 @@ def test_symlink_records_file_is_rejected_without_following(tmp_path: Path) -> N
     assert (excinfo.value.quarantined_to / "records.jsonl").is_symlink()
 
 
+@pytest.mark.parametrize(
+    ("error_number", "reason"),
+    [
+        (errno.ELOOP, "unsafe-symlink"),
+        (errno.ENOTDIR, "not-a-directory"),
+        (errno.EACCES, "unreadable-entry"),
+    ],
+)
+def test_open_dir_preserves_failure_reason(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, error_number: int, reason: str
+) -> None:
+    entry = tmp_path / "entry"
+    entry.mkdir()
+
+    def fail_open(*args, **kwargs):
+        raise OSError(error_number, os.strerror(error_number))
+
+    monkeypatch.setattr(dataset_cache_io.os, "open", fail_open)
+    with pytest.raises(CacheValidationError) as excinfo:
+        open_dir_nofollow(entry)
+    assert excinfo.value.reason == reason
+
+
+def test_unreadable_entry_is_quarantined_with_accurate_reason(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cache = _offline_cache(tmp_path)
+    entry = _install_fixture(cache, FIXTURE_SPEC, "hit")
+    real_open = os.open
+
+    def deny_entry(path, *args, **kwargs):
+        if Path(path) == entry:
+            raise OSError(errno.EACCES, os.strerror(errno.EACCES))
+        return real_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(dataset_cache_io.os, "open", deny_entry)
+    with pytest.raises(CacheValidationError) as excinfo:
+        cache.load(FIXTURE_SPEC, fetch=_network_must_not_run)
+
+    error = excinfo.value
+    assert error.reason == "unreadable-entry"
+    assert error.quarantined_to is not None
+    note = json.loads(
+        (error.quarantined_to / "quarantine.json").read_text(encoding="utf-8")
+    )
+    assert note["reason"] == "unreadable-entry"
+
+
 def test_symlink_cache_root_can_store(tmp_path: Path) -> None:
     real = tmp_path / "real-cache"
     real.mkdir()
@@ -479,14 +548,23 @@ def test_second_store_keeps_existing_live_entry(tmp_path: Path) -> None:
     root = tmp_path / "cache"
     cache = DatasetCache(root=root, mode=CacheMode.PREFER_CACHE)
     first = cache.load(FIXTURE_SPEC, fetch=_fetch_ok)
-    payload = encode_records(first.records)
+    loser = FetchResult(
+        records=[DatasetRecord(prompt="losing record", reference="loser")],
+        source_uri=f"hf://datasets/{FIXTURE_SPEC.hf_id}@{FIXTURE_REVISION}",
+        resolved_revision=FIXTURE_REVISION,
+        upstream_license="cc-by-4.0",
+    )
+    loser_payload = encode_records(loser.records)
     again = cache._store(
         cache.key_for(FIXTURE_SPEC),
-        _fetch_ok(FIXTURE_SPEC),
-        payload,
-        checksum_bytes(payload),
+        loser,
+        loser_payload,
+        checksum_bytes(loser_payload),
     )
     assert again.cache_path == first.cache_path
+    assert again.cache_hit is True
+    assert again.records == first.records
+    assert again.manifest == first.manifest
     assert first.cache_path.is_dir()
     assert list(root.glob(".*.staging-*")) == []
     notes = list((root / "quarantine").glob("*/quarantine.json"))
@@ -497,3 +575,91 @@ def test_second_store_keeps_existing_live_entry(tmp_path: Path) -> None:
     assert hit.cache_hit is True
     assert hit.manifest.checksum_sha256 == first.manifest.checksum_sha256
 
+
+def test_publish_race_propagates_invalid_winner(tmp_path: Path) -> None:
+    cache = DatasetCache(root=tmp_path / "cache", mode=CacheMode.PREFER_CACHE)
+    key = cache.key_for(FIXTURE_SPEC)
+    live = cache.entry_dir(key)
+    live.mkdir(parents=True)
+    (live / "records.jsonl").write_text("corrupt\n", encoding="utf-8")
+
+    fetched = _fetch_ok(FIXTURE_SPEC)
+    payload = encode_records(fetched.records)
+    with pytest.raises(CacheValidationError, match="incomplete cache entry"):
+        cache._store(key, fetched, payload, checksum_bytes(payload))
+
+    assert live.is_dir()
+    assert (live / "records.jsonl").read_text(encoding="utf-8") == "corrupt\n"
+
+
+def test_movable_hf_revision_is_pinned_before_key_and_fetch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    resolved_revision = "a" * 40
+    spec = DatasetSpec(
+        name="movable",
+        source="hf",
+        hf_id="org/dataset",
+        revision="main",
+    )
+    observed: dict[str, object] = {}
+
+    class FakeDataset(list):
+        info = SimpleNamespace(license="mit")
+
+    def resolve(item: DatasetSpec) -> str:
+        observed["resolved_spec"] = item
+        return resolved_revision
+
+    def load_dataset(dataset_id, subset, *, split, revision):
+        observed["load"] = (dataset_id, subset, split, revision)
+        return FakeDataset([{"prompt": "question", "reference": "answer"}])
+
+    monkeypatch.setattr(dataset_cache_module, "resolve_huggingface_revision", resolve)
+    monkeypatch.setattr(dataset_cache_hf, "hf_load_dataset", load_dataset)
+    cache = DatasetCache(root=tmp_path / "cache", mode=CacheMode.PREFER_CACHE)
+
+    loaded = cache.load(spec, fetch=fetch_huggingface_dataset)
+
+    expected_key = cache_key_for(spec, resolved_revision=resolved_revision)
+    assert loaded.cache_path == cache.entry_dir(expected_key)
+    assert loaded.manifest.cache_key["revision"] == resolved_revision
+    assert loaded.manifest.resolved_revision == resolved_revision
+    assert loaded.manifest.source_uri == (
+        f"hf://datasets/{spec.hf_id}@{resolved_revision}"
+    )
+    assert observed["load"] == (
+        spec.hf_id,
+        None,
+        spec.split,
+        resolved_revision,
+    )
+
+
+def test_offline_legacy_hit_does_not_resolve_movable_revision(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    spec = DatasetSpec(
+        name="legacy",
+        source="hf",
+        hf_id="org/dataset",
+        revision="main",
+    )
+    writer = DatasetCache(root=tmp_path / "cache", mode=CacheMode.PREFER_CACHE)
+    fetched = _fetch_ok(spec, revision="main")
+    payload = encode_records(fetched.records)
+    writer._store(
+        writer.key_for(spec), fetched, payload, checksum_bytes(payload)
+    )
+
+    def fail_resolution(_spec: DatasetSpec) -> str:
+        raise AssertionError("remote revision resolution invoked")
+
+    monkeypatch.setattr(
+        dataset_cache_module, "resolve_huggingface_revision", fail_resolution
+    )
+    cache = DatasetCache(root=writer.root, mode=CacheMode.OFFLINE)
+    loaded = cache.load(spec, fetch=_network_must_not_run)
+
+    assert loaded.cache_hit is True
+    assert loaded.manifest.resolved_revision == "main"

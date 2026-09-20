@@ -183,13 +183,18 @@ def requested_revision(spec: DatasetSpec) -> str:
     return UNSPECIFIED_REVISION
 
 
-def cache_key_for(spec: DatasetSpec, *, schema_version: str = LOADER_SCHEMA_VERSION) -> CacheKey:
+def cache_key_for(
+    spec: DatasetSpec,
+    *,
+    resolved_revision: str | None = None,
+    schema_version: str = LOADER_SCHEMA_VERSION,
+) -> CacheKey:
     return CacheKey(
         dataset_name=spec.name,
         hf_id=spec.hf_id or "",
         configuration=spec.hf_subset or "",
         split=spec.split,
-        revision=requested_revision(spec),
+        revision=resolved_revision or requested_revision(spec),
         schema_version=schema_version,
     )
 

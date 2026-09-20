@@ -20,8 +20,11 @@ class DatasetSpec:
     upstream_license: str | None = None
 
     def __post_init__(self) -> None:
-        if self.max_samples is not None and self.max_samples < 0:
-            raise ValueError("max_samples must be non-negative")
+        if self.max_samples is not None:
+            if type(self.max_samples) is not int:
+                raise ValueError("max_samples must be an integer")
+            if self.max_samples < 0:
+                raise ValueError("max_samples must be non-negative")
 
     @staticmethod
     def from_dict(raw: dict) -> "DatasetSpec":
@@ -88,7 +91,7 @@ def _require_choice_list(record: DatasetRecord) -> None:
 
 
 def _require_answer_index(record: DatasetRecord) -> None:
-    if not isinstance(record.answer_index, int):
+    if type(record.answer_index) is not int:
         raise ValueError("multiple-choice records require an integer answer_index")
     if record.choices is None or record.answer_index < 0 or record.answer_index >= len(
         record.choices
