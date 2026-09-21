@@ -58,6 +58,20 @@ def _reject_blank_choice(choices: list[str], *, dataset: str, example_id: str) -
             )
 
 
+def _reject_classification_expected_text(
+    dataset: str,
+    example_id: str,
+    expected: str | None,
+) -> None:
+    if expected is None or not str(expected).strip():
+        return
+    label = _case_label(dataset, example_id)
+    raise ValueError(
+        f"malformed classification target ({label}): "
+        "expected/reference must not be set; use choices and answer_index"
+    )
+
+
 def _reject_classification_shape(
     *,
     dataset: str,
@@ -80,11 +94,7 @@ def _reject_classification_shape(
             f"malformed choices ({label}): answer_index "
             f"{answer_index} is out of range for {len(choices)} choices"
         )
-    if expected is not None and str(expected).strip():
-        raise ValueError(
-            f"malformed classification target ({label}): "
-            "expected/reference must not be set; use choices and answer_index"
-        )
+    _reject_classification_expected_text(dataset, example_id, expected)
 
 
 def _reject_open_ended_shape(
@@ -304,6 +314,16 @@ def stable_example_id(dataset: str, split: str, index: int, explicit: str | None
     return f"{dataset}:{split}:{index:04d}"
 
 
+def _fixture_id_conflicts_with_split(candidate: str, dataset: str, split: str) -> bool:
+    parts = candidate.split(":")
+    return (
+        len(parts) >= 3
+        and parts[0] == dataset
+        and parts[1] != split
+        and parts[2].isdigit()
+    )
+
+
 def resolve_example_id(
     dataset: str,
     split: str,
@@ -314,13 +334,7 @@ def resolve_example_id(
     if explicit is not None:
         candidate = str(explicit).strip()
         if candidate:
-            parts = candidate.split(":")
-            if (
-                len(parts) >= 3
-                and parts[0] == dataset
-                and parts[1] != split
-                and parts[2].isdigit()
-            ):
+            if _fixture_id_conflicts_with_split(candidate, dataset, split):
                 return stable_example_id(dataset, split, index, None)
             return candidate
     return stable_example_id(dataset, split, index, None)

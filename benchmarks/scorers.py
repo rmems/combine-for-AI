@@ -76,6 +76,10 @@ def canonicalize_math(token: str | None) -> str | None:
         return stripped.lower()
     if not value.is_finite():
         return None
+    return _render_canonical_decimal(value)
+
+
+def _render_canonical_decimal(value: Decimal) -> str:
     if value == value.to_integral_value():
         return format(value.quantize(Decimal(1)), "f")
     rendered = format(value, "f")
@@ -348,6 +352,10 @@ def _corpus_token_logprobs(
             expected="at least one logprob value",
             observed=0,
         )
+    return _corpus_dataset_label(cases), token_logprobs
+
+
+def _corpus_dataset_label(cases: Sequence[DatasetCase]) -> str:
     datasets = {case.dataset for case in cases}
     if len(datasets) != 1:
         raise ScorerError(
@@ -357,7 +365,7 @@ def _corpus_token_logprobs(
             expected="single dataset",
             observed=sorted(datasets),
         )
-    return cases[0].dataset, token_logprobs
+    return cases[0].dataset
 
 
 def score_perplexity_corpus(
