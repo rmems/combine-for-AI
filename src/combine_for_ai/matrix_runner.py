@@ -26,8 +26,10 @@ from combine_for_ai.matrix import (
     dataset_payload,
     family_aggregates,
     index_baselines,
+    matrix_execution_fingerprint,
     outcome_from_progress,
     outcome_to_progress,
+    validate_cell_progress,
 )
 
 SUPPORTED_REPORT_FORMATS = frozenset({"json", "csv", "markdown"})
@@ -207,6 +209,13 @@ class MatrixRunner:
             if outcome.status is CellStatus.FAILED and self.fail_fast:
                 break
 
+        if self.fail_fast and len(outcomes) < len(self.matrix.cells):
+            for cell in self.matrix.cells[len(outcomes) :]:
+                skipped = CellOutcome.skipped(cell)
+                outcomes.append(skipped)
+                stored_cells[cell.cell_id] = outcome_to_progress(skipped)
+            self._write_progress(stored_cells)
+
         report = build_matrix_report(
             self.matrix,
             outcomes,
@@ -225,6 +234,7 @@ class MatrixRunner:
         if not _should_execute(previous, resume=self.resume):
             if stored is None:
                 raise MatrixError(f"missing stored progress for cell {cell.cell_id}")
+            validate_cell_progress(cell, stored)
             return outcome_from_progress(cell, stored)
 
         stored_cells[cell.cell_id] = outcome_to_progress(
@@ -270,6 +280,7 @@ class MatrixRunner:
             return {"cells": {}}
         if not isinstance(cells, dict):
             raise MatrixError(f"progress file cells must be an object: {path}")
+        _validate_progress_header(payload, self.matrix)
         return {"cells": cells}
 
     def _write_progress(self, cells: dict[str, Any]) -> None:
@@ -277,17 +288,37 @@ class MatrixRunner:
             "version": PROGRESS_VERSION,
             "matrix_name": self.matrix.name,
             "matrix_run_id": self.run_id,
+            "matrix_fingerprint": matrix_execution_fingerprint(self.matrix),
             "baseline_quantization": self.matrix.baseline_quantization,
             "cells": cells,
         }
-        write_json(self.progress_path, payload)
+        tmp_path = self.progress_path.with_suffix(".json.tmp")
+        write_json(tmp_path, payload)
+        tmp_path.replace(self.progress_path)
 
 
 def default_matrix_run_id() -> str:
     now = time.time()
     stamp = time.strftime("%Y%m%dT%H%M%S", time.gmtime(now))
-    millis = int(now % 1 * 1000)
+    millis = int((now % 1) * 1000)
     return f"{stamp}.{millis:03d}Z-{secrets.token_hex(4)}-matrix"
+
+
+def _validate_progress_header(payload: dict[str, Any], matrix: ExperimentMatrix) -> None:
+    if payload.get("matrix_name") != matrix.name:
+        raise MatrixError(
+            "progress file belongs to a different matrix_name; rerun with --fresh"
+        )
+    expected = matrix_execution_fingerprint(matrix)
+    stored = payload.get("matrix_fingerprint")
+    if stored != expected:
+        raise MatrixError(
+            "progress file does not match this matrix selection; rerun with --fresh"
+        )
+    if payload.get("baseline_quantization") != matrix.baseline_quantization:
+        raise MatrixError(
+            "progress file baseline_quantization differs; rerun with --fresh"
+        )
 
 
 def build_matrix_report(
@@ -310,7 +341,7 @@ def build_matrix_report(
             case CellStatus.SKIPPED:
                 skipped += 1
             case CellStatus.PENDING | CellStatus.RUNNING:
-                pass
+                skipped += 1
             case _:
                 assert_never(outcome.status)
         baseline = baselines.get((outcome.cell.model.name, outcome.cell.dataset.name))

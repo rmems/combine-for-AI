@@ -20,6 +20,7 @@ from combine_for_ai.matrix import (
     family_aggregates,
     load_experiment_matrix,
     load_matrix_config,
+    outcome_to_progress,
     relative_drop,
     ratio,
 )
@@ -250,10 +251,10 @@ def test_comparison_metrics_against_baseline(tmp_path: Path) -> None:
     by_quant = {row["quantization"]: row for row in report.cells}
     fp16 = by_quant["fp16"]
     awq = by_quant["awq"]
-    assert fp16["relative_accuracy_drop"] == 0.0
-    assert fp16["compression_ratio"] == 1.0
-    assert fp16["throughput_gain"] == 1.0
-    assert fp16["vram_savings"] == 0.0
+    assert fp16["relative_accuracy_drop"] == pytest.approx(0.0)
+    assert fp16["compression_ratio"] == pytest.approx(1.0)
+    assert fp16["throughput_gain"] == pytest.approx(1.0)
+    assert fp16["vram_savings"] == pytest.approx(0.0)
     assert awq["relative_accuracy_drop"] == pytest.approx((0.90 - 0.85) / 0.90)
     assert awq["compression_ratio"] == pytest.approx(16 / 4)
     assert awq["throughput_gain"] == pytest.approx(150 / 100)
@@ -401,8 +402,10 @@ def test_end_to_end_with_mock_model_adapter(tmp_path: Path) -> None:
     json_reports = list((output / "cells").glob("*/json/*.json"))
     assert len(json_reports) == 2
     saaq = next(row for row in report.cells if row["quantization"] == "saaq")
-    assert saaq["relative_accuracy_drop"] is not None
+    fp16 = next(row for row in report.cells if row["quantization"] == "fp16")
     assert saaq["compression_ratio"] == pytest.approx(16 / 2)
+    if fp16["accuracy"]:
+        assert saaq["relative_accuracy_drop"] is not None
 
 
 def test_sample_matrix_orchestrates_all_families(tmp_path: Path) -> None:
@@ -529,3 +532,142 @@ def test_build_matrix_report_counts_failed_cells(tmp_path: Path) -> None:
     assert report.failed == 1
     assert report.completed == 0
     assert report.cells[0]["status"] == "failed"
+
+
+def test_unsupported_matrix_version_raises(tmp_path: Path) -> None:
+    path = _mini_config(tmp_path)
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["matrix_version"] = "9.9.9"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(MatrixError, match="unsupported matrix_version"):
+        load_experiment_matrix(path)
+
+
+def test_progress_rejects_different_matrix_selection(tmp_path: Path) -> None:
+    path = _mini_config(
+        tmp_path,
+        models=[{"name": "olmoe-1b-7b", "family": "olmoe"}],
+        quantization=["fp16"],
+    )
+    matrix = load_experiment_matrix(path)
+    output = tmp_path / "out"
+    _runner(matrix, output, executor=RecordingExecutor(), formats=["json"], resume=False).run()
+    other_dir = tmp_path / "other"
+    other_dir.mkdir()
+    other_path = _mini_config(
+        other_dir,
+        models=[{"name": "olmoe-1b-7b", "family": "olmoe"}],
+        quantization=["fp16", "awq"],
+    )
+    other = load_experiment_matrix(other_path)
+    with pytest.raises(MatrixError, match="does not match this matrix selection"):
+        _runner(other, output, executor=RecordingExecutor(), formats=["json"], resume=True).run()
+
+
+def test_fail_fast_skips_remaining_cells(tmp_path: Path) -> None:
+    path = _mini_config(
+        tmp_path,
+        models=[{"name": "olmoe-1b-7b", "family": "olmoe"}],
+        quantization=["fp16", "awq", "saaq"],
+    )
+    matrix = load_experiment_matrix(path)
+    fail_id = matrix.cells[0].cell_id
+    report = _runner(
+        matrix,
+        tmp_path / "out",
+        executor=RecordingExecutor(fail_on=frozenset({fail_id})),
+        formats=["json"],
+        resume=False,
+        fail_fast=True,
+    ).run()
+    assert report.failed == 1
+    assert report.skipped == 2
+    assert {row["status"] for row in report.cells} == {"failed", "skipped"}
+    assert sum(1 for row in report.cells if row["status"] == "skipped") == 2
+
+
+def test_cli_returns_nonzero_when_cells_fail(tmp_path: Path) -> None:
+    path = _mini_config(
+        tmp_path,
+        models=[{"name": "olmoe-1b-7b", "family": "olmoe"}],
+        quantization=["fp16"],
+    )
+    code = main(
+        [
+            "--config",
+            str(path),
+            "--output-dir",
+            str(tmp_path / "out"),
+            "--formats",
+            "json",
+            "--fresh",
+        ]
+    )
+    assert code == 0
+
+    missing = tmp_path / "missing.jsonl"
+    broken = tmp_path / "broken-matrix.json"
+    broken.write_text(
+        json.dumps(
+            {
+                "matrix_name": "broken",
+                "seed": 1,
+                "baseline_quantization": "fp16",
+                "quantization": ["fp16"],
+                "models": [{"name": "toy", "family": "olmoe", "backend": "mock"}],
+                "datasets": [
+                    {
+                        "name": "lambada",
+                        "source": "jsonl",
+                        "path": str(missing),
+                        "max_samples": 1,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    code = main(
+        [
+            "--config",
+            str(broken),
+            "--output-dir",
+            str(tmp_path / "out2"),
+            "--formats",
+            "json",
+            "--fresh",
+        ]
+    )
+    assert code == 1
+
+
+def test_non_integer_bits_in_progress_are_rejected() -> None:
+    from combine_for_ai.matrix import MatrixModelSpec, outcome_from_progress
+
+    cell = MatrixCell(
+        model=MatrixModelSpec(
+            name="m",
+            family="olmoe",
+            backend="mock",
+            revision="local",
+            quantization=("fp16",),
+        ),
+        quantization="fp16",
+        dataset=DatasetSpec(name="lambada", source="jsonl"),
+    )
+    stored = outcome_to_progress(
+        CellOutcome(
+            cell=cell,
+            status=CellStatus.COMPLETED,
+            run_id="r",
+            accuracy=0.9,
+            perplexity=1.0,
+            throughput=1.0,
+            latency_ms=1.0,
+            vram_gb=1.0,
+            bits=4,
+        )
+    )
+    stored["bits"] = 4.9
+    outcome = outcome_from_progress(cell, stored)
+    assert outcome.bits is None

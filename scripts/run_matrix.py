@@ -148,6 +148,8 @@ def main(argv: list[str] | None = None) -> int:
         f"families={len(report.by_family)}"
     )
     print(f"  progress: {runner.progress_path}")
+    if report.failed > 0:
+        return 1
     return 0
 
 
