@@ -56,7 +56,9 @@ def test_build_metadata_outside_a_repository_still_succeeds(
 )
 def test_git_info_survives_every_subprocess_failure(failure: Exception) -> None:
     """git missing from PATH, or hung, must degrade the same way."""
-    with mock.patch("benchmarks.runner.subprocess.check_output", side_effect=failure):
+    with mock.patch(
+        "benchmarks.runner.shutil.which", return_value="/usr/bin/git"
+    ), mock.patch("benchmarks.runner.subprocess.check_output", side_effect=failure):
         assert get_git_info() == (UNKNOWN_GIT_INFO, UNKNOWN_GIT_INFO)
 
 
