@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-import subprocess
+from subprocess import CompletedProcess
 
 from combine_for_ai.environment_probe import _apply_cuda_visibility, git_rev_parse_head
 from combine_for_ai.environment import (
@@ -319,11 +319,6 @@ def test_cuda_visibility_filters_enumerated_devices(
 
 def test_cuda_visibility_maps_gpu_uuid(monkeypatch: pytest.MonkeyPatch) -> None:
     devices = ("NVIDIA A100", "NVIDIA H100")
-    uuid_line = "GPU-aaaa-bbbb,NVIDIA A100\nGPU-cccc-dddd,NVIDIA H100"
-
-    def fake_uuid(timeout: float) -> str:
-        return uuid_line
-
     monkeypatch.setattr(
         "combine_for_ai.environment_probe._nvidia_smi_uuid_to_name",
         lambda timeout: {
@@ -365,9 +360,9 @@ def test_set_values_in_config_digest_are_order_stable() -> None:
 def test_git_probe_uses_literal_git_argv(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: list[list[str]] = []
 
-    def fake_run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+    def fake_run(argv: list[str], **kwargs: object) -> CompletedProcess[str]:
         captured.append(list(argv))
-        return subprocess.CompletedProcess(argv, 0, stdout="deadbeef\n", stderr="")
+        return CompletedProcess(argv, 0, stdout="deadbeef\n", stderr="")
 
     monkeypatch.setattr(
         "combine_for_ai.environment_probe.subprocess.run",
@@ -378,12 +373,12 @@ def test_git_probe_uses_literal_git_argv(monkeypatch: pytest.MonkeyPatch) -> Non
 
 
 def test_clean_git_status_records_dirty_false(monkeypatch: pytest.MonkeyPatch) -> None:
-    def fake_run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+    def fake_run(argv: list[str], **kwargs: object) -> CompletedProcess[str]:
         if argv[1:] == ["status", "--porcelain"]:
-            return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+            return CompletedProcess(argv, 0, stdout="", stderr="")
         if argv[1:] == ["rev-parse", "HEAD"]:
-            return subprocess.CompletedProcess(argv, 0, stdout="c" * 40 + "\n", stderr="")
-        return subprocess.CompletedProcess(argv, 1, stdout="", stderr="")
+            return CompletedProcess(argv, 0, stdout="c" * 40 + "\n", stderr="")
+        return CompletedProcess(argv, 1, stdout="", stderr="")
 
     monkeypatch.setattr(
         "combine_for_ai.environment_probe.subprocess.run",

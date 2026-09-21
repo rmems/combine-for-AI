@@ -92,19 +92,21 @@ def test_matching_fingerprints_do_not_warn() -> None:
 
 
 def test_drift_emits_concise_compatibility_warning() -> None:
-    cpu = _snapshot()
-    cuda = replace(
-        cpu,
+    cpu_snapshot: EnvironmentSnapshot = _snapshot()
+    cuda_snapshot: EnvironmentSnapshot = replace(
+        cpu_snapshot,
         accelerator_backend=AcceleratorBackend.CUDA,
         accelerator_devices=("NVIDIA GeForce RTX 4090",),
         driver_version="545.23.08",
         runtime_version="12.4",
     )
-    dirty = replace(cpu, git_commit="d" * 40, git_dirty=True)
+    dirty_snapshot: EnvironmentSnapshot = replace(
+        cpu_snapshot, git_commit="d" * 40, git_dirty=True
+    )
     cells = [
-        _cell("toy/fp16/lambada", cpu),
-        _cell("toy/saaq/lambada", cuda, quantization="saaq"),
-        _cell("toy/fp16/piqa", dirty, dataset="piqa"),
+        _cell("toy/fp16/lambada", cpu_snapshot),
+        _cell("toy/saaq/lambada", cuda_snapshot, quantization="saaq"),
+        _cell("toy/fp16/piqa", dirty_snapshot, dataset="piqa"),
     ]
     report = aggregate_matrix_report(cells, matrix_id="drift")
     assert report["compatible"] is False
@@ -151,10 +153,13 @@ def test_write_matrix_reports_rejects_unknown_formats(tmp_path: Path) -> None:
 
 
 def test_write_matrix_reports_json_and_markdown(tmp_path: Path) -> None:
-    cpu = _snapshot()
-    other = replace(cpu, lock_bytes=b"version = 2\n")
+    cpu_snapshot: EnvironmentSnapshot = _snapshot()
+    other_snapshot: EnvironmentSnapshot = replace(cpu_snapshot, lock_bytes=b"version = 2\n")
     report = aggregate_matrix_report(
-        [_cell("a/fp16/lambada", cpu), _cell("b/fp16/lambada", other, model="b")],
+        [
+            _cell("a/fp16/lambada", cpu_snapshot),
+            _cell("b/fp16/lambada", other_snapshot, model="b"),
+        ],
         matrix_id="demo",
     )
     written = write_matrix_reports(report, tmp_path, run_id="demo-run")

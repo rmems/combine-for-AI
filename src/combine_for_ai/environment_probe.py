@@ -31,6 +31,7 @@ except ImportError:
 
 _GIT_TIMEOUT_S = 5.0
 _ACCEL_TIMEOUT_S = 5.0
+_ROCM_DEVICE_TYPE_FIELD = "Device Type:"
 
 
 def discover_repo_root() -> Path:
@@ -121,7 +122,7 @@ def rocm_devices_and_driver() -> tuple[tuple[str, ...], str | None]:
         return (), None
     names: list[str] = []
     for block in re.split(r"^Agent \d+\s*$", output, flags=re.MULTILINE):
-        if "Device Type:" not in block or not _rocm_block_is_gpu(block):
+        if _ROCM_DEVICE_TYPE_FIELD not in block or not _rocm_block_is_gpu(block):
             continue
         names.extend(_rocm_marketing_names(block))
     if not names:
@@ -132,9 +133,9 @@ def rocm_devices_and_driver() -> tuple[tuple[str, ...], str | None]:
 def _rocm_block_is_gpu(block: str) -> bool:
     for line in block.splitlines():
         stripped = line.strip()
-        if not stripped.startswith("Device Type:"):
+        if not stripped.startswith(_ROCM_DEVICE_TYPE_FIELD):
             continue
-        device_type = (_text_after("Device Type:", stripped) or "").upper()
+        device_type = (_text_after(_ROCM_DEVICE_TYPE_FIELD, stripped) or "").upper()
         return device_type == "GPU"
     return False
 
