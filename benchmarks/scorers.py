@@ -74,6 +74,8 @@ def canonicalize_math(token: str | None) -> str | None:
         value = Decimal(stripped)
     except InvalidOperation:
         return stripped.lower()
+    if not value.is_finite():
+        return None
     if value == value.to_integral_value():
         return format(value.quantize(Decimal(1)), "f")
     rendered = format(value, "f")
@@ -345,6 +347,15 @@ def _corpus_token_logprobs(
             example_id="corpus",
             expected="at least one logprob value",
             observed=0,
+        )
+    datasets = {case.dataset for case in cases}
+    if len(datasets) != 1:
+        raise ScorerError(
+            "corpus cases must share one dataset",
+            dataset=cases[0].dataset,
+            example_id="corpus",
+            expected="single dataset",
+            observed=sorted(datasets),
         )
     return cases[0].dataset, token_logprobs
 

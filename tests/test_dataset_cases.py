@@ -170,6 +170,23 @@ def test_max_samples_negative_fails() -> None:
         load_sample_cases("lambada", max_samples=-1)
 
 
+def test_load_family_records_max_samples_zero() -> None:
+    loaded = load_family_records("lambada", max_samples=0)
+    assert loaded.records == []
+
+
+def test_cases_from_loaded_includes_hf_provenance() -> None:
+    loaded = load_family_records("lambada")
+    cases = cases_from_loaded(loaded)
+    assert cases[0].metadata["hf_id"] == "EleutherAI/lambada_openai"
+
+
+def test_split_override_regenerates_structured_example_id() -> None:
+    cases = load_sample_cases("lambada", split="test")
+    assert cases[0].example_id == "lambada:test:0000"
+    assert cases[0].split == "test"
+
+
 def test_whitespace_identity_is_rejected() -> None:
     with pytest.raises(DatasetCaseError, match="example_id"):
         parse_case(

@@ -190,21 +190,119 @@ def test_assert_score_rejects_nan_expected() -> None:
         assert_score(result, float("nan"))
 
 
+def _regenerate_golden_output_rows() -> list[dict]:
+    import math
+
+    golden = _load_golden()
+    rows: list[dict] = []
+    for family, group in golden["metric_families"].items():
+        family_results = []
+        for item in group["items"]:
+            case = DatasetCase.model_validate(item["case"])
+            result = score_case(
+                case,
+                prediction=item.get("prediction"),
+                logprobs=item.get("logprobs"),
+            )
+            family_results.append(result)
+            rows.append(
+                {
+                    "name": item["name"],
+                    "metric": family,
+                    "dataset": result.dataset,
+                    "example_id": result.example_id,
+                    "prompt": case.prompt,
+                    "task": case.task.value,
+                    "target": case.target,
+                    "choices": case.choices,
+                    "answer_index": case.answer_index,
+                    "prediction": item.get("prediction"),
+                    "logprobs": item.get("logprobs"),
+                    "expected_value": item["expected_value"],
+                    "observed_value": result.value,
+                    "scorer_expected": result.expected,
+                    "scorer_observed": result.observed,
+                    "tolerance": group["tolerance"],
+                    "passed": True,
+                }
+            )
+        if family != "perplexity":
+            rows.append(
+                {
+                    "name": f"{family}_mean",
+                    "metric": family,
+                    "dataset": family_results[0].dataset,
+                    "example_id": "aggregate",
+                    "expected_value": sum(float(i["expected_value"]) for i in group["items"])
+                    / len(group["items"]),
+                    "observed_value": mean_score(family_results),
+                    "tolerance": group["tolerance"],
+                    "passed": True,
+                }
+            )
+    ppl_group = golden["metric_families"]["perplexity"]
+    cases = [DatasetCase.model_validate(item["case"]) for item in ppl_group["items"]]
+    logprobs = [item["logprobs"] for item in ppl_group["items"]]
+    corpus = score_perplexity_corpus(cases, logprobs, tolerance=float(ppl_group["tolerance"]))
+    token_count = sum(len(group) for group in logprobs)
+    total = sum(sum(values) for values in logprobs)
+    expected = math.exp(-(total / token_count))
+    rows.append(
+        {
+            "name": "wikitext_corpus_perplexity",
+            "metric": "perplexity",
+            "dataset": "wikitext2",
+            "example_id": "corpus",
+            "logprobs": logprobs,
+            "expected_value": expected,
+            "observed_value": corpus.value,
+            "tolerance": ppl_group["tolerance"],
+            "passed": True,
+        }
+    )
+    return rows
+
+
 def test_golden_output_artifact_matches_fixture() -> None:
     artifact_path = Path(__file__).resolve().parent / "fixtures" / "golden_scorer_outputs.json"
     artifact = json.loads(artifact_path.read_text(encoding="utf-8"))
-    golden = _load_golden()
-    by_name = {row["name"]: row for row in artifact["rows"]}
     assert artifact["network_access"] is False
-    for family, group in golden["metric_families"].items():
-        for item in group["items"]:
-            row = by_name[item["name"]]
-            assert row["metric"] == family
-            assert row["passed"] is True
-            assert row["observed_value"] == pytest.approx(
-                float(item["expected_value"]),
-                abs=float(group["tolerance"] or 0.0) or 1e-15,
-            )
+    assert artifact["rows"] == _regenerate_golden_output_rows()
+
+
+def test_corpus_rejects_mixed_datasets() -> None:
+    cases = [
+        DatasetCase.model_validate(
+            _load_golden()["metric_families"]["perplexity"]["items"][0]["case"]
+        ),
+        DatasetCase.model_validate(
+            {
+                **_load_golden()["metric_families"]["perplexity"]["items"][1]["case"],
+                "example_id": "wikitext2:validation:0099",
+                "dataset": "lambada",
+            }
+        ),
+    ]
+    with pytest.raises(ScorerError, match="share one dataset"):
+        score_perplexity_corpus(cases, [[-0.5], [-0.5]])
+
+
+def test_canonicalize_math_rejects_infinity() -> None:
+    assert canonicalize_math("Infinity") is None
+
+
+def test_classification_rejects_bool_answer_index() -> None:
+    payload = dict(_load_golden()["metric_families"]["classification"]["items"][0]["case"])
+    payload["answer_index"] = True
+    with pytest.raises(DatasetCaseError, match="invalid case"):
+        parse_case(payload)
+
+
+def test_classification_rejects_conflicting_expected() -> None:
+    payload = dict(_load_golden()["metric_families"]["classification"]["items"][0]["case"])
+    payload["expected"] = "wrong"
+    with pytest.raises(DatasetCaseError, match="invalid case"):
+        parse_case(payload)
 
 
 def test_golden_fixture_is_self_contained() -> None:

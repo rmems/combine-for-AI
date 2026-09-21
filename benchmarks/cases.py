@@ -64,6 +64,7 @@ def _reject_classification_shape(
     example_id: str,
     choices: list[str] | None,
     answer_index: int | None,
+    expected: str | None,
 ) -> None:
     label = _case_label(dataset, example_id)
     if choices is None or len(choices) < 2:
@@ -78,6 +79,11 @@ def _reject_classification_shape(
         raise ValueError(
             f"malformed choices ({label}): answer_index "
             f"{answer_index} is out of range for {len(choices)} choices"
+        )
+    if expected is not None and str(expected).strip():
+        raise ValueError(
+            f"malformed classification target ({label}): "
+            "expected/reference must not be set; use choices and answer_index"
         )
 
 
@@ -135,6 +141,13 @@ class DatasetCase(BaseModel):
             return value.strip()
         return value
 
+    @field_validator("answer_index", mode="before")
+    @classmethod
+    def _reject_bool_answer_index(cls, value: object) -> object:
+        if isinstance(value, bool):
+            raise ValueError("answer_index must be an integer, not a boolean")
+        return value
+
     @field_validator("prompt")
     @classmethod
     def _reject_blank_prompt(cls, value: str) -> str:
@@ -180,6 +193,7 @@ class DatasetCase(BaseModel):
                 example_id=self.example_id,
                 choices=self.choices,
                 answer_index=self.answer_index,
+                expected=self.expected,
             )
         else:
             _reject_open_ended_shape(
@@ -290,6 +304,28 @@ def stable_example_id(dataset: str, split: str, index: int, explicit: str | None
     return f"{dataset}:{split}:{index:04d}"
 
 
+def resolve_example_id(
+    dataset: str,
+    split: str,
+    index: int,
+    explicit: str | None,
+) -> str:
+    """Use fixture IDs when consistent; regenerate when the split override disagrees."""
+    if explicit is not None:
+        candidate = str(explicit).strip()
+        if candidate:
+            parts = candidate.split(":")
+            if (
+                len(parts) >= 3
+                and parts[0] == dataset
+                and parts[1] != split
+                and parts[2].isdigit()
+            ):
+                return stable_example_id(dataset, split, index, None)
+            return candidate
+    return stable_example_id(dataset, split, index, None)
+
+
 def parse_case(raw: Mapping[str, Any]) -> DatasetCase:
     payload = dict(raw)
     try:
@@ -381,6 +417,10 @@ def cases_from_loaded(
 ) -> list[DatasetCase]:
     source = str(loaded.metadata.get("source", loaded.spec.source))
     base_meta = {key: value for key, value in loaded.metadata.items() if key != "source"}
+    if loaded.spec.hf_id:
+        base_meta.setdefault("hf_id", loaded.spec.hf_id)
+    if loaded.spec.hf_subset:
+        base_meta.setdefault("hf_subset", loaded.spec.hf_subset)
     cases = [
         record_to_case(
             record,
@@ -418,7 +458,12 @@ def _row_to_case(
     }
     return parse_case(
         {
-            "example_id": stable_example_id(spec.name, row_split, index, str(explicit) if explicit else None),
+            "example_id": resolve_example_id(
+                spec.name,
+                row_split,
+                index,
+                str(explicit) if explicit else None,
+            ),
             "dataset": spec.name,
             "split": row_split,
             "prompt": payload["prompt"],
