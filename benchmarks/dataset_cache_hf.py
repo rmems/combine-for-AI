@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import re
-from dataclasses import replace
 from typing import Any
 
 from benchmarks.dataset_cache_models import (
@@ -61,21 +60,26 @@ def huggingface_source_uri(
     return f"{uri}@{revision}"
 
 
-def load_hf_split(spec: DatasetSpec) -> Any:
+def load_hf_split(
+    hf_id: str,
+    subset: str | None,
+    split: str,
+    revision: str,
+) -> Any:
     if hf_load_dataset is None:
         raise ImportError(
             "datasets is required for Hugging Face sources; "
             "install with `pip install datasets`"
         )
-    if not spec.hf_id:
-        raise ValueError(f"hf dataset '{spec.name}' is missing hf_id")
-    hf_id = spec.hf_id
-    pinned_revision = resolve_huggingface_revision(spec)
+    if not _COMMIT_SHA.fullmatch(revision):
+        raise ValueError(
+            f"Hugging Face loads require a pinned commit SHA revision, got {revision!r}"
+        )
     return hf_load_dataset(
         path=hf_id,
-        name=spec.hf_subset,
-        split=spec.split,
-        revision=pinned_revision,
+        name=subset,
+        split=split,
+        revision=revision,
     )
 
 
@@ -102,8 +106,14 @@ def hf_license(spec: DatasetSpec, dataset: Any) -> str | None:
 
 def fetch_huggingface_dataset(spec: DatasetSpec) -> FetchResult:
     resolved_revision = resolve_huggingface_revision(spec)
-    pinned_spec = replace(spec, revision=resolved_revision)
-    dataset = load_hf_split(pinned_spec)
+    if not spec.hf_id:
+        raise ValueError(f"hf dataset '{spec.name}' is missing hf_id")
+    dataset = load_hf_split(
+        spec.hf_id,
+        spec.hf_subset,
+        spec.split,
+        resolved_revision,
+    )
     records = [record_from_row(row) for row in dataset]
     return FetchResult(
         records=records,

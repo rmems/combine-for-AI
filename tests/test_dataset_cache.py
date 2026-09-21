@@ -11,7 +11,6 @@ from types import SimpleNamespace
 
 import pytest
 
-import benchmarks.dataset_cache as dataset_cache_module
 import benchmarks.dataset_cache_hf as dataset_cache_hf
 import benchmarks.dataset_cache_io as dataset_cache_io
 from benchmarks.dataset_cache import (
