@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
-from benchmarks.jsonio import write_json
+from combine_for_ai.jsonio import write_json
 
 from combine_for_ai.environment import (
     EnvironmentFingerprint,

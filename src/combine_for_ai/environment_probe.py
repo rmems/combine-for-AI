@@ -7,7 +7,7 @@ Failures degrade to ``None`` rather than raising.
 from __future__ import annotations
 
 import os
-import shutil
+import re
 import subprocess  # nosec B404
 from pathlib import Path
 from typing import Any
@@ -47,7 +47,9 @@ def probe_git(
     porcelain = git_status_porcelain(repo_root)
     if porcelain is None:
         return commit, None, None, None
-    return commit, bool(porcelain), porcelain or None, git_diff_head(repo_root)
+    if porcelain == "":
+        return commit, False, None, None
+    return commit, True, porcelain, git_diff_head(repo_root)
 
 
 def probe_accelerator() -> tuple[str, tuple[str, ...], str | None, str | None]:
@@ -118,10 +120,20 @@ def rocm_devices_and_driver() -> tuple[tuple[str, ...], str | None]:
     if not output:
         return (), None
     names: list[str] = []
-    for line in output.splitlines():
-        name = _text_after("Marketing Name:", line)
-        if name and name.upper() != "AMD":
-            names.append(name)
+    for block in re.split(r"^Agent \d+\s*$", output, flags=re.MULTILINE):
+        if "Device Type:" not in block:
+            continue
+        device_type = None
+        for line in block.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("Device Type:"):
+                device_type = (_text_after("Device Type:", stripped) or "").upper()
+        if device_type != "GPU":
+            continue
+        for line in block.splitlines():
+            name = _text_after("Marketing Name:", line)
+            if name and name.upper() != "AMD":
+                names.append(name)
     if not names:
         return (), None
     return tuple(names), None
@@ -196,8 +208,13 @@ def _decode_nvml(value: Any) -> str:
     return str(value)
 
 
-def _visible_cuda_device(devices: tuple[str, ...], token: str) -> str | None:
-    if not token:
+def _visible_cuda_device(
+    devices: tuple[str, ...],
+    token: str,
+    *,
+    uuid_to_name: dict[str, str],
+) -> str | None:
+    if not token or token == "-1":
         return None
     if token.isdigit():
         index = int(token)
@@ -205,6 +222,10 @@ def _visible_cuda_device(devices: tuple[str, ...], token: str) -> str | None:
             return devices[index]
         return None
     lowered = token.lower()
+    if lowered.startswith(("gpu-", "mig-")):
+        mapped = uuid_to_name.get(lowered)
+        if mapped is not None:
+            return mapped
     for device in devices:
         name = device.lower()
         if name == lowered or lowered in name:
@@ -219,47 +240,37 @@ def _apply_cuda_visibility(devices: tuple[str, ...]) -> tuple[str, ...]:
     stripped = raw.strip()
     if stripped in {"", "-1"}:
         return ()
-    selected = [
-        name
-        for token in stripped.split(",")
-        if (name := _visible_cuda_device(devices, token.strip()))
-    ]
+    uuid_to_name = _nvidia_smi_uuid_to_name(_ACCEL_TIMEOUT_S)
+    selected: list[str] = []
+    for token in stripped.split(","):
+        name = _visible_cuda_device(
+            devices, token.strip(), uuid_to_name=uuid_to_name
+        )
+        if name is None:
+            break
+        selected.append(name)
     return tuple(selected)
 
 
-def _absolute_executable(command: str) -> str | None:
-    path = shutil.which(command)
-    if not path:
-        return None
-    resolved = Path(path)
-    if not resolved.is_file():
-        return None
-    return str(resolved)
-
-
-def _git_executable() -> str | None:
-    return _absolute_executable("git")
-
-
-def _nvcc_executable() -> str | None:
-    return _absolute_executable("nvcc")
-
-
-def _nvidia_smi_executable() -> str | None:
-    return _absolute_executable("nvidia-smi")
-
-
-def _rocminfo_executable() -> str | None:
-    return _absolute_executable("rocminfo")
+def _nvidia_smi_uuid_to_name(timeout: float) -> dict[str, str]:
+    text = _run_nvidia_smi_gpu_uuid_and_name(timeout)
+    if not text:
+        return {}
+    mapping: dict[str, str] = {}
+    for line in text.splitlines():
+        parts = line.split(",", maxsplit=1)
+        if len(parts) != 2:
+            continue
+        uuid, name = parts[0].strip().lower(), parts[1].strip()
+        if uuid and name:
+            mapping[uuid] = name
+    return mapping
 
 
 def _run_git_rev_parse_head(cwd: Path | None, timeout: float) -> str | None:
-    git = _git_executable()
-    if git is None:
-        return None
     try:
-        completed = subprocess.run(  # nosec B603
-            [git, "rev-parse", "HEAD"],
+        completed = subprocess.run(  # nosec B603,B607
+            ["git", "rev-parse", "HEAD"],
             cwd=cwd,
             check=False,
             capture_output=True,
@@ -273,12 +284,9 @@ def _run_git_rev_parse_head(cwd: Path | None, timeout: float) -> str | None:
 
 
 def _run_git_show_toplevel(timeout: float) -> str | None:
-    git = _git_executable()
-    if git is None:
-        return None
     try:
-        completed = subprocess.run(  # nosec B603
-            [git, "rev-parse", "--show-toplevel"],
+        completed = subprocess.run(  # nosec B603,B607
+            ["git", "rev-parse", "--show-toplevel"],
             check=False,
             capture_output=True,
             text=True,
@@ -291,12 +299,9 @@ def _run_git_show_toplevel(timeout: float) -> str | None:
 
 
 def _run_git_status_porcelain(cwd: Path | None, timeout: float) -> str | None:
-    git = _git_executable()
-    if git is None:
-        return None
     try:
-        completed = subprocess.run(  # nosec B603
-            [git, "status", "--porcelain"],
+        completed = subprocess.run(  # nosec B603,B607
+            ["git", "status", "--porcelain"],
             cwd=cwd,
             check=False,
             capture_output=True,
@@ -306,16 +311,13 @@ def _run_git_status_porcelain(cwd: Path | None, timeout: float) -> str | None:
         )
     except (OSError, subprocess.TimeoutExpired):
         return None
-    return _ok_stdout(completed)
+    return _ok_stdout(completed, preserve_empty=True)
 
 
 def _run_git_diff_head(cwd: Path | None, timeout: float) -> str | None:
-    git = _git_executable()
-    if git is None:
-        return None
     try:
-        completed = subprocess.run(  # nosec B603
-            [git, "diff", "HEAD"],
+        completed = subprocess.run(  # nosec B603,B607
+            ["git", "diff", "HEAD"],
             cwd=cwd,
             check=False,
             capture_output=True,
@@ -329,12 +331,9 @@ def _run_git_diff_head(cwd: Path | None, timeout: float) -> str | None:
 
 
 def _run_nvcc_version(timeout: float) -> str | None:
-    nvcc = _nvcc_executable()
-    if nvcc is None:
-        return None
     try:
-        completed = subprocess.run(  # nosec B603
-            [nvcc, "--version"],
+        completed = subprocess.run(  # nosec B603,B607
+            ["nvcc", "--version"],
             check=False,
             capture_output=True,
             text=True,
@@ -347,12 +346,9 @@ def _run_nvcc_version(timeout: float) -> str | None:
 
 
 def _run_nvidia_smi(timeout: float) -> str | None:
-    smi = _nvidia_smi_executable()
-    if smi is None:
-        return None
     try:
-        completed = subprocess.run(  # nosec B603
-            [smi],
+        completed = subprocess.run(  # nosec B603,B607
+            ["nvidia-smi"],
             check=False,
             capture_output=True,
             text=True,
@@ -365,12 +361,28 @@ def _run_nvidia_smi(timeout: float) -> str | None:
 
 
 def _run_nvidia_smi_gpu_names(timeout: float) -> str | None:
-    smi = _nvidia_smi_executable()
-    if smi is None:
-        return None
     try:
-        completed = subprocess.run(  # nosec B603
-            [smi, "--query-gpu=name", "--format=csv,noheader"],
+        completed = subprocess.run(  # nosec B603,B607
+            ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            shell=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return _ok_stdout(completed)
+
+
+def _run_nvidia_smi_gpu_uuid_and_name(timeout: float) -> str | None:
+    try:
+        completed = subprocess.run(  # nosec B603,B607
+            [
+                "nvidia-smi",
+                "--query-gpu=uuid,name",
+                "--format=csv,noheader",
+            ],
             check=False,
             capture_output=True,
             text=True,
@@ -383,12 +395,9 @@ def _run_nvidia_smi_gpu_names(timeout: float) -> str | None:
 
 
 def _run_rocminfo(timeout: float) -> str | None:
-    rocminfo = _rocminfo_executable()
-    if rocminfo is None:
-        return None
     try:
-        completed = subprocess.run(  # nosec B603
-            [rocminfo],
+        completed = subprocess.run(  # nosec B603,B607
+            ["rocminfo"],
             check=False,
             capture_output=True,
             text=True,
@@ -410,10 +419,16 @@ def _text_after(marker: str, text: str | None) -> str | None:
     return stripped or None
 
 
-def _ok_stdout(completed: subprocess.CompletedProcess[str]) -> str | None:
+def _ok_stdout(
+    completed: subprocess.CompletedProcess[str],
+    *,
+    preserve_empty: bool = False,
+) -> str | None:
     if completed.returncode != 0:
         return None
     text = completed.stdout.strip()
+    if not text and preserve_empty:
+        return ""
     return text or None
 
 

@@ -313,9 +313,56 @@ def test_cuda_visibility_filters_enumerated_devices(
     assert _apply_cuda_visibility(devices) == ()
     monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "GPU-1")
     assert _apply_cuda_visibility(devices) == ("GPU-1",)
+    monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "0,2,-1,1")
+    assert _apply_cuda_visibility(devices) == ("GPU-0", "GPU-2")
 
 
-def test_git_probe_invokes_absolute_git_argv(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_cuda_visibility_maps_gpu_uuid(monkeypatch: pytest.MonkeyPatch) -> None:
+    devices = ("NVIDIA A100", "NVIDIA H100")
+    uuid_line = "GPU-aaaa-bbbb,NVIDIA A100\nGPU-cccc-dddd,NVIDIA H100"
+
+    def fake_uuid(timeout: float) -> str:
+        return uuid_line
+
+    monkeypatch.setattr(
+        "combine_for_ai.environment_probe._nvidia_smi_uuid_to_name",
+        lambda timeout: {
+            "gpu-aaaa-bbbb": "NVIDIA A100",
+            "gpu-cccc-dddd": "NVIDIA H100",
+        },
+    )
+    monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "GPU-cccc-dddd")
+    assert _apply_cuda_visibility(devices) == ("NVIDIA H100",)
+
+
+def test_rocm_parser_ignores_cpu_agents(monkeypatch: pytest.MonkeyPatch) -> None:
+    from combine_for_ai.environment_probe import rocm_devices_and_driver
+
+    sample = """
+Agent 1
+  Marketing Name:          AMD Ryzen 9 7950X
+  Device Type:             CPU
+Agent 2
+  Marketing Name:          AMD Radeon RX 7900 XTX
+  Device Type:             GPU
+"""
+    monkeypatch.setattr(
+        "combine_for_ai.environment_probe._run_rocminfo",
+        lambda timeout: sample,
+    )
+    devices, _ = rocm_devices_and_driver()
+    assert devices == ("AMD Radeon RX 7900 XTX",)
+
+
+def test_set_values_in_config_digest_are_order_stable() -> None:
+    home = "/home/alice"
+    username = "alice"
+    left = digest_resolved_config({"tags": {"b", "a"}}, home=home, username=username)
+    right = digest_resolved_config({"tags": frozenset({"a", "b"})}, home=home, username=username)
+    assert left == right
+
+
+def test_git_probe_uses_literal_git_argv(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: list[list[str]] = []
 
     def fake_run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
@@ -323,15 +370,32 @@ def test_git_probe_invokes_absolute_git_argv(monkeypatch: pytest.MonkeyPatch) ->
         return subprocess.CompletedProcess(argv, 0, stdout="deadbeef\n", stderr="")
 
     monkeypatch.setattr(
-        "combine_for_ai.environment_probe._git_executable",
-        lambda: "/usr/bin/git",
-    )
-    monkeypatch.setattr(
         "combine_for_ai.environment_probe.subprocess.run",
         fake_run,
     )
     assert git_rev_parse_head(None) == "deadbeef"
-    assert captured == [["/usr/bin/git", "rev-parse", "HEAD"]]
+    assert captured == [["git", "rev-parse", "HEAD"]]
+
+
+def test_clean_git_status_records_dirty_false(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fake_run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        if argv[1:] == ["status", "--porcelain"]:
+            return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+        if argv[1:] == ["rev-parse", "HEAD"]:
+            return subprocess.CompletedProcess(argv, 0, stdout="c" * 40 + "\n", stderr="")
+        return subprocess.CompletedProcess(argv, 1, stdout="", stderr="")
+
+    monkeypatch.setattr(
+        "combine_for_ai.environment_probe.subprocess.run",
+        fake_run,
+    )
+    from combine_for_ai.environment_probe import probe_git
+
+    commit, dirty, porcelain, diff = probe_git(None)
+    assert commit == "c" * 40
+    assert dirty is False
+    assert porcelain is None
+    assert diff is None
 
 
 def test_digest_resolved_config_ignores_volatile_process_fields() -> None:
