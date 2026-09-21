@@ -61,7 +61,7 @@ def huggingface_source_uri(
     return f"{uri}@{revision}"
 
 
-def load_hf_split(spec: DatasetSpec):
+def load_hf_split(spec: DatasetSpec) -> Any:
     if hf_load_dataset is None:
         raise ImportError(
             "datasets is required for Hugging Face sources; "
@@ -69,10 +69,11 @@ def load_hf_split(spec: DatasetSpec):
         )
     if not spec.hf_id:
         raise ValueError(f"hf dataset '{spec.name}' is missing hf_id")
-    pinned_revision = spec.revision or resolve_huggingface_revision(spec)
+    hf_id = spec.hf_id
+    pinned_revision = resolve_huggingface_revision(spec)
     return hf_load_dataset(
-        spec.hf_id,
-        spec.hf_subset,
+        path=hf_id,
+        name=spec.hf_subset,
         split=spec.split,
         revision=pinned_revision,
     )

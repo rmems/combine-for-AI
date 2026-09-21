@@ -627,11 +627,11 @@ def test_movable_hf_revision_is_pinned_before_key_and_fetch(
         observed["resolved_spec"] = item
         return resolved_revision
 
-    def load_dataset(dataset_id, subset, *, split, revision):
-        observed["load"] = (dataset_id, subset, split, revision)
+    def load_dataset(path, name=None, *, split, revision):
+        observed["load"] = (path, name, split, revision)
         return FakeDataset([{"prompt": "question", "reference": "answer"}])
 
-    monkeypatch.setattr(dataset_cache_module, "resolve_huggingface_revision", resolve)
+    monkeypatch.setattr(dataset_cache_hf, "resolve_huggingface_revision", resolve)
     monkeypatch.setattr(dataset_cache_hf, "hf_load_dataset", load_dataset)
     cache = DatasetCache(root=tmp_path / "cache", mode=CacheMode.PREFER_CACHE)
 
@@ -672,7 +672,7 @@ def test_offline_legacy_hit_does_not_resolve_movable_revision(
         raise AssertionError("remote revision resolution invoked")
 
     monkeypatch.setattr(
-        dataset_cache_module, "resolve_huggingface_revision", fail_resolution
+        dataset_cache_hf, "resolve_huggingface_revision", fail_resolution
     )
     cache = DatasetCache(root=writer.root, mode=CacheMode.OFFLINE)
     loaded = cache.load(spec, fetch=_network_must_not_run)
