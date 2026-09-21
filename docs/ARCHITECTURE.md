@@ -89,6 +89,8 @@ Baseline is `baseline_quantization` (default `fp16`) for the same model+dataset.
 
 CLI: `python scripts/run_matrix.py --config configs/matrix/corinth_canal.sample.json`.
 
+Environment fingerprints for matrix cells (compatibility warnings when pooling runs) live in `combine_for_ai.matrix_fingerprint` with probes in `combine_for_ai.environment`.
+
 ## Metrics
 
 ### LLM baseline
@@ -130,6 +132,14 @@ CLI: `scripts/import_goz_experiment.py`. Output rows map:
 - pack provenance → `scale_source`, `goz1_version`, `sparsity`
 
 Payload includes `benchmark_linkage.grok_ozempic_report_path` and optional decision/provenance.
+
+## Hybrid comparison runner
+
+`combine_for_ai.compare` builds matrices from imported or raw experiment rows:
+
+- Baseline arm (default `fp16_control`) vs treatment (default `expert_only`)
+- Paired by `block_index` with deltas for route top-1/2, cosine, residual drift, etc.
+- CLI: `scripts/compare_runs.py` → `*.compare.json`, `*.compare-by-block.csv`, `*.compare.md`
 
 ## Telemetry
 
