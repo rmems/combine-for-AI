@@ -315,7 +315,7 @@ def test_cuda_visibility_filters_enumerated_devices(
     assert _apply_cuda_visibility(devices) == ("GPU-1",)
 
 
-def test_git_probe_invokes_literal_argv(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_git_probe_invokes_absolute_git_argv(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: list[list[str]] = []
 
     def fake_run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
@@ -323,11 +323,15 @@ def test_git_probe_invokes_literal_argv(monkeypatch: pytest.MonkeyPatch) -> None
         return subprocess.CompletedProcess(argv, 0, stdout="deadbeef\n", stderr="")
 
     monkeypatch.setattr(
+        "combine_for_ai.environment_probe._git_executable",
+        lambda: "/usr/bin/git",
+    )
+    monkeypatch.setattr(
         "combine_for_ai.environment_probe.subprocess.run",
         fake_run,
     )
     assert git_rev_parse_head(None) == "deadbeef"
-    assert captured == [["git", "rev-parse", "HEAD"]]
+    assert captured == [["/usr/bin/git", "rev-parse", "HEAD"]]
 
 
 def test_digest_resolved_config_ignores_volatile_process_fields() -> None:

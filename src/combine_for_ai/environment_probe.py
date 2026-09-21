@@ -7,6 +7,7 @@ Failures degrade to ``None`` rather than raising.
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess  # nosec B404
 from pathlib import Path
 from typing import Any
@@ -226,10 +227,39 @@ def _apply_cuda_visibility(devices: tuple[str, ...]) -> tuple[str, ...]:
     return tuple(selected)
 
 
+def _absolute_executable(command: str) -> str | None:
+    path = shutil.which(command)
+    if not path:
+        return None
+    resolved = Path(path)
+    if not resolved.is_file():
+        return None
+    return str(resolved)
+
+
+def _git_executable() -> str | None:
+    return _absolute_executable("git")
+
+
+def _nvcc_executable() -> str | None:
+    return _absolute_executable("nvcc")
+
+
+def _nvidia_smi_executable() -> str | None:
+    return _absolute_executable("nvidia-smi")
+
+
+def _rocminfo_executable() -> str | None:
+    return _absolute_executable("rocminfo")
+
+
 def _run_git_rev_parse_head(cwd: Path | None, timeout: float) -> str | None:
+    git = _git_executable()
+    if git is None:
+        return None
     try:
         completed = subprocess.run(  # nosec B603
-            ["git", "rev-parse", "HEAD"],
+            [git, "rev-parse", "HEAD"],
             cwd=cwd,
             check=False,
             capture_output=True,
@@ -243,9 +273,12 @@ def _run_git_rev_parse_head(cwd: Path | None, timeout: float) -> str | None:
 
 
 def _run_git_show_toplevel(timeout: float) -> str | None:
+    git = _git_executable()
+    if git is None:
+        return None
     try:
         completed = subprocess.run(  # nosec B603
-            ["git", "rev-parse", "--show-toplevel"],
+            [git, "rev-parse", "--show-toplevel"],
             check=False,
             capture_output=True,
             text=True,
@@ -258,9 +291,12 @@ def _run_git_show_toplevel(timeout: float) -> str | None:
 
 
 def _run_git_status_porcelain(cwd: Path | None, timeout: float) -> str | None:
+    git = _git_executable()
+    if git is None:
+        return None
     try:
         completed = subprocess.run(  # nosec B603
-            ["git", "status", "--porcelain"],
+            [git, "status", "--porcelain"],
             cwd=cwd,
             check=False,
             capture_output=True,
@@ -274,9 +310,12 @@ def _run_git_status_porcelain(cwd: Path | None, timeout: float) -> str | None:
 
 
 def _run_git_diff_head(cwd: Path | None, timeout: float) -> str | None:
+    git = _git_executable()
+    if git is None:
+        return None
     try:
         completed = subprocess.run(  # nosec B603
-            ["git", "diff", "HEAD"],
+            [git, "diff", "HEAD"],
             cwd=cwd,
             check=False,
             capture_output=True,
@@ -290,9 +329,12 @@ def _run_git_diff_head(cwd: Path | None, timeout: float) -> str | None:
 
 
 def _run_nvcc_version(timeout: float) -> str | None:
+    nvcc = _nvcc_executable()
+    if nvcc is None:
+        return None
     try:
         completed = subprocess.run(  # nosec B603
-            ["nvcc", "--version"],
+            [nvcc, "--version"],
             check=False,
             capture_output=True,
             text=True,
@@ -305,9 +347,12 @@ def _run_nvcc_version(timeout: float) -> str | None:
 
 
 def _run_nvidia_smi(timeout: float) -> str | None:
+    smi = _nvidia_smi_executable()
+    if smi is None:
+        return None
     try:
         completed = subprocess.run(  # nosec B603
-            ["nvidia-smi"],
+            [smi],
             check=False,
             capture_output=True,
             text=True,
@@ -320,9 +365,12 @@ def _run_nvidia_smi(timeout: float) -> str | None:
 
 
 def _run_nvidia_smi_gpu_names(timeout: float) -> str | None:
+    smi = _nvidia_smi_executable()
+    if smi is None:
+        return None
     try:
         completed = subprocess.run(  # nosec B603
-            ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
+            [smi, "--query-gpu=name", "--format=csv,noheader"],
             check=False,
             capture_output=True,
             text=True,
@@ -335,9 +383,12 @@ def _run_nvidia_smi_gpu_names(timeout: float) -> str | None:
 
 
 def _run_rocminfo(timeout: float) -> str | None:
+    rocminfo = _rocminfo_executable()
+    if rocminfo is None:
+        return None
     try:
         completed = subprocess.run(  # nosec B603
-            ["rocminfo"],
+            [rocminfo],
             check=False,
             capture_output=True,
             text=True,
