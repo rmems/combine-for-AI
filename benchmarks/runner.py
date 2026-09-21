@@ -165,17 +165,47 @@ def run_benchmarks(
     seed_override: int | None = None,
 ) -> RunMetadata:
     config = load_config(config_path)
+    metadata, _results = run_benchmarks_from_config(
+        config,
+        output_dir,
+        formats,
+        seed_override,
+        config_base_path=config_path.parent,
+    )
+    return metadata
+
+
+def run_benchmarks_from_config(
+    config: dict[str, Any],
+    output_dir: Path,
+    formats: list[str],
+    seed_override: int | None = None,
+    *,
+    config_base_path: Path,
+) -> tuple[RunMetadata, list[DatasetResult]]:
+    """Run a benchmark from an in-memory config (used by the matrix runner)."""
     run_name = config.get("run_name", "benchmark-run")
     seed = seed_override if seed_override is not None else config.get("seed", 0)
-    metadata = build_metadata(run_name, seed)
-
-    # Optionally enrich telemetry with upstream artifacts
-    telemetry = _load_upstream_telemetry(
-        config,
-        config_path.parent,
+    metadata = _attach_telemetry(build_metadata(run_name, seed), config, config_base_path)
+    model_spec = ModelSpec.from_dict(config["model"])
+    results = _evaluate_matrix_cell(
+        model_spec,
+        load_datasets(config, config_base_path),
+        config.get("quantization") or ["fp16"],
+        seed,
         metadata.telemetry,
     )
-    metadata = RunMetadata(
+    write_reports(output_dir, formats, metadata, model_spec, results)
+    return metadata, results
+
+
+def _attach_telemetry(
+    metadata: RunMetadata,
+    config: dict[str, Any],
+    config_base_path: Path,
+) -> RunMetadata:
+    telemetry = _load_upstream_telemetry(config, config_base_path, metadata.telemetry)
+    return RunMetadata(
         run_id=metadata.run_id,
         run_name=metadata.run_name,
         seed=metadata.seed,
@@ -189,51 +219,58 @@ def run_benchmarks(
         telemetry=telemetry,
     )
 
-    datasets = load_datasets(config, config_path.parent)
-    model_spec = ModelSpec.from_dict(config["model"])
-    quantization_names = config.get("quantization") or ["fp16"]
 
+def _evaluate_matrix_cell(
+    model_spec: ModelSpec,
+    datasets: list[LoadedDataset],
+    quantization_names: list[str],
+    seed: int,
+    telemetry: TelemetrySnapshot,
+) -> list[DatasetResult]:
     registry = default_quantization_registry()
     results: list[DatasetResult] = []
-
     for quant_name in quantization_names:
         profile = registry.get(quant_name)
         adapter = build_model_adapter(model_spec, profile)
-
         for dataset in datasets:
-            scoped = scoped_seed(seed, model_spec.name, quant_name, dataset.spec.name)
-            rng = random.Random(scoped)
-            accumulator = MetricsAccumulator()
-
-            for record in dataset.records:
-                prediction = adapter.predict(record, rng)
-                accumulator.add(record, prediction)
-
-            total_time = (
-                accumulator.token_count / profile.speed_tps
-                if profile.speed_tps
-                else 0.0
-            )
-            metrics = accumulator.summary(total_time, profile.vram_gb)
-            provenance = provenance_from_metadata(dataset.metadata)
             results.append(
-                DatasetResult(
-                    dataset=dataset.spec.name,
-                    split=dataset.spec.split,
-                    sample_count=len(dataset.records),
-                    quantization=profile,
-                    metrics=metrics,
-                    telemetry=telemetry,
-                    dataset_upstream_license=provenance["dataset_upstream_license"],
-                    dataset_license_scope=provenance["dataset_license_scope"],
-                    dataset_source_uri=provenance["dataset_source_uri"],
-                    dataset_resolved_revision=provenance["dataset_resolved_revision"],
-                    dataset_cache_key=provenance["dataset_cache_key"],
-                )
+                _evaluate_dataset(adapter, profile, dataset, seed, telemetry)
             )
+    return results
 
-    write_reports(output_dir, formats, metadata, model_spec, results)
-    return metadata
+
+def _evaluate_dataset(
+    adapter: Any,
+    profile: QuantizationProfile,
+    dataset: LoadedDataset,
+    seed: int,
+    telemetry: TelemetrySnapshot,
+) -> DatasetResult:
+    scoped = scoped_seed(seed, adapter.spec.name, dataset.spec.name)
+    accumulator = MetricsAccumulator()
+    for index, record in enumerate(dataset.records):
+        # Deterministic benchmark RNG — not crypto (Bandit B311).
+        record_rng = random.Random(  # nosec B311
+            scoped_seed(scoped, str(index), profile.name)
+        )
+        accumulator.add(record, adapter.predict(record, record_rng))
+    total_time = (
+        accumulator.token_count / profile.speed_tps if profile.speed_tps else 0.0
+    )
+    provenance = provenance_from_metadata(dataset.metadata)
+    return DatasetResult(
+        dataset=dataset.spec.name,
+        split=dataset.spec.split,
+        sample_count=len(dataset.records),
+        quantization=profile,
+        metrics=accumulator.summary(total_time, profile.vram_gb),
+        telemetry=telemetry,
+        dataset_upstream_license=provenance["dataset_upstream_license"],
+        dataset_license_scope=provenance["dataset_license_scope"],
+        dataset_source_uri=provenance["dataset_source_uri"],
+        dataset_resolved_revision=provenance["dataset_resolved_revision"],
+        dataset_cache_key=provenance["dataset_cache_key"],
+    )
 
 
 def write_reports(
