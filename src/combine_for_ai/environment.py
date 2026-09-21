@@ -396,13 +396,22 @@ def _sanitize_value(value: Any, *, home: str, username: str) -> Any:
     if isinstance(value, (list, tuple)):
         return [_sanitize_value(item, home=home, username=username) for item in value]
     if isinstance(value, (set, frozenset)):
-        sanitized = [_sanitize_value(item, home=home, username=username) for item in value]
-        return sorted(sanitized, key=repr)
+        return _sanitize_set(value, home=home, username=username)
     if isinstance(value, str):
         return redact_text(value, home=home, username=username)
     if isinstance(value, (int, float, bool)) or value is None:
         return value
     return redact_text(str(value), home=home, username=username)
+
+
+def _sanitize_set(
+    value: set[Any] | frozenset[Any],
+    *,
+    home: str,
+    username: str,
+) -> list[Any]:
+    sanitized = [_sanitize_value(item, home=home, username=username) for item in value]
+    return sorted(sanitized, key=repr)
 
 
 def _optional_redact(value: str | None, *, home: str, username: str) -> str | None:

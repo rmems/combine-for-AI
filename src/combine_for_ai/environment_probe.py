@@ -121,22 +121,31 @@ def rocm_devices_and_driver() -> tuple[tuple[str, ...], str | None]:
         return (), None
     names: list[str] = []
     for block in re.split(r"^Agent \d+\s*$", output, flags=re.MULTILINE):
-        if "Device Type:" not in block:
+        if "Device Type:" not in block or not _rocm_block_is_gpu(block):
             continue
-        device_type = None
-        for line in block.splitlines():
-            stripped = line.strip()
-            if stripped.startswith("Device Type:"):
-                device_type = (_text_after("Device Type:", stripped) or "").upper()
-        if device_type != "GPU":
-            continue
-        for line in block.splitlines():
-            name = _text_after("Marketing Name:", line)
-            if name and name.upper() != "AMD":
-                names.append(name)
+        names.extend(_rocm_marketing_names(block))
     if not names:
         return (), None
     return tuple(names), None
+
+
+def _rocm_block_is_gpu(block: str) -> bool:
+    for line in block.splitlines():
+        stripped = line.strip()
+        if not stripped.startswith("Device Type:"):
+            continue
+        device_type = (_text_after("Device Type:", stripped) or "").upper()
+        return device_type == "GPU"
+    return False
+
+
+def _rocm_marketing_names(block: str) -> list[str]:
+    names: list[str] = []
+    for line in block.splitlines():
+        name = _text_after("Marketing Name:", line)
+        if name and name.upper() != "AMD":
+            names.append(name)
+    return names
 
 
 def nvml_devices_and_driver() -> tuple[tuple[str, ...], str | None]:
@@ -214,18 +223,38 @@ def _visible_cuda_device(
     *,
     uuid_to_name: dict[str, str],
 ) -> str | None:
-    if not token or token == "-1":
+    if _cuda_visibility_token_invalid(token):
         return None
     if token.isdigit():
-        index = int(token)
-        if 0 <= index < len(devices):
-            return devices[index]
-        return None
+        return _cuda_device_by_index(devices, int(token))
     lowered = token.lower()
-    if lowered.startswith(("gpu-", "mig-")):
-        mapped = uuid_to_name.get(lowered)
-        if mapped is not None:
-            return mapped
+    mapped = _cuda_device_by_uuid(lowered, uuid_to_name)
+    if mapped is not None:
+        return mapped
+    return _cuda_device_by_name(devices, lowered)
+
+
+def _cuda_visibility_token_invalid(token: str) -> bool:
+    if not token:
+        return True
+    if token.lstrip("+-").isdigit():
+        return int(token) < 0
+    return False
+
+
+def _cuda_device_by_index(devices: tuple[str, ...], index: int) -> str | None:
+    if 0 <= index < len(devices):
+        return devices[index]
+    return None
+
+
+def _cuda_device_by_uuid(lowered: str, uuid_to_name: dict[str, str]) -> str | None:
+    if not lowered.startswith(("gpu-", "mig-")):
+        return None
+    return uuid_to_name.get(lowered)
+
+
+def _cuda_device_by_name(devices: tuple[str, ...], lowered: str) -> str | None:
     for device in devices:
         name = device.lower()
         if name == lowered or lowered in name:
@@ -238,7 +267,9 @@ def _apply_cuda_visibility(devices: tuple[str, ...]) -> tuple[str, ...]:
     if raw is None:
         return devices
     stripped = raw.strip()
-    if stripped in {"", "-1"}:
+    if not stripped:
+        return ()
+    if stripped.lstrip("+-").isdigit() and int(stripped) < 0:
         return ()
     uuid_to_name = _nvidia_smi_uuid_to_name(_ACCEL_TIMEOUT_S)
     selected: list[str] = []
@@ -269,14 +300,14 @@ def _nvidia_smi_uuid_to_name(timeout: float) -> dict[str, str]:
 
 def _run_git_rev_parse_head(cwd: Path | None, timeout: float) -> str | None:
     try:
-        completed = subprocess.run(  # nosec B603,B607
+        completed = subprocess.run(  # nosec B607
             ["git", "rev-parse", "HEAD"],
             cwd=cwd,
             check=False,
             capture_output=True,
             text=True,
             timeout=timeout,
-            shell=False,
+            shell=False,  # nosec B603
         )
     except (OSError, subprocess.TimeoutExpired):
         return None
@@ -285,13 +316,13 @@ def _run_git_rev_parse_head(cwd: Path | None, timeout: float) -> str | None:
 
 def _run_git_show_toplevel(timeout: float) -> str | None:
     try:
-        completed = subprocess.run(  # nosec B603,B607
+        completed = subprocess.run(  # nosec B607
             ["git", "rev-parse", "--show-toplevel"],
             check=False,
             capture_output=True,
             text=True,
             timeout=timeout,
-            shell=False,
+            shell=False,  # nosec B603
         )
     except (OSError, subprocess.TimeoutExpired):
         return None
@@ -300,14 +331,14 @@ def _run_git_show_toplevel(timeout: float) -> str | None:
 
 def _run_git_status_porcelain(cwd: Path | None, timeout: float) -> str | None:
     try:
-        completed = subprocess.run(  # nosec B603,B607
+        completed = subprocess.run(  # nosec B607
             ["git", "status", "--porcelain"],
             cwd=cwd,
             check=False,
             capture_output=True,
             text=True,
             timeout=timeout,
-            shell=False,
+            shell=False,  # nosec B603
         )
     except (OSError, subprocess.TimeoutExpired):
         return None
@@ -316,14 +347,14 @@ def _run_git_status_porcelain(cwd: Path | None, timeout: float) -> str | None:
 
 def _run_git_diff_head(cwd: Path | None, timeout: float) -> str | None:
     try:
-        completed = subprocess.run(  # nosec B603,B607
+        completed = subprocess.run(  # nosec B607
             ["git", "diff", "HEAD"],
             cwd=cwd,
             check=False,
             capture_output=True,
             text=True,
             timeout=timeout,
-            shell=False,
+            shell=False,  # nosec B603
         )
     except (OSError, subprocess.TimeoutExpired):
         return None
@@ -332,13 +363,13 @@ def _run_git_diff_head(cwd: Path | None, timeout: float) -> str | None:
 
 def _run_nvcc_version(timeout: float) -> str | None:
     try:
-        completed = subprocess.run(  # nosec B603,B607
+        completed = subprocess.run(  # nosec B607
             ["nvcc", "--version"],
             check=False,
             capture_output=True,
             text=True,
             timeout=timeout,
-            shell=False,
+            shell=False,  # nosec B603
         )
     except (OSError, subprocess.TimeoutExpired):
         return None
@@ -347,13 +378,13 @@ def _run_nvcc_version(timeout: float) -> str | None:
 
 def _run_nvidia_smi(timeout: float) -> str | None:
     try:
-        completed = subprocess.run(  # nosec B603,B607
+        completed = subprocess.run(  # nosec B607
             ["nvidia-smi"],
             check=False,
             capture_output=True,
             text=True,
             timeout=timeout,
-            shell=False,
+            shell=False,  # nosec B603
         )
     except (OSError, subprocess.TimeoutExpired):
         return None
@@ -362,13 +393,13 @@ def _run_nvidia_smi(timeout: float) -> str | None:
 
 def _run_nvidia_smi_gpu_names(timeout: float) -> str | None:
     try:
-        completed = subprocess.run(  # nosec B603,B607
+        completed = subprocess.run(  # nosec B607
             ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
             check=False,
             capture_output=True,
             text=True,
             timeout=timeout,
-            shell=False,
+            shell=False,  # nosec B603
         )
     except (OSError, subprocess.TimeoutExpired):
         return None
@@ -377,7 +408,7 @@ def _run_nvidia_smi_gpu_names(timeout: float) -> str | None:
 
 def _run_nvidia_smi_gpu_uuid_and_name(timeout: float) -> str | None:
     try:
-        completed = subprocess.run(  # nosec B603,B607
+        completed = subprocess.run(  # nosec B607
             [
                 "nvidia-smi",
                 "--query-gpu=uuid,name",
@@ -387,7 +418,7 @@ def _run_nvidia_smi_gpu_uuid_and_name(timeout: float) -> str | None:
             capture_output=True,
             text=True,
             timeout=timeout,
-            shell=False,
+            shell=False,  # nosec B603
         )
     except (OSError, subprocess.TimeoutExpired):
         return None
@@ -396,13 +427,13 @@ def _run_nvidia_smi_gpu_uuid_and_name(timeout: float) -> str | None:
 
 def _run_rocminfo(timeout: float) -> str | None:
     try:
-        completed = subprocess.run(  # nosec B603,B607
+        completed = subprocess.run(  # nosec B607
             ["rocminfo"],
             check=False,
             capture_output=True,
             text=True,
             timeout=timeout,
-            shell=False,
+            shell=False,  # nosec B603
         )
     except (OSError, subprocess.TimeoutExpired):
         return None
