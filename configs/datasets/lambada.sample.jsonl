@@ -1,2 +1,2 @@
-{"prompt": "The quick brown fox jumps over the lazy", "reference": "dog"}
-{"prompt": "She opened the window to feel the cool night", "reference": "air"}
+{"example_id": "lambada:validation:0000", "prompt": "The quick brown fox jumps over the lazy", "reference": "dog"}
+{"example_id": "lambada:validation:0001", "prompt": "She opened the window to feel the cool night", "reference": "air"}
