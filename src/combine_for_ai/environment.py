@@ -391,12 +391,16 @@ def _sanitize_value(value: Any, *, home: str, username: str) -> Any:
         return sanitize_mapping(
             value, home=home, username=username, drop_volatile=False
         )
-    if isinstance(value, Path):
-        return redact_text(str(value), home=home, username=username)
     if isinstance(value, (list, tuple)):
         return [_sanitize_value(item, home=home, username=username) for item in value]
     if isinstance(value, (set, frozenset)):
         return _sanitize_set(value, home=home, username=username)
+    return _sanitize_leaf_value(value, home=home, username=username)
+
+
+def _sanitize_leaf_value(value: Any, *, home: str, username: str) -> Any:
+    if isinstance(value, Path):
+        return redact_text(str(value), home=home, username=username)
     if isinstance(value, str):
         return redact_text(value, home=home, username=username)
     if isinstance(value, (int, float, bool)) or value is None:
