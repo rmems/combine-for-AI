@@ -6,11 +6,11 @@ import platform
 import random
 import subprocess
 import time
-from dataclasses import replace
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
+from benchmarks.dataset_cache import provenance_from_metadata
 from benchmarks.datasets import DatasetSpec, LoadedDataset, default_dataset_registry
 from benchmarks.metrics import MetricsAccumulator, MetricsSummary
 from benchmarks.models import (
@@ -55,6 +55,11 @@ class DatasetResult:
     quantization: QuantizationProfile
     metrics: MetricsSummary
     telemetry: TelemetrySnapshot | None = None
+    dataset_upstream_license: str | None = None
+    dataset_license_scope: str | None = None
+    dataset_source_uri: str | None = None
+    dataset_resolved_revision: str | None = None
+    dataset_cache_key: str | None = None
 
 
 def load_config(path: Path) -> dict[str, Any]:
@@ -94,9 +99,11 @@ def build_metadata(run_name: str, seed: int) -> RunMetadata:
 
 def load_datasets(config: dict[str, Any], base_path: Path) -> list[LoadedDataset]:
     registry = default_dataset_registry()
+    cache_cfg = config.get("dataset_cache") or {}
     datasets = []
     for raw in config["datasets"]:
         spec = DatasetSpec.from_dict(raw)
+        spec = _apply_dataset_cache_defaults(spec, cache_cfg, base_path)
         if spec.path:
             path = Path(spec.path)
             if not path.is_absolute():
@@ -104,6 +111,30 @@ def load_datasets(config: dict[str, Any], base_path: Path) -> list[LoadedDataset
         loader = registry.loader_for(spec.source)
         datasets.append(loader.load(spec))
     return datasets
+
+
+def _resolve_cache_root(raw: str, base_path: Path) -> str:
+    root = Path(raw).expanduser()
+    if not root.is_absolute():
+        root = (base_path / root).resolve()
+    return str(root)
+
+
+def _apply_dataset_cache_defaults(
+    spec: DatasetSpec,
+    cache_cfg: dict[str, Any],
+    base_path: Path,
+) -> DatasetSpec:
+    updates: dict[str, Any] = {}
+    if spec.cache_mode is None and cache_cfg.get("mode"):
+        updates["cache_mode"] = cache_cfg["mode"]
+    if spec.cache_root:
+        updates["cache_root"] = _resolve_cache_root(spec.cache_root, base_path)
+    elif cache_cfg.get("root"):
+        updates["cache_root"] = _resolve_cache_root(str(cache_cfg["root"]), base_path)
+    if updates:
+        return replace(spec, **updates)
+    return spec
 
 
 def _load_upstream_telemetry(
@@ -226,6 +257,7 @@ def _evaluate_dataset(
     total_time = (
         accumulator.token_count / profile.speed_tps if profile.speed_tps else 0.0
     )
+    provenance = provenance_from_metadata(dataset.metadata)
     return DatasetResult(
         dataset=dataset.spec.name,
         split=dataset.spec.split,
@@ -233,6 +265,11 @@ def _evaluate_dataset(
         quantization=profile,
         metrics=accumulator.summary(total_time, profile.vram_gb),
         telemetry=telemetry,
+        dataset_upstream_license=provenance["dataset_upstream_license"],
+        dataset_license_scope=provenance["dataset_license_scope"],
+        dataset_source_uri=provenance["dataset_source_uri"],
+        dataset_resolved_revision=provenance["dataset_resolved_revision"],
+        dataset_cache_key=provenance["dataset_cache_key"],
     )
 
 
@@ -262,6 +299,11 @@ def write_reports(
             "dataset": result.dataset,
             "split": result.split,
             "sample_count": result.sample_count,
+            "dataset_upstream_license": result.dataset_upstream_license,
+            "dataset_license_scope": result.dataset_license_scope,
+            "dataset_source_uri": result.dataset_source_uri,
+            "dataset_resolved_revision": result.dataset_resolved_revision,
+            "dataset_cache_key": result.dataset_cache_key,
             "quantization": result.quantization.name,
             "precision": result.quantization.precision,
             "quantization_format": result.quantization.format,
