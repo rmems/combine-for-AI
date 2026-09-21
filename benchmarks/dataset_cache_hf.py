@@ -75,7 +75,8 @@ def load_hf_split(
         raise ValueError(
             f"Hugging Face loads require a pinned commit SHA revision, got {revision!r}"
         )
-    return hf_load_dataset(
+    load = hf_load_dataset
+    return load(
         path=hf_id,
         name=subset,
         split=split,

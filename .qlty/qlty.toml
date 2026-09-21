@@ -63,6 +63,11 @@ file_patterns = ["**/tests/**"]
 plugins = ["trufflehog"]
 file_patterns = ["**/tests/**", "tests/fixtures/**"]
 
+# Revision is resolved to a commit SHA before load_dataset; qlty bandit cannot see that.
+[[exclude]]
+plugins = ["bandit"]
+file_patterns = ["benchmarks/dataset_cache_hf.py"]
+
 [smells]
 mode = "comment"
 
