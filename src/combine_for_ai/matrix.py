@@ -94,7 +94,7 @@ class MatrixDatasetConfig(BaseModel):
     path: str | None = None
     hf_id: str | None = None
     hf_subset: str | None = None
-    max_samples: int | None = None
+    max_samples: int | None = Field(default=None, ge=1)
 
 
 class MatrixFileConfig(BaseModel):
@@ -410,12 +410,12 @@ def load_experiment_matrix(
     )
 
 
-def matrix_execution_fingerprint(matrix: ExperimentMatrix) -> str:
-    """Stable id for the selected cell set and matrix settings."""
+def matrix_execution_fingerprint(matrix: ExperimentMatrix, *, seed: int) -> str:
+    """Stable id for the selected cell set, effective seed, and matrix settings."""
     payload = "\n".join(
         (
             matrix.name,
-            str(matrix.seed),
+            str(seed),
             matrix.baseline_quantization,
             *sorted(cell.cell_id for cell in matrix.cells),
         )
@@ -436,6 +436,7 @@ def cell_progress_spec(cell: MatrixCell) -> dict[str, Any]:
         "dataset_source": dataset.source,
         "dataset_path": dataset.path,
         "dataset_hf_id": dataset.hf_id,
+        "dataset_hf_subset": dataset.hf_subset,
         "dataset_max_samples": dataset.max_samples,
     }
 

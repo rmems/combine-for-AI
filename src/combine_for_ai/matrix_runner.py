@@ -210,10 +210,7 @@ class MatrixRunner:
                 break
 
         if self.fail_fast and len(outcomes) < len(self.matrix.cells):
-            for cell in self.matrix.cells[len(outcomes) :]:
-                skipped = CellOutcome.skipped(cell)
-                outcomes.append(skipped)
-                stored_cells[cell.cell_id] = outcome_to_progress(skipped)
+            self._append_fail_fast_skipped(outcomes, stored_cells)
             self._write_progress(stored_cells)
 
         report = build_matrix_report(
@@ -280,7 +277,7 @@ class MatrixRunner:
             return {"cells": {}}
         if not isinstance(cells, dict):
             raise MatrixError(f"progress file cells must be an object: {path}")
-        _validate_progress_header(payload, self.matrix)
+        _validate_progress_header(payload, self.matrix, seed=self.seed)
         return {"cells": cells}
 
     def _write_progress(self, cells: dict[str, Any]) -> None:
@@ -288,13 +285,37 @@ class MatrixRunner:
             "version": PROGRESS_VERSION,
             "matrix_name": self.matrix.name,
             "matrix_run_id": self.run_id,
-            "matrix_fingerprint": matrix_execution_fingerprint(self.matrix),
+            "matrix_fingerprint": matrix_execution_fingerprint(
+                self.matrix, seed=self.seed
+            ),
+            "effective_seed": self.seed,
             "baseline_quantization": self.matrix.baseline_quantization,
             "cells": cells,
         }
-        tmp_path = self.progress_path.with_suffix(".json.tmp")
+        tmp_path = self.progress_path.with_name(
+            f"{self.progress_path.stem}.{secrets.token_hex(8)}.tmp"
+        )
         write_json(tmp_path, payload)
         tmp_path.replace(self.progress_path)
+
+    def _append_fail_fast_skipped(
+        self,
+        outcomes: list[CellOutcome],
+        stored_cells: dict[str, Any],
+    ) -> None:
+        for cell in self.matrix.cells[len(outcomes) :]:
+            stored = stored_cells.get(cell.cell_id)
+            if (
+                self.resume
+                and stored is not None
+                and _stored_status(stored) is CellStatus.COMPLETED
+            ):
+                validate_cell_progress(cell, stored)
+                outcomes.append(outcome_from_progress(cell, stored))
+                continue
+            skipped = CellOutcome.skipped(cell)
+            outcomes.append(skipped)
+            stored_cells[cell.cell_id] = outcome_to_progress(skipped)
 
 
 def default_matrix_run_id() -> str:
@@ -304,12 +325,18 @@ def default_matrix_run_id() -> str:
     return f"{stamp}.{millis:03d}Z-{secrets.token_hex(4)}-matrix"
 
 
-def _validate_progress_header(payload: dict[str, Any], matrix: ExperimentMatrix) -> None:
+def _validate_progress_header(
+    payload: dict[str, Any], matrix: ExperimentMatrix, *, seed: int
+) -> None:
     if payload.get("matrix_name") != matrix.name:
         raise MatrixError(
             "progress file belongs to a different matrix_name; rerun with --fresh"
         )
-    expected = matrix_execution_fingerprint(matrix)
+    if payload.get("effective_seed") != seed:
+        raise MatrixError(
+            "progress file effective_seed differs; rerun with --fresh"
+        )
+    expected = matrix_execution_fingerprint(matrix, seed=seed)
     stored = payload.get("matrix_fingerprint")
     if stored != expected:
         raise MatrixError(

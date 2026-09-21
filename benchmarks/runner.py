@@ -216,10 +216,12 @@ def _evaluate_dataset(
     telemetry: TelemetrySnapshot,
 ) -> DatasetResult:
     scoped = scoped_seed(seed, adapter.spec.name, dataset.spec.name)
-    rng = random.Random(scoped)
     accumulator = MetricsAccumulator()
-    for record in dataset.records:
-        accumulator.add(record, adapter.predict(record, rng))
+    for index, record in enumerate(dataset.records):
+        record_rng = random.Random(
+            scoped_seed(scoped, str(index), profile.name)
+        )
+        accumulator.add(record, adapter.predict(record, record_rng))
     total_time = (
         accumulator.token_count / profile.speed_tps if profile.speed_tps else 0.0
     )
