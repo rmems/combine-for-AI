@@ -90,7 +90,7 @@ The canonical scored unit is `benchmarks.cases.DatasetCase`:
 | `task` | `classification` · `cloze` · `perplexity` · `exact_match_math` |
 | `source` / `metadata` | `jsonl` plus local path, row index, and documented HF id (never fetched here) |
 
-Adapters: `record_to_case`, `case_to_record`, `cases_from_loaded`. Offline samples live in `configs/datasets/*.sample.jsonl` and load through `load_sample_cases` with no network access.
+Adapters: `record_to_case`, `case_to_record`, `cases_from_loaded`. Offline samples live in `configs/datasets/*.sample.jsonl` and load through `benchmarks.case_loading.load_sample_cases` with no network access.
 
 Golden scorers (`benchmarks.scorers`) are deterministic. Failures always name `dataset`, `example_id`, `expected`, and `observed`. Inputs and expected outputs are pinned in `tests/fixtures/golden_scorers.json`.
 

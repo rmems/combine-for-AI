@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from benchmarks.case_loading import load_family_records, load_sample_cases
 from benchmarks.cases import (
     FAMILY_SPECS,
     DatasetCaseError,
@@ -12,8 +13,6 @@ from benchmarks.cases import (
     case_to_record,
     cases_from_loaded,
     family_spec,
-    load_family_records,
-    load_sample_cases,
     normalize_family_name,
     parse_case,
     record_to_case,
