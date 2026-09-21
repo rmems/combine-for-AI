@@ -21,7 +21,7 @@ class DatasetSpec:
 
     def __post_init__(self) -> None:
         if self.max_samples is not None:
-            if type(self.max_samples) is not int:
+            if not isinstance(self.max_samples, int) or isinstance(self.max_samples, bool):
                 raise ValueError("max_samples must be an integer")
             if self.max_samples < 0:
                 raise ValueError("max_samples must be non-negative")
@@ -91,7 +91,7 @@ def _require_choice_list(record: DatasetRecord) -> None:
 
 
 def _require_answer_index(record: DatasetRecord) -> None:
-    if type(record.answer_index) is not int:
+    if not isinstance(record.answer_index, int) or isinstance(record.answer_index, bool):
         raise ValueError("multiple-choice records require an integer answer_index")
     if record.choices is None or record.answer_index < 0 or record.answer_index >= len(
         record.choices
