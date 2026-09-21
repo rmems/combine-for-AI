@@ -215,7 +215,7 @@ def _evaluate_dataset(
     seed: int,
     telemetry: TelemetrySnapshot,
 ) -> DatasetResult:
-    scoped = scoped_seed(seed, adapter.spec.name, profile.name, dataset.spec.name)
+    scoped = scoped_seed(seed, adapter.spec.name, dataset.spec.name)
     rng = random.Random(scoped)
     accumulator = MetricsAccumulator()
     for record in dataset.records:
