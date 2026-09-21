@@ -11,7 +11,7 @@ from combine_for_ai.environment import (
     EnvironmentSnapshot,
     fingerprint_from_snapshot,
 )
-from combine_for_ai.matrix import (
+from combine_for_ai.matrix_fingerprint import (
     MatrixCellResult,
     MatrixReportError,
     aggregate_matrix_report,
