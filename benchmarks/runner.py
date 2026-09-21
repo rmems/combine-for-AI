@@ -218,7 +218,8 @@ def _evaluate_dataset(
     scoped = scoped_seed(seed, adapter.spec.name, dataset.spec.name)
     accumulator = MetricsAccumulator()
     for index, record in enumerate(dataset.records):
-        record_rng = random.Random(
+        # Deterministic benchmark RNG — not crypto (Bandit B311).
+        record_rng = random.Random(  # nosec B311
             scoped_seed(scoped, str(index), profile.name)
         )
         accumulator.add(record, adapter.predict(record, record_rng))
