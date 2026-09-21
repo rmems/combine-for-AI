@@ -215,11 +215,14 @@ def _evaluate_dataset(
     seed: int,
     telemetry: TelemetrySnapshot,
 ) -> DatasetResult:
-    scoped = scoped_seed(seed, adapter.spec.name, profile.name, dataset.spec.name)
-    rng = random.Random(scoped)
+    scoped = scoped_seed(seed, adapter.spec.name, dataset.spec.name)
     accumulator = MetricsAccumulator()
-    for record in dataset.records:
-        accumulator.add(record, adapter.predict(record, rng))
+    for index, record in enumerate(dataset.records):
+        # Deterministic benchmark RNG — not crypto (Bandit B311).
+        record_rng = random.Random(  # nosec B311
+            scoped_seed(scoped, str(index), profile.name)
+        )
+        accumulator.add(record, adapter.predict(record, record_rng))
     total_time = (
         accumulator.token_count / profile.speed_tps if profile.speed_tps else 0.0
     )

@@ -7,15 +7,16 @@ benchmark harness for each cell.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import tomllib
 from dataclasses import dataclass, replace
 from enum import Enum
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, Mapping
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 from benchmarks.datasets import DatasetSpec
 from benchmarks.models import QuantizationRegistry, default_quantization_registry
@@ -84,6 +85,18 @@ class MatrixModelConfig(BaseModel):
     quantization: list[str] | None = None
 
 
+class MatrixDatasetConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    split: str = "validation"
+    source: str = "jsonl"
+    path: str | None = None
+    hf_id: str | None = None
+    hf_subset: str | None = None
+    max_samples: int | None = Field(default=None, ge=1)
+
+
 class MatrixFileConfig(BaseModel):
     """On-disk matrix definition (JSON or TOML)."""
 
@@ -96,9 +109,18 @@ class MatrixFileConfig(BaseModel):
     baseline_quantization: str = "fp16"
     models: list[MatrixModelConfig]
     quantization: list[str] = Field(default_factory=lambda: ["fp16"])
-    datasets: list[dict[str, Any]]
+    datasets: list[MatrixDatasetConfig]
     select: MatrixSelect | None = None
     exclude: list[MatrixExclude] = Field(default_factory=list)
+
+    @field_validator("matrix_version")
+    @classmethod
+    def _supported_matrix_version(cls, value: str) -> str:
+        if value != MATRIX_VERSION:
+            raise ValueError(
+                f"unsupported matrix_version {value!r}; expected {MATRIX_VERSION}"
+            )
+        return value
 
     @model_validator(mode="after")
     def _non_empty(self) -> MatrixFileConfig:
@@ -205,6 +227,20 @@ class CellOutcome:
             vram_gb=None,
             bits=None,
             error=error,
+        )
+
+    @staticmethod
+    def skipped(cell: MatrixCell) -> CellOutcome:
+        return CellOutcome(
+            cell=cell,
+            status=CellStatus.SKIPPED,
+            run_id=None,
+            accuracy=None,
+            perplexity=None,
+            throughput=None,
+            latency_ms=None,
+            vram_gb=None,
+            bits=None,
         )
 
 
@@ -374,6 +410,49 @@ def load_experiment_matrix(
     )
 
 
+def matrix_execution_fingerprint(matrix: ExperimentMatrix, *, seed: int) -> str:
+    """Stable id for the selected cell set, effective seed, and matrix settings."""
+    payload = "\n".join(
+        (
+            matrix.name,
+            str(seed),
+            matrix.baseline_quantization,
+            *sorted(cell.cell_id for cell in matrix.cells),
+        )
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
+
+
+def cell_progress_spec(cell: MatrixCell) -> dict[str, Any]:
+    dataset = cell.dataset
+    return {
+        "model": cell.model.name,
+        "family": cell.model.family,
+        "backend": cell.model.backend,
+        "revision": cell.model.revision,
+        "quantization": cell.quantization,
+        "dataset": dataset.name,
+        "dataset_split": dataset.split,
+        "dataset_source": dataset.source,
+        "dataset_path": dataset.path,
+        "dataset_hf_id": dataset.hf_id,
+        "dataset_hf_subset": dataset.hf_subset,
+        "dataset_max_samples": dataset.max_samples,
+    }
+
+
+def validate_cell_progress(cell: MatrixCell, stored: Mapping[str, Any]) -> None:
+    spec = stored.get("cell_spec")
+    if not isinstance(spec, dict):
+        raise MatrixError(
+            f"progress for cell {cell.cell_id} is missing cell_spec; rerun with --fresh"
+        )
+    if spec != cell_progress_spec(cell):
+        raise MatrixError(
+            f"progress for cell {cell.cell_id} does not match the current matrix cell"
+        )
+
+
 def relative_drop(baseline: float | None, treatment: float | None) -> float | None:
     """(baseline - treatment) / baseline, or None when undefined."""
     if baseline is None or treatment is None or baseline == 0:
@@ -481,6 +560,7 @@ def _column_mean(rows: list[dict[str, Any]], key: str) -> float | None:
 def outcome_to_progress(outcome: CellOutcome) -> dict[str, Any]:
     return {
         "cell_id": outcome.cell.cell_id,
+        "cell_spec": cell_progress_spec(outcome.cell),
         "status": outcome.status.value,
         "run_id": outcome.run_id,
         "accuracy": outcome.accuracy,
@@ -566,8 +646,12 @@ def _validate_quants(names: list[str], registry: QuantizationRegistry) -> tuple[
     return tuple(validated)
 
 
-def _resolve_dataset(raw: dict[str, Any], base_path: Path) -> DatasetSpec:
-    spec = DatasetSpec.from_dict(raw)
+def _resolve_dataset(entry: MatrixDatasetConfig, base_path: Path) -> DatasetSpec:
+    raw = entry.model_dump(exclude_none=True)
+    try:
+        spec = DatasetSpec.from_dict(raw)
+    except KeyError as exc:
+        raise MatrixError(f"invalid dataset entry: missing {exc}") from exc
     if spec.path:
         path = Path(spec.path)
         if not path.is_absolute():
@@ -609,10 +693,15 @@ def _as_float(value: Any) -> float | None:
 def _as_int(value: Any) -> int | None:
     if value is None or isinstance(value, bool):
         return None
+    if isinstance(value, float) and not value.is_integer():
+        return None
     try:
-        return int(value)
+        numeric = int(value)
     except (TypeError, ValueError):
         return None
+    if isinstance(value, float) and float(numeric) != value:
+        return None
+    return numeric
 
 
 def _optional_str(value: Any) -> str | None:
