@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from dataclasses import replace
 from typing import Any
 
 from benchmarks.dataset_cache_models import (
@@ -46,13 +47,18 @@ def resolve_huggingface_revision(spec: DatasetSpec) -> str:
     return resolved
 
 
-def huggingface_source_uri(spec: DatasetSpec) -> str:
+def huggingface_source_uri(
+    spec: DatasetSpec,
+    *,
+    resolved_revision: str | None = None,
+) -> str:
     if not spec.hf_id:
         raise ValueError(f"hf dataset {spec.name!r} is missing hf_id")
     uri = f"hf://datasets/{spec.hf_id}"
     if spec.hf_subset:
         uri += f"/{spec.hf_subset}"
-    return f"{uri}@{requested_revision(spec)}"
+    revision = resolved_revision or requested_revision(spec)
+    return f"{uri}@{revision}"
 
 
 def load_hf_split(spec: DatasetSpec):
@@ -63,11 +69,12 @@ def load_hf_split(spec: DatasetSpec):
         )
     if not spec.hf_id:
         raise ValueError(f"hf dataset '{spec.name}' is missing hf_id")
+    pinned_revision = spec.revision or resolve_huggingface_revision(spec)
     return hf_load_dataset(
         spec.hf_id,
         spec.hf_subset,
         split=spec.split,
-        revision=requested_revision(spec),
+        revision=pinned_revision,
     )
 
 
@@ -93,11 +100,13 @@ def hf_license(spec: DatasetSpec, dataset: Any) -> str | None:
 
 
 def fetch_huggingface_dataset(spec: DatasetSpec) -> FetchResult:
-    dataset = load_hf_split(spec)
+    resolved_revision = resolve_huggingface_revision(spec)
+    pinned_spec = replace(spec, revision=resolved_revision)
+    dataset = load_hf_split(pinned_spec)
     records = [record_from_row(row) for row in dataset]
     return FetchResult(
         records=records,
-        source_uri=huggingface_source_uri(spec),
-        resolved_revision=requested_revision(spec),
+        source_uri=huggingface_source_uri(spec, resolved_revision=resolved_revision),
+        resolved_revision=resolved_revision,
         upstream_license=normalize_license(hf_license(spec, dataset)),
     )

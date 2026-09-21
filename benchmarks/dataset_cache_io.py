@@ -9,6 +9,7 @@ import stat
 from pathlib import Path
 
 from benchmarks.dataset_cache_models import (
+    LICENSE_SCOPE_DATASET_SOURCE,
     MANIFEST_FILENAME,
     RECORDS_FILENAME,
     CacheKey,
@@ -185,7 +186,7 @@ def parse_manifest(manifest_bytes: bytes, entry: Path) -> CacheManifest:
     try:
         raw_manifest = json.loads(manifest_bytes.decode("utf-8"))
         return CacheManifest.from_dict(raw_manifest)
-    except (json.JSONDecodeError, KeyError, TypeError, ValueError, UnicodeDecodeError) as exc:
+    except (json.JSONDecodeError, KeyError, TypeError, UnicodeDecodeError) as exc:
         raise CacheValidationError(
             f"unreadable manifest at {entry / MANIFEST_FILENAME}: {exc}",
             path=entry,
@@ -202,6 +203,7 @@ def records_if_valid(
     _require_checksum(entry, manifest, payload)
     _require_schema(entry, key, manifest)
     _require_cache_key(entry, key, manifest)
+    _require_license_scope(entry, manifest)
     records = decode_records(payload, entry)
     if len(records) != manifest.row_count:
         raise CacheValidationError(
@@ -250,6 +252,15 @@ def _require_cache_key(entry: Path, key: CacheKey, manifest: CacheManifest) -> N
         )
 
 
+def _require_license_scope(entry: Path, manifest: CacheManifest) -> None:
+    if manifest.license_scope != LICENSE_SCOPE_DATASET_SOURCE:
+        raise CacheValidationError(
+            f"invalid license scope at {entry / MANIFEST_FILENAME}",
+            path=entry,
+            reason="invalid-license-scope",
+        )
+
+
 def decode_records(payload: bytes, entry: Path) -> list[DatasetRecord]:
     records: list[DatasetRecord] = []
     try:
@@ -266,7 +277,7 @@ def decode_records(payload: bytes, entry: Path) -> list[DatasetRecord]:
         try:
             raw = json.loads(line)
             records.append(deserialize_record(raw))
-        except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
+        except (json.JSONDecodeError, KeyError, TypeError) as exc:
             raise CacheValidationError(
                 f"invalid record on line {line_number} in {entry / RECORDS_FILENAME}",
                 path=entry,

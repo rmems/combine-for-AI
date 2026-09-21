@@ -139,18 +139,30 @@ class DatasetCache:
                 path=entry,
                 reason="missing-artifact",
             )
-        resolved_spec = spec
-        if spec.hf_id:
-            resolved_revision = resolve_huggingface_revision(spec)
-            resolved_spec = replace(spec, revision=resolved_revision)
-            resolved_key = self.key_for(spec, resolved_revision=resolved_revision)
-            if resolved_key != key:
-                key = resolved_key
-                entry = self.entry_dir(key)
-                existing = self._load_existing(entry, key)
-                if existing is not None and self._use_existing_without_fetch():
-                    return existing
+        resolved_spec, key, entry, existing = self._resolve_hf_cache_target(
+            spec, key, entry, existing
+        )
+        if existing is not None and self._use_existing_without_fetch():
+            return existing
         return self._fetch_and_store(resolved_spec, key, entry, existing, fetch)
+
+    def _resolve_hf_cache_target(
+        self,
+        spec: DatasetSpec,
+        key: CacheKey,
+        entry: Path,
+        existing: CacheLoad | None,
+    ) -> tuple[DatasetSpec, CacheKey, Path, CacheLoad | None]:
+        if not spec.hf_id:
+            return spec, key, entry, existing
+        resolved_revision = resolve_huggingface_revision(spec)
+        resolved_spec = replace(spec, revision=resolved_revision)
+        resolved_key = self.key_for(spec, resolved_revision=resolved_revision)
+        if resolved_key == key:
+            return resolved_spec, key, entry, existing
+        entry = self.entry_dir(resolved_key)
+        existing = self._load_existing(entry, resolved_key)
+        return resolved_spec, resolved_key, entry, existing
 
     def _load_existing(self, entry: Path, key: CacheKey) -> CacheLoad | None:
         if lstat_or_none(entry) is None:

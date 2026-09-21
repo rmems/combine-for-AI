@@ -223,6 +223,22 @@ def test_prefer_cache_refetches_after_quarantining_invalid_entry(tmp_path: Path)
     )
 
 
+def test_repository_license_scope_is_rejected(tmp_path: Path) -> None:
+    cache = _offline_cache(tmp_path)
+    entry = _install_fixture(cache, FIXTURE_SPEC, "hit")
+    manifest_path = entry / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["license_scope"] = "repository"
+    manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+
+    with pytest.raises(CacheValidationError, match="invalid-license-scope") as excinfo:
+        cache.load(FIXTURE_SPEC, fetch=_network_must_not_run)
+
+    assert excinfo.value.reason == "invalid-license-scope"
+    assert excinfo.value.quarantined_to is not None
+    assert not entry.exists()
+
+
 def test_stale_schema_is_rejected_with_path_and_reason(tmp_path: Path) -> None:
     cache = _offline_cache(tmp_path)
     entry = _install_fixture(cache, FIXTURE_SPEC, "stale-schema")
