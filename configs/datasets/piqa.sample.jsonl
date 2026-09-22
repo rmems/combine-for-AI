@@ -1,2 +1,2 @@
-{"prompt": "To keep a plant healthy you should", "choices": ["water it regularly.", "store it in a freezer."], "answer_index": 0}
-{"prompt": "To keep shoes looking new you can", "choices": ["clean them with a soft brush.", "soak them in bleach overnight."], "answer_index": 0}
+{"example_id": "piqa:validation:0000", "prompt": "To keep a plant healthy you should", "choices": ["water it regularly.", "store it in a freezer."], "answer_index": 0}
+{"example_id": "piqa:validation:0001", "prompt": "To keep shoes looking new you can", "choices": ["clean them with a soft brush.", "soak them in bleach overnight."], "answer_index": 0}

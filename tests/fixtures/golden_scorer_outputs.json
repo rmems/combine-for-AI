@@ -1,0 +1,377 @@
+{
+  "schema": "combine_for_ai.golden_scorer_outputs.v1",
+  "source_fixture": "tests/fixtures/golden_scorers.json",
+  "network_access": false,
+  "rows": [
+    {
+      "name": "hellaswag_correct_index",
+      "metric": "classification",
+      "dataset": "hellaswag",
+      "example_id": "hellaswag:validation:0000",
+      "prompt": "A woman is cooking pasta. She drains the pot and then",
+      "task": "classification",
+      "target": "adds sauce and serves dinner.",
+      "choices": [
+        "adds sauce and serves dinner.",
+        "puts it back on the stove to freeze."
+      ],
+      "answer_index": 0,
+      "prediction": 0,
+      "logprobs": null,
+      "expected_value": 1.0,
+      "observed_value": 1.0,
+      "scorer_expected": {
+        "index": 0,
+        "label": "adds sauce and serves dinner."
+      },
+      "scorer_observed": {
+        "index": 0,
+        "label": "adds sauce and serves dinner."
+      },
+      "tolerance": 0.0,
+      "passed": true
+    },
+    {
+      "name": "hellaswag_wrong_index",
+      "metric": "classification",
+      "dataset": "hellaswag",
+      "example_id": "hellaswag:validation:0001",
+      "prompt": "A cyclist reaches a red light. They",
+      "task": "classification",
+      "target": "stop and wait for green.",
+      "choices": [
+        "stop and wait for green.",
+        "keep pedaling through traffic."
+      ],
+      "answer_index": 0,
+      "prediction": 1,
+      "logprobs": null,
+      "expected_value": 0.0,
+      "observed_value": 0.0,
+      "scorer_expected": {
+        "index": 0,
+        "label": "stop and wait for green."
+      },
+      "scorer_observed": {
+        "index": 1,
+        "label": "keep pedaling through traffic."
+      },
+      "tolerance": 0.0,
+      "passed": true
+    },
+    {
+      "name": "piqa_choice_string",
+      "metric": "classification",
+      "dataset": "piqa",
+      "example_id": "piqa:validation:0000",
+      "prompt": "To keep a plant healthy you should",
+      "task": "classification",
+      "target": "water it regularly.",
+      "choices": [
+        "water it regularly.",
+        "store it in a freezer."
+      ],
+      "answer_index": 0,
+      "prediction": "water it regularly.",
+      "logprobs": null,
+      "expected_value": 1.0,
+      "observed_value": 1.0,
+      "scorer_expected": {
+        "index": 0,
+        "label": "water it regularly."
+      },
+      "scorer_observed": {
+        "index": 0,
+        "label": "water it regularly."
+      },
+      "tolerance": 0.0,
+      "passed": true
+    },
+    {
+      "name": "arc_easy_normalized_choice",
+      "metric": "classification",
+      "dataset": "arc_easy",
+      "example_id": "arc_easy:validation:0000",
+      "prompt": "What is the main source of energy for Earth's climate?",
+      "task": "classification",
+      "target": "the Sun",
+      "choices": [
+        "the Sun",
+        "the Moon",
+        "volcanoes",
+        "tides"
+      ],
+      "answer_index": 0,
+      "prediction": "The Sun.",
+      "logprobs": null,
+      "expected_value": 1.0,
+      "observed_value": 1.0,
+      "scorer_expected": {
+        "index": 0,
+        "label": "the Sun"
+      },
+      "scorer_observed": {
+        "index": 0,
+        "label": "the Sun"
+      },
+      "tolerance": 0.0,
+      "passed": true
+    },
+    {
+      "name": "classification_mean",
+      "metric": "classification",
+      "dataset": "hellaswag",
+      "example_id": "aggregate",
+      "expected_value": 0.75,
+      "observed_value": 0.75,
+      "tolerance": 0.0,
+      "passed": true
+    },
+    {
+      "name": "lambada_exact",
+      "metric": "cloze",
+      "dataset": "lambada",
+      "example_id": "lambada:validation:0000",
+      "prompt": "The quick brown fox jumps over the lazy",
+      "task": "cloze",
+      "target": "dog",
+      "choices": null,
+      "answer_index": null,
+      "prediction": "dog",
+      "logprobs": null,
+      "expected_value": 1.0,
+      "observed_value": 1.0,
+      "scorer_expected": "dog",
+      "scorer_observed": "dog",
+      "tolerance": 0.0,
+      "passed": true
+    },
+    {
+      "name": "lambada_punctuation_and_case",
+      "metric": "cloze",
+      "dataset": "lambada",
+      "example_id": "lambada:golden:punct",
+      "prompt": "The quick brown fox jumps over the lazy",
+      "task": "cloze",
+      "target": "dog",
+      "choices": null,
+      "answer_index": null,
+      "prediction": "  Dog. ",
+      "logprobs": null,
+      "expected_value": 1.0,
+      "observed_value": 1.0,
+      "scorer_expected": "dog",
+      "scorer_observed": "dog",
+      "tolerance": 0.0,
+      "passed": true
+    },
+    {
+      "name": "lambada_collapsed_whitespace",
+      "metric": "cloze",
+      "dataset": "lambada",
+      "example_id": "lambada:golden:ws",
+      "prompt": "She opened the window to feel the cool night",
+      "task": "cloze",
+      "target": "air",
+      "choices": null,
+      "answer_index": null,
+      "prediction": "AIR",
+      "logprobs": null,
+      "expected_value": 1.0,
+      "observed_value": 1.0,
+      "scorer_expected": "air",
+      "scorer_observed": "air",
+      "tolerance": 0.0,
+      "passed": true
+    },
+    {
+      "name": "lambada_mismatch",
+      "metric": "cloze",
+      "dataset": "lambada",
+      "example_id": "lambada:golden:mismatch",
+      "prompt": "The quick brown fox jumps over the lazy",
+      "task": "cloze",
+      "target": "dog",
+      "choices": null,
+      "answer_index": null,
+      "prediction": "cat",
+      "logprobs": null,
+      "expected_value": 0.0,
+      "observed_value": 0.0,
+      "scorer_expected": "dog",
+      "scorer_observed": "cat",
+      "tolerance": 0.0,
+      "passed": true
+    },
+    {
+      "name": "cloze_mean",
+      "metric": "cloze",
+      "dataset": "lambada",
+      "example_id": "aggregate",
+      "expected_value": 0.75,
+      "observed_value": 0.75,
+      "tolerance": 0.0,
+      "passed": true
+    },
+    {
+      "name": "wikitext_ppl_two",
+      "metric": "perplexity",
+      "dataset": "wikitext2",
+      "example_id": "wikitext2:validation:0000",
+      "prompt": "In 1969, the Apollo 11 mission landed on the",
+      "task": "perplexity",
+      "target": "moon.",
+      "choices": null,
+      "answer_index": null,
+      "prediction": null,
+      "logprobs": [
+        -0.6931471805599453,
+        -0.6931471805599453,
+        -0.6931471805599453,
+        -0.6931471805599453
+      ],
+      "expected_value": 2.0,
+      "observed_value": 2.0,
+      "scorer_expected": "moon.",
+      "scorer_observed": {
+        "logprob_count": 4,
+        "mean_logprob": -0.6931471805599453
+      },
+      "tolerance": 1e-12,
+      "passed": true
+    },
+    {
+      "name": "wikitext_ppl_one",
+      "metric": "perplexity",
+      "dataset": "wikitext2",
+      "example_id": "wikitext2:validation:0001",
+      "prompt": "The capital city of France is",
+      "task": "perplexity",
+      "target": "Paris.",
+      "choices": null,
+      "answer_index": null,
+      "prediction": null,
+      "logprobs": [
+        0.0,
+        0.0
+      ],
+      "expected_value": 1.0,
+      "observed_value": 1.0,
+      "scorer_expected": "Paris.",
+      "scorer_observed": {
+        "logprob_count": 2,
+        "mean_logprob": 0.0
+      },
+      "tolerance": 1e-12,
+      "passed": true
+    },
+    {
+      "name": "gsm8k_hash_answer",
+      "metric": "exact_match_math",
+      "dataset": "gsm8k",
+      "example_id": "gsm8k:validation:0000",
+      "prompt": "Natalia sold clips to 48 of her friends in April, and then she sold half as many clips in May. How many clips did Natalia sell altogether in April and May?",
+      "task": "exact_match_math",
+      "target": "72",
+      "choices": null,
+      "answer_index": null,
+      "prediction": "Natalia sold 48/2 = 24 clips in May.\n48 + 24 = 72\n#### 72",
+      "logprobs": null,
+      "expected_value": 1.0,
+      "observed_value": 1.0,
+      "scorer_expected": "72",
+      "scorer_observed": "72",
+      "tolerance": 0.0,
+      "passed": true
+    },
+    {
+      "name": "gsm8k_trailing_point_zero",
+      "metric": "exact_match_math",
+      "dataset": "gsm8k",
+      "example_id": "gsm8k:golden:float",
+      "prompt": "Natalia sold clips to 48 of her friends in April, and then she sold half as many clips in May. How many clips did Natalia sell altogether in April and May?",
+      "task": "exact_match_math",
+      "target": "72.0",
+      "choices": null,
+      "answer_index": null,
+      "prediction": "72",
+      "logprobs": null,
+      "expected_value": 1.0,
+      "observed_value": 1.0,
+      "scorer_expected": "72",
+      "scorer_observed": "72",
+      "tolerance": 0.0,
+      "passed": true
+    },
+    {
+      "name": "gsm8k_thousands_comma",
+      "metric": "exact_match_math",
+      "dataset": "gsm8k",
+      "example_id": "gsm8k:golden:comma",
+      "prompt": "How many units?",
+      "task": "exact_match_math",
+      "target": "1000",
+      "choices": null,
+      "answer_index": null,
+      "prediction": "The total is 1,000.",
+      "logprobs": null,
+      "expected_value": 1.0,
+      "observed_value": 1.0,
+      "scorer_expected": "1000",
+      "scorer_observed": "1000",
+      "tolerance": 0.0,
+      "passed": true
+    },
+    {
+      "name": "gsm8k_wrong_final",
+      "metric": "exact_match_math",
+      "dataset": "gsm8k",
+      "example_id": "gsm8k:validation:0001",
+      "prompt": "Weng earns $12 an hour for babysitting. Yesterday, she just did 50 minutes of babysitting. How much did she earn?",
+      "task": "exact_match_math",
+      "target": "10",
+      "choices": null,
+      "answer_index": null,
+      "prediction": "12 * 50/60 = 10, but I will guess #### 12",
+      "logprobs": null,
+      "expected_value": 0.0,
+      "observed_value": 0.0,
+      "scorer_expected": "10",
+      "scorer_observed": "12",
+      "tolerance": 0.0,
+      "passed": true
+    },
+    {
+      "name": "exact_match_math_mean",
+      "metric": "exact_match_math",
+      "dataset": "gsm8k",
+      "example_id": "aggregate",
+      "expected_value": 0.75,
+      "observed_value": 0.75,
+      "tolerance": 0.0,
+      "passed": true
+    },
+    {
+      "name": "wikitext_corpus_perplexity",
+      "metric": "perplexity",
+      "dataset": "wikitext2",
+      "example_id": "corpus",
+      "logprobs": [
+        [
+          -0.6931471805599453,
+          -0.6931471805599453,
+          -0.6931471805599453,
+          -0.6931471805599453
+        ],
+        [
+          0.0,
+          0.0
+        ]
+      ],
+      "expected_value": 1.5874010519681994,
+      "observed_value": 1.5874010519681994,
+      "tolerance": 1e-12,
+      "passed": true
+    }
+  ]
+}

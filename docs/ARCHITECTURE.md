@@ -15,6 +15,7 @@ xai-dissect ──manifests──► grok-ozempic ──GOZ1 packs──► comb
 | Manifest ingestion | Validate magere-style handoff JSON/YAML; dispatch by artifact format |
 | GOZ1 header sniff | Magic/version/tensor_count only — no dequant (format SoT in grok-ozempic) |
 | Benchmark runner | Mock (CI) + future import adapters for grok-ozempic experiment JSON |
+| Matrix runner | Config-driven models × quant × datasets campaign; comparison + family reports |
 | Telemetry | Local GPU snapshot + optional corinth/myelin overlay |
 | Reports | JSON/CSV (+ markdown generators); MoE/SNN fields nullable |
 
@@ -73,6 +74,43 @@ Selection priority for **existing** generated artifacts: **GOZ1 → AWQ → GPTQ
 
 GOZ1 success path uses quantization profile **`saaq`** and attaches header fields to the report row.
 
+## Dataset case protocol
+
+Loader rows remain `DatasetRecord` (`prompt`, `reference`, `choices`, `answer_index`) so the benchmark runner and `MetricsAccumulator` stay unchanged.
+
+The canonical scored unit is `benchmarks.cases.DatasetCase`:
+
+| Field | Role |
+|-------|------|
+| `example_id` | Stable id, `{dataset}:{split}:{index:04d}` when a fixture omits one |
+| `dataset` / `split` | Family name (`lambada`, `hellaswag`, `wikitext2`, `gsm8k`, `piqa`, `arc_easy`) and split |
+| `prompt` | Model input |
+| `choices` / `answer_index` | Present only for classification (HellaSwag, PIQA, ARC-Easy) |
+| `expected` | Cloze word, WikiText continuation, or GSM8K final answer |
+| `task` | `classification` · `cloze` · `perplexity` · `exact_match_math` |
+| `source` / `metadata` | `jsonl` plus local path, row index, and documented HF id (never fetched here) |
+
+Adapters: `record_to_case`, `case_to_record`, `cases_from_loaded`. Offline samples live in `configs/datasets/*.sample.jsonl` and load through `benchmarks.case_loading.load_sample_cases` with no network access.
+
+Golden scorers (`benchmarks.scorers`) are deterministic. Failures always name `dataset`, `example_id`, `expected`, and `observed`. Inputs and expected outputs are pinned in `tests/fixtures/golden_scorers.json`.
+
+## Experiment matrix
+
+Config: `configs/matrix/*.json` or `*.toml`. Cartesian product of `models` × `quantization` (per-model override allowed) × `datasets`, with optional `select` / `exclude` plus CLI filters (`--models`, `--families`, `--quant-methods`, `--datasets`).
+
+`MatrixRunner` (`src/combine_for_ai/matrix_runner.py`) iterates cells, invokes `run_benchmarks_from_config` for each, writes `reports/cells/<cell_id>/`, and aggregates:
+
+- `relative_accuracy_drop` = `(baseline_acc - treatment_acc) / baseline_acc`
+- `compression_ratio` = `baseline_bits / treatment_bits`
+- `throughput_gain` = `treatment_throughput / baseline_throughput`
+- `vram_savings` = `(baseline_vram - treatment_vram) / baseline_vram`
+
+Baseline is `baseline_quantization` (default `fp16`) for the same model+dataset. Progress is `matrix-progress.json` so interrupted campaigns resume. Family grouping uses `models[].family` (corinth-canal: `olmoe`, `qwen3moe`, `gemma4`, `deepseek2`, `llamamoe`, `zaya`).
+
+CLI: `python scripts/run_matrix.py --config configs/matrix/corinth_canal.sample.json`.
+
+Environment fingerprints for matrix cells (compatibility warnings when pooling runs) live in `combine_for_ai.matrix_fingerprint` with probes in `combine_for_ai.environment`.
+
 ## Metrics
 
 ### LLM baseline
@@ -114,6 +152,14 @@ CLI: `scripts/import_goz_experiment.py`. Output rows map:
 - pack provenance → `scale_source`, `goz1_version`, `sparsity`
 
 Payload includes `benchmark_linkage.grok_ozempic_report_path` and optional decision/provenance.
+
+## Hybrid comparison runner
+
+`combine_for_ai.compare` builds matrices from imported or raw experiment rows:
+
+- Baseline arm (default `fp16_control`) vs treatment (default `expert_only`)
+- Paired by `block_index` with deltas for route top-1/2, cosine, residual drift, etc.
+- CLI: `scripts/compare_runs.py` → `*.compare.json`, `*.compare-by-block.csv`, `*.compare.md`
 
 ## Telemetry
 

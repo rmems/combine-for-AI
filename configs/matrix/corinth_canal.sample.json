@@ -1,0 +1,61 @@
+{
+  "matrix_version": "1.0.0",
+  "matrix_name": "corinth-canal-vultr-sprint",
+  "comment": "22 model×quant cells from corinth-canal's Vultr sprint lineup (OLMoE, Qwen3Moe, Gemma4, DeepSeek2, LlamaMoe, Zaya). Mock backend keeps the harness decoupled from kernels; swap backend/revision when running against real artifacts.",
+  "seed": 1337,
+  "baseline_quantization": "fp16",
+  "quantization": ["fp16", "awq", "gptq", "saaq"],
+  "models": [
+    {
+      "name": "olmoe-1b-7b",
+      "family": "olmoe",
+      "backend": "mock",
+      "revision": "local",
+      "quantization": ["fp16", "awq", "gptq", "saaq"]
+    },
+    {
+      "name": "qwen3-moe-30b-a3b",
+      "family": "qwen3moe",
+      "backend": "mock",
+      "revision": "local",
+      "quantization": ["fp16", "awq", "gptq", "saaq"]
+    },
+    {
+      "name": "gemma4-9b",
+      "family": "gemma4",
+      "backend": "mock",
+      "revision": "local",
+      "quantization": ["fp16", "awq", "saaq"]
+    },
+    {
+      "name": "deepseek2-lite",
+      "family": "deepseek2",
+      "backend": "mock",
+      "revision": "local",
+      "quantization": ["fp16", "awq", "gptq", "saaq"]
+    },
+    {
+      "name": "llama-moe-3b",
+      "family": "llamamoe",
+      "backend": "mock",
+      "revision": "local",
+      "quantization": ["fp16", "awq", "gptq", "saaq"]
+    },
+    {
+      "name": "zaya-1",
+      "family": "zaya",
+      "backend": "mock",
+      "revision": "local",
+      "quantization": ["fp16", "saaq", "ternary"]
+    }
+  ],
+  "datasets": [
+    {
+      "name": "lambada",
+      "source": "jsonl",
+      "path": "../datasets/lambada.sample.jsonl",
+      "split": "validation",
+      "max_samples": 2
+    }
+  ]
+}

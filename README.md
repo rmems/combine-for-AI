@@ -87,6 +87,36 @@ python scripts/import_goz_experiment.py \
 
 Writes `reports/json/<run_id>.goz-import.json` and `reports/csv/<run_id>.goz-import.csv` with route/residual fields populated (issue **#22**).
 
+## Experiment matrix
+
+Orchestrate a models × quantization × datasets campaign (Linear **RM-105**). The matrix runner invokes the existing benchmark runner for each cell, writes per-cell reports, and aggregates a side-by-side comparison (relative accuracy drop, compression ratio, throughput gain, VRAM savings) plus family-level means.
+
+```bash
+python scripts/run_matrix.py --config configs/matrix/corinth_canal.sample.json
+```
+
+The sample config is the 22-cell corinth-canal Vultr sprint lineup (OLMoE, Qwen3Moe, Gemma4, DeepSeek2, LlamaMoe, Zaya) on the mock backend. TOML is also accepted (`configs/matrix/corinth_canal.sample.toml`). Interrupted runs resume from `reports/matrix-progress.json`; pass `--fresh` to rerun.
+
+```bash
+python scripts/run_matrix.py \
+  --config configs/matrix/corinth_canal.sample.json \
+  --families olmoe,zaya \
+  --quant-methods fp16,saaq \
+  --output-dir reports
+```
+
+Compare hybrid quant arms (e.g. `fp16_control` vs `expert_only` across blocks):
+
+```bash
+python scripts/compare_runs.py \
+  --input tests/fixtures/goz_multiblock_metrics.sample.json \
+  --baseline-arm fp16_control \
+  --treatment-arm expert_only \
+  --output-dir reports
+```
+
+Writes JSON, by-block CSV, and a short Markdown table (issue **#15**).
+
 ## Tracking
 
 Primary board: [GitHub issues](https://github.com/rmems/combine-for-AI/issues) — epic **#20** (GOZ1 / MoE-SNN evaluation readiness for grok-ozempic).
