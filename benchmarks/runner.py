@@ -5,7 +5,6 @@ import os
 import platform
 import random
 import secrets
-import shutil
 import subprocess
 import time
 from dataclasses import dataclass, replace
@@ -75,51 +74,49 @@ UNKNOWN_GIT_INFO = "unknown"
 _GIT_TIMEOUT_SECONDS = 5
 
 
-def _resolve_git_executable() -> str | None:
-    """Return an absolute git path, or None when git is not installed."""
-    # Resolved up front so a `git` planted earlier in PATH is never executed.
-    return shutil.which("git")
-
-
-def _git_stdout(git: str, args: tuple[str, ...]) -> str | None:
-    """Run a read-only git command and return stripped stdout, or None."""
+def _git_commit() -> str:
+    """Return HEAD, or UNKNOWN_GIT_INFO when provenance is unavailable."""
     try:
-        output = subprocess.check_output(  # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit  # nosec B603 - argv is a fixed list built from a resolved git binary
-            [git, *args],
-            text=True,
-            stderr=subprocess.DEVNULL,
+        completed = subprocess.run(  # nosec B603 B607
+            ["git", "rev-parse", "HEAD"],
+            cwd=None,
             timeout=_GIT_TIMEOUT_SECONDS,
+            capture_output=True,
+            text=True,
+            check=True,
         )
-    except (subprocess.SubprocessError, OSError):
-        # Not a repository, or a hung invocation.
-        return None
-    return output.strip() or None
+    except (
+        FileNotFoundError,
+        subprocess.CalledProcessError,
+        subprocess.TimeoutExpired,
+    ):
+        return UNKNOWN_GIT_INFO
+    return completed.stdout.strip() or UNKNOWN_GIT_INFO
 
 
-def _git(*args: str) -> str | None:
-    """Run a read-only git command, or return None if it cannot be answered.
-
-    Provenance is metadata about the run, not a precondition for it: a
-    benchmark launched from an installed wheel, a source tarball or a container
-    layer without a `.git` directory should still produce a report.
-    """
-    git = _resolve_git_executable()
-    if git is None:
-        return None
-    return _git_stdout(git, args)
-
-
-def _git_or_unknown(*args: str) -> str:
-    """Return git stdout, or UNKNOWN_GIT_INFO when provenance is unavailable."""
-    return _git(*args) or UNKNOWN_GIT_INFO
+def _git_branch() -> str:
+    """Return the current branch, or UNKNOWN_GIT_INFO when unavailable."""
+    try:
+        completed = subprocess.run(  # nosec B603 B607
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            cwd=None,
+            timeout=_GIT_TIMEOUT_SECONDS,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except (
+        FileNotFoundError,
+        subprocess.CalledProcessError,
+        subprocess.TimeoutExpired,
+    ):
+        return UNKNOWN_GIT_INFO
+    return completed.stdout.strip() or UNKNOWN_GIT_INFO
 
 
 def get_git_info() -> tuple[str, str]:
     """Return (commit, branch), falling back to "unknown" for either."""
-    return (
-        _git_or_unknown("rev-parse", "HEAD"),
-        _git_or_unknown("rev-parse", "--abbrev-ref", "HEAD"),
-    )
+    return _git_commit(), _git_branch()
 
 
 def _build_run_id(commit: str) -> str:
