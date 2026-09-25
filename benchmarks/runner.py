@@ -75,18 +75,14 @@ UNKNOWN_GIT_INFO = "unknown"
 _GIT_TIMEOUT_SECONDS = 5
 
 
-def _git(*args: str) -> str | None:
-    """Run a read-only git command, or return None if it cannot be answered.
+def _resolve_git_executable() -> str | None:
+    """Return an absolute git path, or None when git is not installed."""
+    # Resolved up front so a `git` planted earlier in PATH is never executed.
+    return shutil.which("git")
 
-    Provenance is metadata about the run, not a precondition for it: a
-    benchmark launched from an installed wheel, a source tarball or a container
-    layer without a `.git` directory should still produce a report.
-    """
-    # Resolved to an absolute path rather than letting the OS search PATH, so a
-    # `git` planted earlier in PATH cannot be what a benchmark run executes.
-    git = shutil.which("git")
-    if git is None:
-        return None
+
+def _git_stdout(git: str, args: tuple[str, ...]) -> str | None:
+    """Run a read-only git command and return stripped stdout, or None."""
     try:
         output = subprocess.check_output(  # nosec B603 - fixed argv, no shell
             [git, *args],
@@ -97,15 +93,33 @@ def _git(*args: str) -> str | None:
     except (subprocess.SubprocessError, OSError):
         # Not a repository, or a hung invocation.
         return None
-    stripped = output.strip()
-    return stripped or None
+    return output.strip() or None
+
+
+def _git(*args: str) -> str | None:
+    """Run a read-only git command, or return None if it cannot be answered.
+
+    Provenance is metadata about the run, not a precondition for it: a
+    benchmark launched from an installed wheel, a source tarball or a container
+    layer without a `.git` directory should still produce a report.
+    """
+    git = _resolve_git_executable()
+    if git is None:
+        return None
+    return _git_stdout(git, args)
+
+
+def _git_or_unknown(*args: str) -> str:
+    """Return git stdout, or UNKNOWN_GIT_INFO when provenance is unavailable."""
+    return _git(*args) or UNKNOWN_GIT_INFO
 
 
 def get_git_info() -> tuple[str, str]:
     """Return (commit, branch), falling back to "unknown" for either."""
-    commit = _git("rev-parse", "HEAD") or UNKNOWN_GIT_INFO
-    branch = _git("rev-parse", "--abbrev-ref", "HEAD") or UNKNOWN_GIT_INFO
-    return commit, branch
+    return (
+        _git_or_unknown("rev-parse", "HEAD"),
+        _git_or_unknown("rev-parse", "--abbrev-ref", "HEAD"),
+    )
 
 
 def _build_run_id(commit: str) -> str:
