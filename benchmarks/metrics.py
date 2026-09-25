@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import math
 from collections import Counter
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 
 from benchmarks.datasets import DatasetRecord
 from benchmarks.models import Prediction
@@ -109,9 +109,23 @@ class MetricsAccumulator:
         )
         if self._saaq is None:
             return summary
-        return replace(
-            summary,
+        return MetricsSummary(
+            accuracy=summary.accuracy,
+            perplexity=summary.perplexity,
+            throughput=summary.throughput,
+            latency_ms=summary.latency_ms,
+            vram_gb=summary.vram_gb,
+            routing_entropy=summary.routing_entropy,
             spike_density=_coalesce(self._saaq.spike_density, summary.spike_density),
+            route_top1_agreement=summary.route_top1_agreement,
+            route_top2_agreement=summary.route_top2_agreement,
+            block_output_cosine=summary.block_output_cosine,
+            resid_in_drift=summary.resid_in_drift,
+            block_index=summary.block_index,
+            expert_load_js=summary.expert_load_js,
+            scale_source=summary.scale_source,
+            goz1_version=summary.goz1_version,
+            sparsity=summary.sparsity,
             firing_rate=self._saaq.firing_rate,
             membrane_pressure=self._saaq.membrane_pressure,
             saaq_delta_q=self._saaq.saaq_delta_q,

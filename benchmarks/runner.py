@@ -182,6 +182,14 @@ def _resolve_corinth_source(
     return path
 
 
+def _with_corinth_dir(config: dict[str, Any], corinth_canal_dir: Path) -> dict[str, Any]:
+    copied = dict(config)
+    telemetry_cfg = dict(config.get("telemetry") or {})
+    telemetry_cfg["corinth_canal_dir"] = str(corinth_canal_dir)
+    copied["telemetry"] = telemetry_cfg
+    return copied
+
+
 def run_benchmarks(
     config_path: Path,
     output_dir: Path,
@@ -190,13 +198,14 @@ def run_benchmarks(
     corinth_canal_dir: Path | None = None,
 ) -> RunMetadata:
     config = load_config(config_path)
+    if corinth_canal_dir is not None:
+        config = _with_corinth_dir(config, corinth_canal_dir)
     metadata, _results = run_benchmarks_from_config(
         config,
         output_dir,
         formats,
         seed_override,
         config_base_path=config_path.parent,
-        corinth_canal_dir=corinth_canal_dir,
     )
     return metadata
 
@@ -208,7 +217,6 @@ def run_benchmarks_from_config(
     seed_override: int | None = None,
     *,
     config_base_path: Path,
-    corinth_canal_dir: Path | None = None,
 ) -> tuple[RunMetadata, list[DatasetResult]]:
     """Run a benchmark from an in-memory config (used by the matrix runner)."""
     run_name = config.get("run_name", "benchmark-run")
@@ -217,16 +225,13 @@ def run_benchmarks_from_config(
         build_metadata(run_name, seed),
         config,
         config_base_path,
-        corinth_canal_dir=corinth_canal_dir,
     )
     model_spec = ModelSpec.from_dict(config["model"])
     results = _evaluate_matrix_cell(
         model_spec,
         load_datasets(config, config_base_path),
         config.get("quantization") or ["fp16"],
-        seed,
-        metadata.telemetry,
-        corinth=corinth,
+        _EvalContext(seed=seed, telemetry=metadata.telemetry, corinth=corinth),
     )
     write_reports(output_dir, formats, metadata, model_spec, results)
     return metadata, results
@@ -236,14 +241,11 @@ def _attach_telemetry(
     metadata: RunMetadata,
     config: dict[str, Any],
     config_base_path: Path,
-    *,
-    corinth_canal_dir: Path | None = None,
 ) -> tuple[RunMetadata, CorinthCanalArtifact | None]:
     telemetry, corinth = _load_upstream_telemetry(
         config,
         config_base_path,
         metadata.telemetry,
-        corinth_canal_dir=corinth_canal_dir,
     )
     return RunMetadata(
         run_id=metadata.run_id,
@@ -260,14 +262,18 @@ def _attach_telemetry(
     ), corinth
 
 
+@dataclass(frozen=True)
+class _EvalContext:
+    seed: int
+    telemetry: TelemetrySnapshot
+    corinth: CorinthCanalArtifact | None = None
+
+
 def _evaluate_matrix_cell(
     model_spec: ModelSpec,
     datasets: list[LoadedDataset],
     quantization_names: list[str],
-    seed: int,
-    telemetry: TelemetrySnapshot,
-    *,
-    corinth: CorinthCanalArtifact | None = None,
+    ctx: _EvalContext,
 ) -> list[DatasetResult]:
     registry = default_quantization_registry()
     results: list[DatasetResult] = []
@@ -275,9 +281,7 @@ def _evaluate_matrix_cell(
         profile = registry.get(quant_name)
         adapter = build_model_adapter(model_spec, profile)
         for dataset in datasets:
-            results.append(
-                _evaluate_dataset(adapter, profile, dataset, seed, telemetry, corinth=corinth)
-            )
+            results.append(_evaluate_dataset(adapter, profile, dataset, ctx))
     return results
 
 
@@ -285,15 +289,12 @@ def _evaluate_dataset(
     adapter: Any,
     profile: QuantizationProfile,
     dataset: LoadedDataset,
-    seed: int,
-    telemetry: TelemetrySnapshot,
-    *,
-    corinth: CorinthCanalArtifact | None = None,
+    ctx: _EvalContext,
 ) -> DatasetResult:
-    scoped = scoped_seed(seed, adapter.spec.name, dataset.spec.name)
+    scoped = scoped_seed(ctx.seed, adapter.spec.name, dataset.spec.name)
     accumulator = MetricsAccumulator()
-    if corinth is not None:
-        accumulator.apply_saaq(corinth.to_saaq_overlay())
+    if ctx.corinth is not None:
+        accumulator.apply_saaq(ctx.corinth.to_saaq_overlay())
     for index, record in enumerate(dataset.records):
         # Deterministic benchmark RNG — not crypto (Bandit B311).
         record_rng = random.Random(  # nosec B311
@@ -310,7 +311,7 @@ def _evaluate_dataset(
         sample_count=len(dataset.records),
         quantization=profile,
         metrics=accumulator.summary(total_time, profile.vram_gb),
-        telemetry=telemetry,
+        telemetry=ctx.telemetry,
         dataset_upstream_license=provenance["dataset_upstream_license"],
         dataset_license_scope=provenance["dataset_license_scope"],
         dataset_source_uri=provenance["dataset_source_uri"],

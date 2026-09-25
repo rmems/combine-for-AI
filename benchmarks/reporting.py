@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import json
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
@@ -27,6 +28,9 @@ _TELEMETRY_SCALAR_KEYS = (
     "notes",
     "saaq_rule",
     "saaq_model_family",
+    "saaq_delta_q_trajectory",
+    "saaq_delta_q_legacy_trajectory",
+    "saaq_delta_q_v15_trajectory",
 )
 
 
@@ -83,7 +87,20 @@ def telemetry_to_row(telemetry: TelemetrySnapshot | None) -> dict[str, Any]:
     d["telemetry_notes"] = telemetry.notes
     d["telemetry_saaq_rule"] = telemetry.saaq_rule
     d["telemetry_saaq_model_family"] = telemetry.saaq_model_family
+    d["telemetry_saaq_delta_q_trajectory"] = _trajectory_cell(telemetry.saaq_delta_q_trajectory)
+    d["telemetry_saaq_delta_q_legacy_trajectory"] = _trajectory_cell(
+        telemetry.saaq_delta_q_legacy_trajectory
+    )
+    d["telemetry_saaq_delta_q_v15_trajectory"] = _trajectory_cell(
+        telemetry.saaq_delta_q_v15_trajectory
+    )
     return d
+
+
+def _trajectory_cell(values: tuple[float, ...] | None) -> str | None:
+    if not values:
+        return None
+    return json.dumps(list(values))
 
 
 def _empty_telemetry_row() -> dict[str, Any]:
