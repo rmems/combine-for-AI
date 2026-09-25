@@ -1,0 +1,369 @@
+{
+  "schema": "combine_for_ai.golden_scorers.v1",
+  "notes": "Offline golden inputs and expected scorer outputs. Perplexity is exp(-mean(natural-log logprobs)). Classification, cloze, and exact-match math scores are exact 0/1. Perplexity uses the stated tolerance.",
+  "metric_families": {
+    "classification": {
+      "tolerance": 0.0,
+      "items": [
+        {
+          "name": "hellaswag_correct_index",
+          "case": {
+            "example_id": "hellaswag:validation:0000",
+            "dataset": "hellaswag",
+            "split": "validation",
+            "prompt": "A woman is cooking pasta. She drains the pot and then",
+            "task": "classification",
+            "choices": ["adds sauce and serves dinner.", "puts it back on the stove to freeze."],
+            "answer_index": 0,
+            "source": "jsonl",
+            "metadata": {"fixture": "golden"}
+          },
+          "prediction": 0,
+          "expected_value": 1.0,
+          "expected_observed_index": 0
+        },
+        {
+          "name": "hellaswag_wrong_index",
+          "case": {
+            "example_id": "hellaswag:validation:0001",
+            "dataset": "hellaswag",
+            "split": "validation",
+            "prompt": "A cyclist reaches a red light. They",
+            "task": "classification",
+            "choices": ["stop and wait for green.", "keep pedaling through traffic."],
+            "answer_index": 0,
+            "source": "jsonl",
+            "metadata": {"fixture": "golden"}
+          },
+          "prediction": 1,
+          "expected_value": 0.0,
+          "expected_observed_index": 1
+        },
+        {
+          "name": "piqa_choice_string",
+          "case": {
+            "example_id": "piqa:validation:0000",
+            "dataset": "piqa",
+            "split": "validation",
+            "prompt": "To keep a plant healthy you should",
+            "task": "classification",
+            "choices": ["water it regularly.", "store it in a freezer."],
+            "answer_index": 0,
+            "source": "jsonl",
+            "metadata": {"fixture": "golden"}
+          },
+          "prediction": "water it regularly.",
+          "expected_value": 1.0,
+          "expected_observed_index": 0
+        },
+        {
+          "name": "arc_easy_normalized_choice",
+          "case": {
+            "example_id": "arc_easy:validation:0000",
+            "dataset": "arc_easy",
+            "split": "validation",
+            "prompt": "What is the main source of energy for Earth's climate?",
+            "task": "classification",
+            "choices": ["the Sun", "the Moon", "volcanoes", "tides"],
+            "answer_index": 0,
+            "source": "jsonl",
+            "metadata": {"fixture": "golden"}
+          },
+          "prediction": "The Sun.",
+          "expected_value": 1.0,
+          "expected_observed_index": 0
+        }
+      ]
+    },
+    "cloze": {
+      "tolerance": 0.0,
+      "items": [
+        {
+          "name": "lambada_exact",
+          "case": {
+            "example_id": "lambada:validation:0000",
+            "dataset": "lambada",
+            "split": "validation",
+            "prompt": "The quick brown fox jumps over the lazy",
+            "task": "cloze",
+            "expected": "dog",
+            "source": "jsonl",
+            "metadata": {"fixture": "golden"}
+          },
+          "prediction": "dog",
+          "expected_value": 1.0,
+          "expected_normalized": "dog"
+        },
+        {
+          "name": "lambada_punctuation_and_case",
+          "case": {
+            "example_id": "lambada:golden:punct",
+            "dataset": "lambada",
+            "split": "validation",
+            "prompt": "The quick brown fox jumps over the lazy",
+            "task": "cloze",
+            "expected": "dog",
+            "source": "jsonl",
+            "metadata": {"fixture": "golden", "edge": "normalization"}
+          },
+          "prediction": "  Dog. ",
+          "expected_value": 1.0,
+          "expected_normalized": "dog"
+        },
+        {
+          "name": "lambada_collapsed_whitespace",
+          "case": {
+            "example_id": "lambada:golden:ws",
+            "dataset": "lambada",
+            "split": "validation",
+            "prompt": "She opened the window to feel the cool night",
+            "task": "cloze",
+            "expected": "air",
+            "source": "jsonl",
+            "metadata": {"fixture": "golden", "edge": "normalization"}
+          },
+          "prediction": "AIR",
+          "expected_value": 1.0,
+          "expected_normalized": "air"
+        },
+        {
+          "name": "lambada_mismatch",
+          "case": {
+            "example_id": "lambada:golden:mismatch",
+            "dataset": "lambada",
+            "split": "validation",
+            "prompt": "The quick brown fox jumps over the lazy",
+            "task": "cloze",
+            "expected": "dog",
+            "source": "jsonl",
+            "metadata": {"fixture": "golden"}
+          },
+          "prediction": "cat",
+          "expected_value": 0.0,
+          "expected_normalized": "dog"
+        }
+      ]
+    },
+    "perplexity": {
+      "tolerance": 1e-12,
+      "items": [
+        {
+          "name": "wikitext_ppl_two",
+          "case": {
+            "example_id": "wikitext2:validation:0000",
+            "dataset": "wikitext2",
+            "split": "validation",
+            "prompt": "In 1969, the Apollo 11 mission landed on the",
+            "task": "perplexity",
+            "expected": "moon.",
+            "source": "jsonl",
+            "metadata": {"fixture": "golden", "formula": "exp(-mean(logprobs)); four tokens at ln(0.5) => 2.0"}
+          },
+          "logprobs": [-0.6931471805599453, -0.6931471805599453, -0.6931471805599453, -0.6931471805599453],
+          "expected_value": 2.0
+        },
+        {
+          "name": "wikitext_ppl_one",
+          "case": {
+            "example_id": "wikitext2:validation:0001",
+            "dataset": "wikitext2",
+            "split": "validation",
+            "prompt": "The capital city of France is",
+            "task": "perplexity",
+            "expected": "Paris.",
+            "source": "jsonl",
+            "metadata": {"fixture": "golden", "formula": "exp(0) => 1.0"}
+          },
+          "logprobs": [0.0, 0.0],
+          "expected_value": 1.0
+        }
+      ]
+    },
+    "exact_match_math": {
+      "tolerance": 0.0,
+      "items": [
+        {
+          "name": "gsm8k_hash_answer",
+          "case": {
+            "example_id": "gsm8k:validation:0000",
+            "dataset": "gsm8k",
+            "split": "validation",
+            "prompt": "Natalia sold clips to 48 of her friends in April, and then she sold half as many clips in May. How many clips did Natalia sell altogether in April and May?",
+            "task": "exact_match_math",
+            "expected": "72",
+            "source": "jsonl",
+            "metadata": {"fixture": "golden"}
+          },
+          "prediction": "Natalia sold 48/2 = 24 clips in May.\n48 + 24 = 72\n#### 72",
+          "expected_value": 1.0,
+          "expected_canonical": "72"
+        },
+        {
+          "name": "gsm8k_trailing_point_zero",
+          "case": {
+            "example_id": "gsm8k:golden:float",
+            "dataset": "gsm8k",
+            "split": "validation",
+            "prompt": "Natalia sold clips to 48 of her friends in April, and then she sold half as many clips in May. How many clips did Natalia sell altogether in April and May?",
+            "task": "exact_match_math",
+            "expected": "72.0",
+            "source": "jsonl",
+            "metadata": {"fixture": "golden", "edge": "normalization"}
+          },
+          "prediction": "72",
+          "expected_value": 1.0,
+          "expected_canonical": "72"
+        },
+        {
+          "name": "gsm8k_thousands_comma",
+          "case": {
+            "example_id": "gsm8k:golden:comma",
+            "dataset": "gsm8k",
+            "split": "validation",
+            "prompt": "How many units?",
+            "task": "exact_match_math",
+            "expected": "1000",
+            "source": "jsonl",
+            "metadata": {"fixture": "golden", "edge": "normalization"}
+          },
+          "prediction": "The total is 1,000.",
+          "expected_value": 1.0,
+          "expected_canonical": "1000"
+        },
+        {
+          "name": "gsm8k_wrong_final",
+          "case": {
+            "example_id": "gsm8k:validation:0001",
+            "dataset": "gsm8k",
+            "split": "validation",
+            "prompt": "Weng earns $12 an hour for babysitting. Yesterday, she just did 50 minutes of babysitting. How much did she earn?",
+            "task": "exact_match_math",
+            "expected": "10",
+            "source": "jsonl",
+            "metadata": {"fixture": "golden"}
+          },
+          "prediction": "12 * 50/60 = 10, but I will guess #### 12",
+          "expected_value": 0.0,
+          "expected_canonical": "10"
+        }
+      ]
+    }
+  },
+  "invalid_cases": [
+    {
+      "name": "malformed_choices_empty",
+      "payload": {
+        "example_id": "piqa:bad:empty",
+        "dataset": "piqa",
+        "split": "validation",
+        "prompt": "To keep a plant healthy you should",
+        "task": "classification",
+        "choices": [],
+        "answer_index": 0,
+        "source": "jsonl",
+        "metadata": {}
+      },
+      "error_substrings": ["malformed choices", "piqa", "piqa:bad:empty"]
+    },
+    {
+      "name": "malformed_choices_blank",
+      "payload": {
+        "example_id": "hellaswag:bad:blank",
+        "dataset": "hellaswag",
+        "split": "validation",
+        "prompt": "A woman is cooking pasta. She drains the pot and then",
+        "task": "classification",
+        "choices": ["adds sauce and serves dinner.", "   "],
+        "answer_index": 1,
+        "source": "jsonl",
+        "metadata": {}
+      },
+      "error_substrings": ["malformed choices", "hellaswag:bad:blank"]
+    },
+    {
+      "name": "missing_target_cloze",
+      "payload": {
+        "example_id": "lambada:bad:missing",
+        "dataset": "lambada",
+        "split": "validation",
+        "prompt": "The quick brown fox jumps over the lazy",
+        "task": "cloze",
+        "source": "jsonl",
+        "metadata": {}
+      },
+      "error_substrings": ["missing target", "lambada", "lambada:bad:missing"]
+    },
+    {
+      "name": "missing_target_math",
+      "payload": {
+        "example_id": "gsm8k:bad:missing",
+        "dataset": "gsm8k",
+        "split": "validation",
+        "prompt": "How many clips?",
+        "task": "exact_match_math",
+        "expected": "   ",
+        "source": "jsonl",
+        "metadata": {}
+      },
+      "error_substrings": ["missing target", "gsm8k:bad:missing"]
+    }
+  ],
+  "duplicate_ids": {
+    "name": "duplicate_example_ids",
+    "payloads": [
+      {
+        "example_id": "lambada:dup:0000",
+        "dataset": "lambada",
+        "split": "validation",
+        "prompt": "The quick brown fox jumps over the lazy",
+        "task": "cloze",
+        "expected": "dog",
+        "source": "jsonl",
+        "metadata": {}
+      },
+      {
+        "example_id": "lambada:dup:0000",
+        "dataset": "lambada",
+        "split": "validation",
+        "prompt": "She opened the window to feel the cool night",
+        "task": "cloze",
+        "expected": "air",
+        "source": "jsonl",
+        "metadata": {}
+      }
+    ],
+    "error_substrings": ["duplicate example ID", "lambada", "lambada:dup:0000"]
+  },
+  "invalid_scores": [
+    {
+      "name": "non_finite_nan",
+      "case": {
+        "example_id": "wikitext2:bad:nan",
+        "dataset": "wikitext2",
+        "split": "validation",
+        "prompt": "In 1969, the Apollo 11 mission landed on the",
+        "task": "perplexity",
+        "expected": "moon.",
+        "source": "jsonl",
+        "metadata": {"fixture": "golden"}
+      },
+      "logprobs": ["NaN"],
+      "error_substrings": ["non-finite", "wikitext2", "wikitext2:bad:nan"]
+    },
+    {
+      "name": "non_finite_inf",
+      "case": {
+        "example_id": "wikitext2:bad:inf",
+        "dataset": "wikitext2",
+        "split": "validation",
+        "prompt": "The capital city of France is",
+        "task": "perplexity",
+        "expected": "Paris.",
+        "source": "jsonl",
+        "metadata": {"fixture": "golden"}
+      },
+      "logprobs": ["Infinity"],
+      "error_substrings": ["non-finite", "wikitext2:bad:inf"]
+    }
+  ]
+}

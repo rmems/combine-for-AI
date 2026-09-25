@@ -12,6 +12,9 @@
     "gptq",
     "gguf"
   ],
+  "dataset_cache": {
+    "mode": "prefer-cache"
+  },
   "datasets": [
     {
       "name": "lambada",
@@ -45,6 +48,13 @@
       "name": "arc-easy",
       "source": "jsonl",
       "path": "datasets/arc_easy.sample.jsonl",
+      "split": "validation",
+      "max_samples": 2
+    },
+    {
+      "name": "gsm8k",
+      "source": "jsonl",
+      "path": "datasets/gsm8k.sample.jsonl",
       "split": "validation",
       "max_samples": 2
     }

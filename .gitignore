@@ -21,7 +21,7 @@ htmlcov/
 
 # Generated reports. Every documented entrypoint writes here by default
 # (`scripts/benchmark.py`, `run_smoke_benchmark.py`, `import_goz_experiment.py`,
-# `compare_runs.py`), so without this a quickstart run leaves the tree dirty and
+# `run_matrix.py`), so without this a quickstart run leaves the tree dirty and
 # run artifacts get committed by accident. The .gitkeep placeholders stay tracked.
 /reports/**
 !/reports/**/
