@@ -9,13 +9,7 @@ from pathlib import Path
 from typing import Any, Mapping, Never
 
 from benchmarks.datasets import DatasetSpec, LoadedDataset, default_dataset_registry
-from benchmarks.journal import (
-    CellState,
-    CommitPoint,
-    JOURNAL_SCHEMA,
-    JournalError,
-    ResumeJournal,
-)
+from benchmarks.journal import CellState, CommitPoint, JOURNAL_SCHEMA, ResumeJournal
 from benchmarks.jsonio import ensure_dir, write_json
 from benchmarks.matrix import (
     CellIdentity,
@@ -26,6 +20,15 @@ from benchmarks.matrix import (
     assert_compatible,
     inputs_checksum,
     sha256_hex,
+)
+from benchmarks.matrix_replay import (
+    TransitionFields,
+    aggregate_payload,
+    apply_transition,
+    journal_header,
+    journaled_cell_ids,
+    statuses_from_records,
+    transition_record,
 )
 from benchmarks.matrix_types import (
     Action,
@@ -50,121 +53,6 @@ class SessionContext:
     journal: ResumeJournal
     config_dir: Path
     aggregate_path: Path
-
-
-def _journal_header(definition: MatrixDefinition, created_at: str) -> dict[str, Any]:
-    return {
-        "cell_ids": [cell.cell_id() for cell in definition.cells],
-        "config_revision": definition.config_revision,
-        "created_at": created_at,
-        "definition_fingerprint": definition.fingerprint,
-        "kind": "header",
-        "matrix_name": definition.name,
-        "schema": JOURNAL_SCHEMA,
-    }
-
-
-@dataclass(frozen=True)
-class TransitionFields:
-    artifact_checksum: str | None = None
-    artifact_path: str | None = None
-    input_digest: str | None = None
-    fingerprint: str | None = None
-    error: str | None = None
-
-
-def _transition(
-    identity: CellIdentity,
-    state: CellState,
-    attempt: int,
-    ts: str,
-    fields: TransitionFields | None = None,
-) -> dict[str, Any]:
-    extra = fields or TransitionFields()
-    fingerprint = extra.fingerprint
-    if fingerprint is None:
-        fingerprint = identity.fingerprint()
-    return {
-        "artifact_checksum": extra.artifact_checksum,
-        "artifact_path": extra.artifact_path,
-        "inputs_checksum": extra.input_digest,
-        "attempt": attempt,
-        "cell_id": identity.cell_id(),
-        "error": extra.error,
-        "fingerprint": fingerprint,
-        "identity": identity.to_canonical_dict(),
-        "kind": "transition",
-        "state": state.value,
-        "ts": ts,
-    }
-
-
-def _optional_str(record: Mapping[str, Any], key: str) -> str | None:
-    value = record.get(key)
-    return value if isinstance(value, str) else None
-
-
-def _stamp_transition(status: CellStatus, state: CellState, ts: str | None) -> None:
-    if state is CellState.RUNNING:
-        status.started_at = ts
-        status.finished_at = None
-        return
-    if state is CellState.PENDING:
-        return
-    status.finished_at = ts
-
-
-def _copy_present(status: CellStatus, record: Mapping[str, Any], field: str) -> None:
-    value = record.get(field)
-    if value is not None:
-        setattr(status, field, value)
-
-
-def _apply_transition(status: CellStatus, record: Mapping[str, Any]) -> None:
-    try:
-        state = CellState(str(record["state"]))
-        attempt = int(record.get("attempt") or 0)
-    except (KeyError, TypeError, ValueError) as exc:
-        raise JournalError("malformed journal transition") from exc
-    status.state = state
-    status.attempt = attempt
-    status.error = record.get("error")
-    _copy_present(status, record, "artifact_checksum")
-    _copy_present(status, record, "fingerprint")
-    _copy_present(status, record, "artifact_path")
-    _copy_present(status, record, "inputs_checksum")
-    if state is CellState.FAILED:
-        status.artifact_checksum = None
-        status.artifact_path = None
-        status.inputs_checksum = None
-    _stamp_transition(status, state, _optional_str(record, "ts"))
-
-
-def _statuses_from_records(
-    definition: MatrixDefinition,
-    records: tuple[dict[str, Any], ...],
-) -> dict[str, CellStatus]:
-    statuses: dict[str, CellStatus] = {
-        identity.cell_id(): CellStatus(identity=identity, state=CellState.PENDING, attempt=0)
-        for identity in definition.cells
-    }
-    for record in records:
-        kind = record.get("kind")
-        if kind == "header":
-            continue
-        if kind != "transition":
-            continue
-        try:
-            cell_id = str(record["cell_id"])
-        except KeyError as exc:
-            raise JournalError("malformed journal transition") from exc
-        identity = definition.cell_by_id.get(cell_id)
-        if identity is None:
-            raise IncompatibleMatrixError(
-                f"journal references unknown cell {cell_id} for the current matrix"
-            )
-        _apply_transition(statuses[cell_id], record)
-    return statuses
 
 
 def cell_artifact_path(output_dir: Path, cell_id: str) -> Path:
@@ -279,47 +167,6 @@ def _dataset_for(
     return loaded[spec]
 
 
-def _journaled_cell_ids(records: tuple[dict[str, Any], ...]) -> set[str]:
-    return {
-        str(record["cell_id"])
-        for record in records
-        if record.get("kind") == "transition" and "cell_id" in record
-    }
-
-
-def _aggregate_payload(
-    definition: MatrixDefinition,
-    statuses: Mapping[str, CellStatus],
-    truncated_tail: bool,
-) -> dict[str, Any]:
-    cells = []
-    counts = {state.value: 0 for state in CellState}
-    for identity in definition.cells:
-        status = statuses[identity.cell_id()]
-        counts[status.state.value] += 1
-        cells.append(
-            {
-                **identity.summary(),
-                "attempt": status.attempt,
-                "disposition": status.disposition,
-                "error": status.error,
-                "retry_count": status.retry_count,
-                "state": status.state.value,
-                "artifact_checksum": status.artifact_checksum,
-                "finished_at": status.finished_at,
-                "started_at": status.started_at,
-            }
-        )
-    return {
-        "cells": cells,
-        "counts": counts,
-        "definition_fingerprint": definition.fingerprint,
-        "matrix_name": definition.name,
-        "schema": "combine.matrix.aggregate.v1",
-        "truncated_tail_recovered": truncated_tail,
-    }
-
-
 def _ensure_journal_header(
     ctx: SessionContext,
     replay_records: tuple[dict[str, Any], ...],
@@ -328,7 +175,7 @@ def _ensure_journal_header(
     if header is None:
         if replay_records:
             raise IncompatibleMatrixError("journal has transitions but no header")
-        ctx.journal.append(_journal_header(ctx.definition, ctx.hooks.clock()))
+        ctx.journal.append(journal_header(ctx.definition, ctx.hooks.clock()))
         ctx.hooks.on_commit(CommitPoint.JOURNAL_WRITE, None)
         return
     if header.get("schema") != JOURNAL_SCHEMA:
@@ -341,13 +188,13 @@ def _journal_pending_cells(
     statuses: dict[str, CellStatus],
     replay_records: tuple[dict[str, Any], ...],
 ) -> None:
-    already_journaled = _journaled_cell_ids(replay_records)
+    already_journaled = journaled_cell_ids(replay_records)
     for identity in ctx.definition.cells:
         cell_id = identity.cell_id()
         if cell_id in already_journaled:
             continue
         ts = ctx.hooks.clock()
-        ctx.journal.append(_transition(identity, CellState.PENDING, 0, ts))
+        ctx.journal.append(transition_record(identity, CellState.PENDING, 0, ts))
         ctx.hooks.on_commit(CommitPoint.JOURNAL_WRITE, cell_id, CellState.PENDING)
         statuses[cell_id].state = CellState.PENDING
 
@@ -355,7 +202,7 @@ def _journal_pending_cells(
 def _record_skip(ctx: SessionContext, identity: CellIdentity, status: CellStatus) -> None:
     ts = ctx.hooks.clock()
     ctx.journal.append(
-        _transition(
+        transition_record(
             identity,
             CellState.SKIPPED,
             status.attempt,
@@ -369,7 +216,7 @@ def _record_skip(ctx: SessionContext, identity: CellIdentity, status: CellStatus
         )
     )
     ctx.hooks.on_commit(CommitPoint.JOURNAL_WRITE, identity.cell_id(), CellState.SKIPPED)
-    _apply_transition(
+    apply_transition(
         status,
         {
             "state": CellState.SKIPPED.value,
@@ -392,7 +239,7 @@ def _fail_cell(
 ) -> None:
     ts = ctx.hooks.clock()
     ctx.journal.append(
-        _transition(
+        transition_record(
             identity,
             CellState.FAILED,
             attempt,
@@ -401,7 +248,7 @@ def _fail_cell(
         )
     )
     ctx.hooks.on_commit(CommitPoint.JOURNAL_WRITE, identity.cell_id(), CellState.FAILED)
-    _apply_transition(
+    apply_transition(
         status,
         {"state": CellState.FAILED.value, "attempt": attempt, "error": error, "ts": ts},
     )
@@ -418,7 +265,7 @@ def _succeed_cell(
     digest = inputs_checksum(identity.dataset)
     ts = ctx.hooks.clock()
     ctx.journal.append(
-        _transition(
+        transition_record(
             identity,
             CellState.SUCCEEDED,
             attempt,
@@ -432,7 +279,7 @@ def _succeed_cell(
         )
     )
     ctx.hooks.on_commit(CommitPoint.JOURNAL_WRITE, identity.cell_id(), CellState.SUCCEEDED)
-    _apply_transition(
+    apply_transition(
         status,
         {
             "state": CellState.SUCCEEDED.value,
@@ -455,7 +302,7 @@ def _run_cell(
     cell_id = identity.cell_id()
     attempt = status.attempt + 1
     ts = ctx.hooks.clock()
-    ctx.journal.append(_transition(identity, CellState.RUNNING, attempt, ts))
+    ctx.journal.append(transition_record(identity, CellState.RUNNING, attempt, ts))
     ctx.hooks.on_commit(CommitPoint.JOURNAL_WRITE, cell_id, CellState.RUNNING)
     status.state = CellState.RUNNING
     status.attempt = attempt
@@ -501,12 +348,12 @@ def execute_session(
     truncated_tail: bool,
 ) -> tuple[dict[str, CellStatus], dict[str, Any]]:
     _ensure_journal_header(ctx, replay_records)
-    statuses = _statuses_from_records(ctx.definition, replay_records)
+    statuses = statuses_from_records(ctx.definition, replay_records)
     loaded: dict[DatasetSpec, LoadedDataset] = {}
     _journal_pending_cells(ctx, statuses, replay_records)
     for identity in ctx.definition.cells:
         _process_cell(ctx, identity, statuses[identity.cell_id()], loaded)
-    aggregate = _aggregate_payload(ctx.definition, statuses, truncated_tail)
+    aggregate = aggregate_payload(ctx.definition, statuses, truncated_tail)
     _atomic_write_json(ctx.aggregate_path, aggregate)
     ctx.hooks.on_commit(CommitPoint.AGGREGATE_UPDATE, None)
     return statuses, aggregate
