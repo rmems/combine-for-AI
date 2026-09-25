@@ -263,35 +263,29 @@ def _ingest_csv_row(
     _append_delta_q(columns, row, fieldnames)
 
 
+_DELTA_Q_FIELDS = (
+    ("saaq_delta_q_target", "delta_q"),
+    ("saaq_delta_q_legacy_target", "delta_q_legacy"),
+    ("saaq_delta_q_v15_target", "delta_q_v15"),
+)
+
+
 def _append_delta_q(
     columns: _LatentCsvColumns, row: dict[str, str | None], fieldnames: set[str]
 ) -> None:
-    primary = _parse_float(_cell(row, "saaq_delta_q_target"))
-    legacy = _parse_float(_cell(row, "saaq_delta_q_legacy_target"))
-    v15 = _parse_float(_cell(row, "saaq_delta_q_v15_target"))
-    dual = {
-        name
-        for name in ("saaq_delta_q_legacy_target", "saaq_delta_q_v15_target")
+    parsed = {
+        name: _parse_float(_cell(row, name))
+        for name, _ in _DELTA_Q_FIELDS
         if name in fieldnames
     }
-    if not dual:
-        _append_if(columns.delta_q, primary)
+    if "saaq_delta_q_legacy_target" not in parsed and "saaq_delta_q_v15_target" not in parsed:
+        _append_if(columns.delta_q, parsed.get("saaq_delta_q_target"))
         return
-    required: list[float | None] = []
-    if "saaq_delta_q_target" in fieldnames:
-        required.append(primary)
-    if "saaq_delta_q_legacy_target" in fieldnames:
-        required.append(legacy)
-    if "saaq_delta_q_v15_target" in fieldnames:
-        required.append(v15)
-    if any(value is None for value in required):
+    if None in parsed.values():
         return
-    if "saaq_delta_q_target" in fieldnames and primary is not None:
-        columns.delta_q.append(primary)
-    if "saaq_delta_q_legacy_target" in fieldnames and legacy is not None:
-        columns.delta_q_legacy.append(legacy)
-    if "saaq_delta_q_v15_target" in fieldnames and v15 is not None:
-        columns.delta_q_v15.append(v15)
+    for name, attr in _DELTA_Q_FIELDS:
+        if name in parsed:
+            getattr(columns, attr).append(parsed[name])
 
 
 def parse_latent_telemetry_csv(path: Path) -> LatentTelemetrySeries:
