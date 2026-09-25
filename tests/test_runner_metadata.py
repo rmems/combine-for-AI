@@ -65,6 +65,8 @@ def test_git_info_survives_every_subprocess_failure(failure: Exception) -> None:
 def test_git_commands_are_given_a_timeout() -> None:
     """A hung git invocation must not hang the benchmark indefinitely."""
     with mock.patch(
+        "benchmarks.runner.shutil.which", return_value="/usr/bin/git"
+    ), mock.patch(
         "benchmarks.runner.subprocess.check_output", return_value="abc123\n"
     ) as check_output:
         get_git_info()
