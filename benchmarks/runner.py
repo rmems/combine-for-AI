@@ -84,7 +84,7 @@ def _resolve_git_executable() -> str | None:
 def _git_stdout(git: str, args: tuple[str, ...]) -> str | None:
     """Run a read-only git command and return stripped stdout, or None."""
     try:
-        output = subprocess.check_output(  # nosec B603 - fixed argv, no shell
+        output = subprocess.check_output(  # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit  # nosec B603 - argv is a fixed list built from a resolved git binary
             [git, *args],
             text=True,
             stderr=subprocess.DEVNULL,
