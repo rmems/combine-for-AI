@@ -64,26 +64,34 @@ def _journal_header(definition: MatrixDefinition, created_at: str) -> dict[str, 
     }
 
 
+@dataclass(frozen=True)
+class TransitionFields:
+    artifact_checksum: str | None = None
+    artifact_path: str | None = None
+    input_digest: str | None = None
+    fingerprint: str | None = None
+    error: str | None = None
+
+
 def _transition(
     identity: CellIdentity,
     state: CellState,
     attempt: int,
     ts: str,
-    *,
-    artifact_checksum: str | None = None,
-    fingerprint: str | None = None,
-    artifact_path: str | None = None,
-    input_digest: str | None = None,
-    error: str | None = None,
+    fields: TransitionFields | None = None,
 ) -> dict[str, Any]:
+    extra = fields or TransitionFields()
+    fingerprint = extra.fingerprint
+    if fingerprint is None:
+        fingerprint = identity.fingerprint()
     return {
-        "artifact_checksum": artifact_checksum,
-        "artifact_path": artifact_path,
-        "inputs_checksum": input_digest,
+        "artifact_checksum": extra.artifact_checksum,
+        "artifact_path": extra.artifact_path,
+        "inputs_checksum": extra.input_digest,
         "attempt": attempt,
         "cell_id": identity.cell_id(),
-        "error": error,
-        "fingerprint": fingerprint if fingerprint is not None else identity.fingerprint(),
+        "error": extra.error,
+        "fingerprint": fingerprint,
         "identity": identity.to_canonical_dict(),
         "kind": "transition",
         "state": state.value,
@@ -352,10 +360,12 @@ def _record_skip(ctx: SessionContext, identity: CellIdentity, status: CellStatus
             CellState.SKIPPED,
             status.attempt,
             ts,
-            artifact_checksum=status.artifact_checksum,
-            fingerprint=status.fingerprint,
-            artifact_path=status.artifact_path,
-            input_digest=status.inputs_checksum,
+            TransitionFields(
+                artifact_checksum=status.artifact_checksum,
+                fingerprint=status.fingerprint,
+                artifact_path=status.artifact_path,
+                input_digest=status.inputs_checksum,
+            ),
         )
     )
     ctx.hooks.on_commit(CommitPoint.JOURNAL_WRITE, identity.cell_id(), CellState.SKIPPED)
@@ -387,8 +397,7 @@ def _fail_cell(
             CellState.FAILED,
             attempt,
             ts,
-            fingerprint=identity.fingerprint(),
-            error=error,
+            TransitionFields(fingerprint=identity.fingerprint(), error=error),
         )
     )
     ctx.hooks.on_commit(CommitPoint.JOURNAL_WRITE, identity.cell_id(), CellState.FAILED)
@@ -414,10 +423,12 @@ def _succeed_cell(
             CellState.SUCCEEDED,
             attempt,
             ts,
-            artifact_checksum=checksum,
-            fingerprint=identity.fingerprint(),
-            artifact_path=str(artifact),
-            input_digest=digest,
+            TransitionFields(
+                artifact_checksum=checksum,
+                fingerprint=identity.fingerprint(),
+                artifact_path=str(artifact),
+                input_digest=digest,
+            ),
         )
     )
     ctx.hooks.on_commit(CommitPoint.JOURNAL_WRITE, identity.cell_id(), CellState.SUCCEEDED)
