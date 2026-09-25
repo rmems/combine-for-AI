@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 
@@ -20,7 +21,7 @@ def _mean(values: list[float]) -> float | None:
 
 
 def _finite_or_none(number: float) -> float | None:
-    if number != number or number in {float("inf"), float("-inf")}:
+    if not math.isfinite(number):
         return None
     return number
 

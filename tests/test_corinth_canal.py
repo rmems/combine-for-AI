@@ -103,6 +103,8 @@ def test_load_run_directory() -> None:
     assert run.latent_rows == 4
     assert run.skipped == ()
     assert run.saaq_delta_q_trajectory[-1] == pytest.approx(0.296199)
+    assert run.spike_density is None
+    assert run.event_rate is None
 
 
 def test_load_summary_in_run_dir_pulls_siblings() -> None:
@@ -131,8 +133,38 @@ def test_partial_run_directory_skips_missing_files(tmp_path: Path) -> None:
     assert "run_manifest.json" in run.skipped
 
 
+def test_malformed_sibling_does_not_discard_csv(tmp_path: Path) -> None:
+    (tmp_path / "latent_telemetry.csv").write_text(
+        (RUN_DIR / "latent_telemetry.csv").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    (tmp_path / "summary.json").write_text("{not-json", encoding="utf-8")
+    run = try_load_corinth_canal(tmp_path)
+    assert run is not None
+    assert run.firing_rate == pytest.approx(7.3875)
+    assert "summary.json" in run.skipped
+
+
+def test_dual_trajectories_stay_aligned_on_partial_row(tmp_path: Path) -> None:
+    path = tmp_path / "latent_telemetry.csv"
+    path.write_text(
+        LATENT_CSV_HEADER
+        + "\n"
+        + "1,6.5,1.2,0.85,0.0,0.1,65,250,70,45,0.0,0.2,0.0,0.3\n"
+        + "2,7.0,0.8,0.82,0.1,nan,66,255,71,46,0.2,0.25,0.3,0.35\n"
+        + "3,8.0,-0.4,0.79,0.2,0.4,67,260,72,47,0.25,0.3,0.35,0.45\n",
+        encoding="utf-8",
+    )
+    series = parse_latent_telemetry_csv(path)
+    assert series.row_count == 3
+    assert series.delta_q_trajectory == pytest.approx((0.1, 0.4))
+    assert series.delta_q_legacy_trajectory == pytest.approx((0.2, 0.3))
+    assert series.delta_q_v15_trajectory == pytest.approx((0.3, 0.45))
+    assert series.delta_q_last == pytest.approx(0.4)
+
+
 def test_unreadable_json_is_skipped(tmp_path: Path) -> None:
-    bad = tmp_path / "summary.json"
+    bad = tmp_path / "broken.json"
     bad.write_text("{not-json", encoding="utf-8")
     assert try_load_corinth_canal(bad) is None
 
@@ -152,7 +184,7 @@ def test_metrics_accumulator_maps_saaq_overlay() -> None:
         )
     )
     summary = accumulator.summary(total_time_s=1.0, vram_gb=14.0)
-    assert summary.accuracy == 0.0
+    assert summary.accuracy == pytest.approx(0.0)
     assert summary.firing_rate == pytest.approx(7.3875)
     assert summary.membrane_pressure == pytest.approx(0.0365)
     assert summary.saaq_delta_q == pytest.approx(0.235891)
@@ -259,6 +291,12 @@ def test_benchmark_merges_saaq_into_json_and_csv(tmp_path: Path) -> None:
     assert float(csv_row["firing_rate"]) == pytest.approx(7.3875)
     assert float(csv_row["saaq_delta_q_last"]) == pytest.approx(0.296199)
     assert csv_row["saaq_rule"] == "SaaqV1_5SqrtRate"
+    assert json.loads(csv_row["telemetry_saaq_delta_q_trajectory"]) == [
+        0.146087,
+        0.226744,
+        0.274534,
+        0.296199,
+    ]
 
 
 def test_benchmark_cli_dir_overrides_missing_config(tmp_path: Path) -> None:
@@ -350,7 +388,9 @@ def test_non_finite_csv_cells_are_skipped(tmp_path: Path) -> None:
     assert series.firing_rate_mean is None
     assert series.delta_q_mean is None
     assert series.membrane_dv_dt_mean == pytest.approx(0.1)
-    assert series.delta_q_legacy_mean == pytest.approx(0.3)
+    assert series.delta_q_legacy_mean is None
+    assert series.delta_q_legacy_trajectory == ()
+    assert series.delta_q_v15_trajectory == ()
 
 
 def test_invalid_tick_value_is_skipped(tmp_path: Path) -> None:

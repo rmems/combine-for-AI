@@ -128,6 +128,9 @@ def activity_pressure(firing_rate_hz: float) -> float:
     return max(0.0, min(1.0, firing_rate_hz / ACTIVITY_PRESSURE_SCALE))
 
 
+_LOAD_ERRORS = (OSError, csv.Error, ValueError)
+
+
 def try_load_corinth_canal(path: Path) -> CorinthCanalRun | None:
     """Load a run directory or file; return None when absent or unreadable."""
 
@@ -135,7 +138,7 @@ def try_load_corinth_canal(path: Path) -> CorinthCanalRun | None:
         return None
     try:
         return load_corinth_canal(path)
-    except (OSError, json.JSONDecodeError, UnicodeDecodeError, csv.Error, ValueError):
+    except _LOAD_ERRORS:
         return None
 
 
@@ -149,9 +152,7 @@ def load_corinth_canal(path: Path) -> CorinthCanalRun:
     suffix = resolved.suffix.lower()
     if suffix == ".csv":
         return _run_from_series(
-            parse_latent_telemetry_csv(resolved),
-            experiment_id=resolved.stem,
-            raw_path=str(resolved),
+            parse_latent_telemetry_csv(resolved), resolved.stem, str(resolved)
         )
     if suffix == ".json":
         parent = resolved.parent
@@ -173,34 +174,21 @@ def load_run_directory(path: Path) -> CorinthCanalRun:
     manifest_path = path / CANONICAL_MANIFEST
     tick_path = path / CANONICAL_TICKS
 
-    series = parse_latent_telemetry_csv(csv_path) if csv_path.exists() else None
-    if not csv_path.exists():
-        skipped.append(CANONICAL_LATENT_CSV)
-
-    summary: dict[str, Any] | None = None
-    if summary_path.exists():
-        summary = _read_json_object(summary_path)
-    else:
-        skipped.append(CANONICAL_SUMMARY)
-
-    manifest: dict[str, Any] | None = None
-    if manifest_path.exists():
-        manifest = _read_json_object(manifest_path)
-    else:
-        skipped.append(CANONICAL_MANIFEST)
-
-    ticks = parse_tick_telemetry(tick_path) if tick_path.exists() else None
-    if not tick_path.exists():
-        skipped.append(CANONICAL_TICKS)
+    series = _optional_parse(csv_path, parse_latent_telemetry_csv, skipped)
+    summary = _optional_json(summary_path, skipped)
+    manifest = _optional_json(manifest_path, skipped)
+    ticks = _optional_parse(tick_path, parse_tick_telemetry, skipped)
 
     return _merge_run(
-        series=series,
-        summary=summary,
-        manifest=manifest,
-        ticks=ticks,
-        experiment_id_fallback=path.name,
-        raw_path=str(path),
-        skipped=tuple(skipped),
+        _MergeInputs(
+            series=series,
+            summary=summary,
+            manifest=manifest,
+            ticks=ticks,
+            experiment_id_fallback=path.name,
+            raw_path=str(path),
+            skipped=tuple(skipped),
+        )
     )
 
 
@@ -259,7 +247,9 @@ def _append_if(values: list[Any], parsed: Any) -> None:
         values.append(parsed)
 
 
-def _ingest_csv_row(columns: _LatentCsvColumns, row: dict[str, str | None]) -> None:
+def _ingest_csv_row(
+    columns: _LatentCsvColumns, row: dict[str, str | None], fieldnames: set[str]
+) -> None:
     _append_if(columns.timestamps, _parse_int(_cell(row, "timestamp_ms")))
     rate = _parse_float(_cell(row, "avg_pop_firing_rate_hz"))
     _append_if(columns.firing_rates, rate)
@@ -270,9 +260,38 @@ def _ingest_csv_row(columns: _LatentCsvColumns, row: dict[str, str | None]) -> N
     if dv_dt is not None:
         columns.membrane_pressures.append(membrane_pressure(dv_dt))
     _append_if(columns.routing_entropies, _parse_float(_cell(row, "routing_entropy")))
-    _append_if(columns.delta_q, _parse_float(_cell(row, "saaq_delta_q_target")))
-    _append_if(columns.delta_q_legacy, _parse_float(_cell(row, "saaq_delta_q_legacy_target")))
-    _append_if(columns.delta_q_v15, _parse_float(_cell(row, "saaq_delta_q_v15_target")))
+    _append_delta_q(columns, row, fieldnames)
+
+
+def _append_delta_q(
+    columns: _LatentCsvColumns, row: dict[str, str | None], fieldnames: set[str]
+) -> None:
+    primary = _parse_float(_cell(row, "saaq_delta_q_target"))
+    legacy = _parse_float(_cell(row, "saaq_delta_q_legacy_target"))
+    v15 = _parse_float(_cell(row, "saaq_delta_q_v15_target"))
+    dual = {
+        name
+        for name in ("saaq_delta_q_legacy_target", "saaq_delta_q_v15_target")
+        if name in fieldnames
+    }
+    if not dual:
+        _append_if(columns.delta_q, primary)
+        return
+    required: list[float | None] = []
+    if "saaq_delta_q_target" in fieldnames:
+        required.append(primary)
+    if "saaq_delta_q_legacy_target" in fieldnames:
+        required.append(legacy)
+    if "saaq_delta_q_v15_target" in fieldnames:
+        required.append(v15)
+    if any(value is None for value in required):
+        return
+    if "saaq_delta_q_target" in fieldnames and primary is not None:
+        columns.delta_q.append(primary)
+    if "saaq_delta_q_legacy_target" in fieldnames and legacy is not None:
+        columns.delta_q_legacy.append(legacy)
+    if "saaq_delta_q_v15_target" in fieldnames and v15 is not None:
+        columns.delta_q_v15.append(v15)
 
 
 def parse_latent_telemetry_csv(path: Path) -> LatentTelemetrySeries:
@@ -280,8 +299,10 @@ def parse_latent_telemetry_csv(path: Path) -> LatentTelemetrySeries:
     columns = _empty_csv_columns()
     row_count = 0
     with path.open("r", encoding="utf-8-sig", newline="") as handle:
-        for row in csv.DictReader(handle):
-            _ingest_csv_row(columns, row)
+        reader = csv.DictReader(handle)
+        fieldnames = {name for name in (reader.fieldnames or []) if name}
+        for row in reader:
+            _ingest_csv_row(columns, row, fieldnames)
             row_count += 1
     return LatentTelemetrySeries(
         row_count=row_count,
@@ -341,47 +362,64 @@ def _dir_looks_like_run(path: Path) -> bool:
     return (path / CANONICAL_LATENT_CSV).exists() or (path / CANONICAL_SUMMARY).exists()
 
 
+@dataclass(frozen=True)
+class _MergeInputs:
+    series: LatentTelemetrySeries | None = None
+    summary: dict[str, Any] | None = None
+    manifest: dict[str, Any] | None = None
+    ticks: TickTelemetrySeries | None = None
+    experiment_id_fallback: str = ""
+    raw_path: str = ""
+    skipped: tuple[str, ...] = ()
+
+
+def _optional_json(path: Path, skipped: list[str]) -> dict[str, Any] | None:
+    if not path.exists():
+        skipped.append(path.name)
+        return None
+    try:
+        return _read_json_object(path)
+    except _LOAD_ERRORS:
+        skipped.append(path.name)
+        return None
+
+
+def _optional_parse(path: Path, parser: Any, skipped: list[str]) -> Any:
+    if not path.exists():
+        skipped.append(path.name)
+        return None
+    try:
+        return parser(path)
+    except _LOAD_ERRORS:
+        skipped.append(path.name)
+        return None
+
+
 def _run_from_series(
-    series: LatentTelemetrySeries,
-    *,
-    experiment_id: str,
-    raw_path: str,
-    summary: dict[str, Any] | None = None,
-    manifest: dict[str, Any] | None = None,
-    skipped: tuple[str, ...] = (),
+    series: LatentTelemetrySeries, experiment_id: str, raw_path: str
 ) -> CorinthCanalRun:
     return _merge_run(
-        series=series,
-        summary=summary,
-        manifest=manifest,
-        ticks=None,
-        experiment_id_fallback=experiment_id,
-        raw_path=raw_path,
-        skipped=skipped,
+        _MergeInputs(series=series, experiment_id_fallback=experiment_id, raw_path=raw_path)
     )
 
 
 def _run_from_summary(raw: dict[str, Any], *, raw_path: str) -> CorinthCanalRun:
     return _merge_run(
-        series=None,
-        summary=raw,
-        manifest=None,
-        ticks=None,
-        experiment_id_fallback=str(raw.get("run_id") or Path(raw_path).stem),
-        raw_path=raw_path,
-        skipped=(),
+        _MergeInputs(
+            summary=raw,
+            experiment_id_fallback=str(raw.get("run_id") or Path(raw_path).stem),
+            raw_path=raw_path,
+        )
     )
 
 
 def _run_from_manifest(raw: dict[str, Any], *, raw_path: str) -> CorinthCanalRun:
     return _merge_run(
-        series=None,
-        summary=None,
-        manifest=raw,
-        ticks=None,
-        experiment_id_fallback=str(raw.get("run_id") or Path(raw_path).stem),
-        raw_path=raw_path,
-        skipped=(),
+        _MergeInputs(
+            manifest=raw,
+            experiment_id_fallback=str(raw.get("run_id") or Path(raw_path).stem),
+            raw_path=raw_path,
+        )
     )
 
 
@@ -469,28 +507,19 @@ def _run_counts(
     return ticks_completed, latent_rows
 
 
-def _merge_run(
-    *,
-    series: LatentTelemetrySeries | None,
-    summary: dict[str, Any] | None,
-    manifest: dict[str, Any] | None,
-    ticks: TickTelemetrySeries | None,
-    experiment_id_fallback: str,
-    raw_path: str,
-    skipped: tuple[str, ...],
-) -> CorinthCanalRun:
-    overlay = _overlay_from_series(series)
+def _merge_run(parts: _MergeInputs) -> CorinthCanalRun:
+    overlay = _overlay_from_series(parts.series)
     experiment_id, saaq_rule, family, slug, projection, dual_emit = _run_identity(
-        summary, manifest, experiment_id_fallback
+        parts.summary, parts.manifest, parts.experiment_id_fallback
     )
-    ticks_completed, latent_rows = _run_counts(summary, overlay, ticks)
-    primary_rule = _as_str((manifest or {}).get("saaq_primary_rule")) or saaq_rule
+    ticks_completed, latent_rows = _run_counts(parts.summary, overlay, parts.ticks)
+    primary_rule = _as_str((parts.manifest or {}).get("saaq_primary_rule")) or saaq_rule
     return CorinthCanalRun(
         experiment_id=experiment_id,
         artifact_version=SAAQ_ARTIFACT_VERSION,
         routing_entropy=overlay.routing_entropy_mean,
-        spike_density=overlay.activity_pressure_mean,
-        event_rate=overlay.firing_rate_mean,
+        spike_density=None,
+        event_rate=None,
         firing_rate=overlay.firing_rate_mean,
         membrane_pressure=overlay.membrane_pressure_mean,
         membrane_dv_dt=overlay.membrane_dv_dt_mean,
@@ -509,10 +538,10 @@ def _merge_run(
         projection_mode=projection,
         ticks_completed=ticks_completed,
         latent_rows=latent_rows,
-        raw_path=raw_path,
-        summary=summary,
-        run_manifest=manifest,
-        skipped=skipped,
+        raw_path=parts.raw_path,
+        summary=parts.summary,
+        run_manifest=parts.manifest,
+        skipped=parts.skipped,
     )
 
 

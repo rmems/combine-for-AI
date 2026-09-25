@@ -328,11 +328,15 @@ class CorinthCanalArtifact:
             saaq_delta_q_trajectory=_tuple_floats(
                 raw.get("delta_q_trajectory") or raw.get("saaq_delta_q_trajectory")
             ),
-            saaq_delta_q_legacy_trajectory=_tuple_floats(raw.get("delta_q_legacy_trajectory")),
-            saaq_delta_q_v15_trajectory=_tuple_floats(raw.get("delta_q_v15_trajectory")),
+            saaq_delta_q_legacy_trajectory=_tuple_floats(
+                raw.get("delta_q_legacy_trajectory") or raw.get("saaq_delta_q_legacy_trajectory")
+            ),
+            saaq_delta_q_v15_trajectory=_tuple_floats(
+                raw.get("delta_q_v15_trajectory") or raw.get("saaq_delta_q_v15_trajectory")
+            ),
             saaq_rule=raw.get("saaq_rule"),
             saaq_primary_rule=raw.get("saaq_primary_rule"),
-            model_family=raw.get("model_family"),
+            model_family=raw.get("model_family") or raw.get("saaq_model_family"),
             model_slug=raw.get("model_slug"),
             ticks_completed=raw.get("ticks_completed"),
             latent_rows=raw.get("latent_rows"),
@@ -438,58 +442,69 @@ def merge_upstream_artifacts(
     corinth: CorinthCanalArtifact | None = None,
     myelin: MyelinAcceleratorArtifact | None = None,
 ) -> TelemetrySnapshot:
-    routing = telemetry.routing
-    saaq_rule = telemetry.saaq_rule
-    saaq_model_family = telemetry.saaq_model_family
-    saaq_traj = telemetry.saaq_delta_q_trajectory
-    saaq_legacy_traj = telemetry.saaq_delta_q_legacy_trajectory
-    saaq_v15_traj = telemetry.saaq_delta_q_v15_trajectory
+    if corinth is not None:
+        telemetry = _merge_corinth(telemetry, corinth)
+    if myelin is not None:
+        telemetry = _merge_myelin(telemetry, myelin)
+    return telemetry
+
+
+def _merge_corinth(telemetry: TelemetrySnapshot, corinth: CorinthCanalArtifact) -> TelemetrySnapshot:
+    base = telemetry.routing or RoutingMetrics()
     notes = telemetry.notes
-    if corinth:
-        base = routing or RoutingMetrics()
-        routing = RoutingMetrics(
-            routing_entropy=_coalesce(corinth.routing_entropy, base.routing_entropy),
-            spike_density=_coalesce(corinth.spike_density, base.spike_density),
-            latent_stability=_coalesce(corinth.latent_stability, base.latent_stability),
-            dv_dt_reductions=_coalesce(corinth.dv_dt_reductions, base.dv_dt_reductions),
-            event_rate=_coalesce(corinth.event_rate, base.event_rate),
-            firing_rate=_coalesce(corinth.firing_rate, base.firing_rate),
-            membrane_pressure=_coalesce(corinth.membrane_pressure, base.membrane_pressure),
-            saaq_delta_q=_coalesce(corinth.saaq_delta_q, base.saaq_delta_q),
-            saaq_delta_q_last=_coalesce(corinth.saaq_delta_q_last, base.saaq_delta_q_last),
-            saaq_delta_q_legacy=_coalesce(corinth.saaq_delta_q_legacy, base.saaq_delta_q_legacy),
-            saaq_delta_q_v15=_coalesce(corinth.saaq_delta_q_v15, base.saaq_delta_q_v15),
-        )
-        saaq_rule = _coalesce(corinth.saaq_rule, saaq_rule)
-        saaq_model_family = _coalesce(corinth.model_family, saaq_model_family)
-        if corinth.saaq_delta_q_trajectory:
-            saaq_traj = corinth.saaq_delta_q_trajectory
-        if corinth.saaq_delta_q_legacy_trajectory:
-            saaq_legacy_traj = corinth.saaq_delta_q_legacy_trajectory
-        if corinth.saaq_delta_q_v15_trajectory:
-            saaq_v15_traj = corinth.saaq_delta_q_v15_trajectory
-        if corinth.skipped:
-            skipped_note = "skipped corinth-canal artifacts: " + ", ".join(corinth.skipped)
-            notes = f"{notes}; {skipped_note}" if notes else skipped_note
-
-    kernel_occupancy = telemetry.kernel_occupancy
-    vram_bw = telemetry.vram_bandwidth_gbps
-    if myelin:
-        kernel_occupancy = myelin.kernel_occupancy if myelin.kernel_occupancy is not None else kernel_occupancy
-        vram_bw = myelin.vram_bandwidth_gbps if myelin.vram_bandwidth_gbps is not None else vram_bw
-
+    if corinth.skipped:
+        skipped_note = "skipped corinth-canal artifacts: " + ", ".join(corinth.skipped)
+        notes = f"{notes}; {skipped_note}" if notes else skipped_note
     return TelemetrySnapshot(
         system=telemetry.system,
         gpu_metrics=telemetry.gpu_metrics,
-        routing=routing,
-        kernel_occupancy=kernel_occupancy,
-        vram_bandwidth_gbps=vram_bw,
+        routing=_routing_from_corinth(base, corinth),
+        kernel_occupancy=telemetry.kernel_occupancy,
+        vram_bandwidth_gbps=telemetry.vram_bandwidth_gbps,
         notes=notes,
-        saaq_rule=saaq_rule,
-        saaq_model_family=saaq_model_family,
-        saaq_delta_q_trajectory=saaq_traj,
-        saaq_delta_q_legacy_trajectory=saaq_legacy_traj,
-        saaq_delta_q_v15_trajectory=saaq_v15_traj,
+        saaq_rule=_coalesce(corinth.saaq_rule, telemetry.saaq_rule),
+        saaq_model_family=_coalesce(corinth.model_family, telemetry.saaq_model_family),
+        saaq_delta_q_trajectory=corinth.saaq_delta_q_trajectory or telemetry.saaq_delta_q_trajectory,
+        saaq_delta_q_legacy_trajectory=(
+            corinth.saaq_delta_q_legacy_trajectory or telemetry.saaq_delta_q_legacy_trajectory
+        ),
+        saaq_delta_q_v15_trajectory=(
+            corinth.saaq_delta_q_v15_trajectory or telemetry.saaq_delta_q_v15_trajectory
+        ),
+    )
+
+
+def _routing_from_corinth(base: RoutingMetrics, corinth: CorinthCanalArtifact) -> RoutingMetrics:
+    return RoutingMetrics(
+        routing_entropy=_coalesce(corinth.routing_entropy, base.routing_entropy),
+        spike_density=_coalesce(corinth.spike_density, base.spike_density),
+        latent_stability=_coalesce(corinth.latent_stability, base.latent_stability),
+        dv_dt_reductions=_coalesce(corinth.dv_dt_reductions, base.dv_dt_reductions),
+        event_rate=_coalesce(corinth.event_rate, base.event_rate),
+        firing_rate=_coalesce(corinth.firing_rate, base.firing_rate),
+        membrane_pressure=_coalesce(corinth.membrane_pressure, base.membrane_pressure),
+        saaq_delta_q=_coalesce(corinth.saaq_delta_q, base.saaq_delta_q),
+        saaq_delta_q_last=_coalesce(corinth.saaq_delta_q_last, base.saaq_delta_q_last),
+        saaq_delta_q_legacy=_coalesce(corinth.saaq_delta_q_legacy, base.saaq_delta_q_legacy),
+        saaq_delta_q_v15=_coalesce(corinth.saaq_delta_q_v15, base.saaq_delta_q_v15),
+    )
+
+
+def _merge_myelin(
+    telemetry: TelemetrySnapshot, myelin: MyelinAcceleratorArtifact
+) -> TelemetrySnapshot:
+    return TelemetrySnapshot(
+        system=telemetry.system,
+        gpu_metrics=telemetry.gpu_metrics,
+        routing=telemetry.routing,
+        kernel_occupancy=_coalesce(myelin.kernel_occupancy, telemetry.kernel_occupancy),
+        vram_bandwidth_gbps=_coalesce(myelin.vram_bandwidth_gbps, telemetry.vram_bandwidth_gbps),
+        notes=telemetry.notes,
+        saaq_rule=telemetry.saaq_rule,
+        saaq_model_family=telemetry.saaq_model_family,
+        saaq_delta_q_trajectory=telemetry.saaq_delta_q_trajectory,
+        saaq_delta_q_legacy_trajectory=telemetry.saaq_delta_q_legacy_trajectory,
+        saaq_delta_q_v15_trajectory=telemetry.saaq_delta_q_v15_trajectory,
     )
 
 
