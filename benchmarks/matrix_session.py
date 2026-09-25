@@ -24,6 +24,7 @@ from benchmarks.matrix import (
     MatrixError,
     RetryPolicy,
     assert_compatible,
+    inputs_checksum,
     sha256_hex,
 )
 from benchmarks.matrix_types import (
@@ -72,11 +73,13 @@ def _transition(
     artifact_checksum: str | None = None,
     fingerprint: str | None = None,
     artifact_path: str | None = None,
+    input_digest: str | None = None,
     error: str | None = None,
 ) -> dict[str, Any]:
     return {
         "artifact_checksum": artifact_checksum,
         "artifact_path": artifact_path,
+        "inputs_checksum": input_digest,
         "attempt": attempt,
         "cell_id": identity.cell_id(),
         "error": error,
@@ -121,6 +124,11 @@ def _apply_transition(status: CellStatus, record: Mapping[str, Any]) -> None:
     _copy_present(status, record, "artifact_checksum")
     _copy_present(status, record, "fingerprint")
     _copy_present(status, record, "artifact_path")
+    _copy_present(status, record, "inputs_checksum")
+    if state is CellState.FAILED:
+        status.artifact_checksum = None
+        status.artifact_path = None
+        status.inputs_checksum = None
     _stamp_transition(status, state, _optional_str(record, "ts"))
 
 
@@ -174,6 +182,8 @@ def artifact_is_valid(status: CellStatus, output_dir: Path) -> bool:
     if status.artifact_checksum is None or status.fingerprint is None:
         return False
     if status.fingerprint != status.identity.fingerprint():
+        return False
+    if status.inputs_checksum != inputs_checksum(status.identity.dataset):
         return False
     path = cell_artifact_path(output_dir, status.identity.cell_id())
     if not path.is_file():
@@ -242,29 +252,23 @@ def execute_cell(
     }
 
 
-def _load_datasets(
-    definition: MatrixDefinition,
-    base_path: Path,
-) -> dict[DatasetSpec, LoadedDataset]:
-    registry = default_dataset_registry()
-    loaded: dict[DatasetSpec, LoadedDataset] = {}
-    for spec in definition.datasets:
-        if spec not in loaded:
-            resolved = resolve_dataset(spec, base_path)
-            loaded[spec] = registry.loader_for(resolved.source).load(resolved)
-    return loaded
-
-
 def _dataset_for(
     identity: CellIdentity,
     loaded: dict[DatasetSpec, LoadedDataset],
+    base_path: Path,
 ) -> LoadedDataset:
+    spec = identity.dataset
+    cached = loaded.get(spec)
+    if cached is not None:
+        return cached
     try:
-        return loaded[identity.dataset]
-    except KeyError as exc:
+        resolved = resolve_dataset(spec, base_path)
+        loaded[spec] = default_dataset_registry().loader_for(resolved.source).load(resolved)
+    except (FileNotFoundError, KeyError, ValueError) as exc:
         raise MatrixError(
             f"dataset {identity.dataset.name}/{identity.dataset.split} was not loaded"
         ) from exc
+    return loaded[spec]
 
 
 def _journaled_cell_ids(records: tuple[dict[str, Any], ...]) -> set[str]:
@@ -351,6 +355,7 @@ def _record_skip(ctx: SessionContext, identity: CellIdentity, status: CellStatus
             artifact_checksum=status.artifact_checksum,
             fingerprint=status.fingerprint,
             artifact_path=status.artifact_path,
+            input_digest=status.inputs_checksum,
         )
     )
     ctx.hooks.on_commit(CommitPoint.JOURNAL_WRITE, identity.cell_id(), CellState.SKIPPED)
@@ -362,6 +367,7 @@ def _record_skip(ctx: SessionContext, identity: CellIdentity, status: CellStatus
             "artifact_checksum": status.artifact_checksum,
             "fingerprint": status.fingerprint,
             "artifact_path": status.artifact_path,
+            "inputs_checksum": status.inputs_checksum,
             "ts": ts,
         },
     )
@@ -400,6 +406,7 @@ def _succeed_cell(
     artifact: Path,
 ) -> None:
     checksum = _file_checksum(artifact)
+    digest = inputs_checksum(identity.dataset)
     ts = ctx.hooks.clock()
     ctx.journal.append(
         _transition(
@@ -410,6 +417,7 @@ def _succeed_cell(
             artifact_checksum=checksum,
             fingerprint=identity.fingerprint(),
             artifact_path=str(artifact),
+            input_digest=digest,
         )
     )
     ctx.hooks.on_commit(CommitPoint.JOURNAL_WRITE, identity.cell_id(), CellState.SUCCEEDED)
@@ -421,6 +429,7 @@ def _succeed_cell(
             "artifact_checksum": checksum,
             "fingerprint": identity.fingerprint(),
             "artifact_path": str(artifact),
+            "inputs_checksum": digest,
             "ts": ts,
         },
     )
@@ -446,7 +455,7 @@ def _run_cell(
     try:
         if cell_id in ctx.hooks.fail_cell_ids or attempt == ctx.hooks.fail_on_attempt.get(cell_id):
             raise RuntimeError("injected cell failure")
-        payload = execute_cell(identity, _dataset_for(identity, loaded))
+        payload = execute_cell(identity, _dataset_for(identity, loaded, ctx.config_dir))
         _atomic_write_json(artifact, payload)
         ctx.hooks.on_commit(CommitPoint.RESULT_COMMIT, cell_id)
         _succeed_cell(ctx, identity, status, attempt, artifact)
@@ -482,7 +491,7 @@ def execute_session(
 ) -> tuple[dict[str, CellStatus], dict[str, Any]]:
     _ensure_journal_header(ctx, replay_records)
     statuses = _statuses_from_records(ctx.definition, replay_records)
-    loaded = _load_datasets(ctx.definition, ctx.config_dir)
+    loaded: dict[DatasetSpec, LoadedDataset] = {}
     _journal_pending_cells(ctx, statuses, replay_records)
     for identity in ctx.definition.cells:
         _process_cell(ctx, identity, statuses[identity.cell_id()], loaded)

@@ -520,3 +520,116 @@ def test_malformed_transition_is_journal_error(tmp_path: Path) -> None:
     )
     with pytest.raises(JournalError, match="malformed"):
         run_matrix(config_path, output)
+
+
+def test_relative_dataset_paths_are_resolved_into_cell_ids(tmp_path: Path) -> None:
+    left = tmp_path / "left"
+    right = tmp_path / "right"
+    left.mkdir()
+    right.mkdir()
+    (left / "data.jsonl").write_text(
+        json.dumps({"prompt": "L", "reference": "one"}) + "\n", encoding="utf-8"
+    )
+    (right / "data.jsonl").write_text(
+        json.dumps({"prompt": "R", "reference": "two"}) + "\n", encoding="utf-8"
+    )
+    raw = {
+        "matrix_name": "resolved",
+        "config_revision": "rev1",
+        "seed": 1,
+        "models": [{"backend": "mock", "name": "toy", "revision": "r1"}],
+        "quantization": ["fp16"],
+        "datasets": [
+            {
+                "name": "smoke",
+                "source": "jsonl",
+                "path": "data.jsonl",
+                "split": "validation",
+                "max_samples": 1,
+            }
+        ],
+    }
+    left_cfg = left / "matrix.json"
+    right_cfg = right / "matrix.json"
+    left_cfg.write_text(json.dumps(raw), encoding="utf-8")
+    right_cfg.write_text(json.dumps(raw), encoding="utf-8")
+    left_id = load_matrix_config(left_cfg).cells[0].cell_id()
+    right_id = load_matrix_config(right_cfg).cells[0].cell_id()
+    assert left_id != right_id
+
+
+def test_changed_dataset_bytes_requeue_successful_cell(tmp_path: Path) -> None:
+    config_path = write_matrix_config(tmp_path, quantization=["fp16"])
+    output = tmp_path / "out"
+    first = run_matrix(config_path, output)
+    cell_id = first.definition.cells[0].cell_id()
+    dataset = Path(first.definition.cells[0].dataset.path or "")
+    dataset.write_text(
+        json.dumps({"prompt": "changed", "reference": "now"}) + "\n", encoding="utf-8"
+    )
+    resumed = run_matrix(config_path, output)
+    assert resumed.statuses[cell_id].state is CellState.SUCCEEDED
+    assert resumed.statuses[cell_id].retry_count >= 1
+
+
+def test_skip_does_not_load_dataset(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    config_path = write_matrix_config(tmp_path, quantization=["fp16"])
+    output = tmp_path / "out"
+    run_matrix(config_path, output)
+
+    def boom(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("dataset loader must not run when cells are skipped")
+
+    monkeypatch.setattr("benchmarks.matrix_session.default_dataset_registry", boom)
+    second = run_matrix(config_path, output)
+    assert all(status.state is CellState.SKIPPED for status in second.statuses.values())
+
+
+def test_failed_replay_clears_stale_checksum(tmp_path: Path) -> None:
+    config_path = write_matrix_config(tmp_path, quantization=["fp16"])
+    output = tmp_path / "out"
+    first = run_matrix(config_path, output)
+    cell_id = first.definition.cells[0].cell_id()
+    artifact = output / first.definition.name / "cells" / cell_id / "result.json"
+    artifact.write_bytes(artifact.read_bytes() + b"\n")
+    failed = run_matrix(
+        config_path,
+        output,
+        retry=RetryPolicy(retry_failed=False, max_attempts=1),
+        hooks=MatrixHooks(fail_on_attempt={cell_id: 2}),
+    )
+    assert failed.statuses[cell_id].state is CellState.FAILED
+    assert failed.statuses[cell_id].artifact_checksum is None
+
+
+def test_journal_lock_rejects_a_second_writer(tmp_path: Path) -> None:
+    from benchmarks.journal import ResumeJournal
+
+    path = tmp_path / "journal.jsonl"
+    held = ResumeJournal(path)
+    held.open()
+    try:
+        with pytest.raises(JournalError, match="locked"):
+            ResumeJournal(path).open()
+    finally:
+        held.close()
+    released = ResumeJournal(path)
+    released.open()
+    released.close()
+
+
+def test_cli_exits_nonzero_when_journal_cells_fail(tmp_path: Path) -> None:
+    config_path = write_matrix_config(tmp_path, quantization=["fp16"])
+    definition = load_matrix_config(config_path)
+    cell_id = definition.cells[0].cell_id()
+    output = tmp_path / "out"
+    run_matrix(
+        config_path,
+        output,
+        retry=RetryPolicy(retry_failed=False, max_attempts=1),
+        hooks=MatrixHooks(fail_on_attempt={cell_id: 1}),
+    )
+    code = run_matrix_main(
+        ["--config", str(config_path), "--output-dir", str(output)]
+    )
+    assert code == 1

@@ -8,6 +8,7 @@ and truncates that tail instead of silently dropping it.
 
 from __future__ import annotations
 
+import fcntl
 import json
 import os
 import zlib
@@ -155,9 +156,18 @@ class ResumeJournal:
     def __init__(self, path: Path) -> None:
         self.path = path
         self._handle: Any | None = None
+        self._lock: Any | None = None
 
     def open(self) -> JournalReplay:
         ensure_dir(self.path.parent)
+        lock_path = self.path.with_name(self.path.name + ".lock")
+        self._lock = lock_path.open("a+")
+        try:
+            fcntl.flock(self._lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            self._lock.close()
+            self._lock = None
+            raise JournalError(f"matrix journal is locked: {self.path}") from exc
         replay = recover_journal_file(self.path)
         self._handle = self.path.open("ab")
         return replay
@@ -170,12 +180,15 @@ class ResumeJournal:
         os.fsync(self._handle.fileno())
 
     def close(self) -> None:
-        if self._handle is None:
-            return
-        self._handle.flush()
-        os.fsync(self._handle.fileno())
-        self._handle.close()
-        self._handle = None
+        if self._handle is not None:
+            self._handle.flush()
+            os.fsync(self._handle.fileno())
+            self._handle.close()
+            self._handle = None
+        if self._lock is not None:
+            fcntl.flock(self._lock.fileno(), fcntl.LOCK_UN)
+            self._lock.close()
+            self._lock = None
 
     def __enter__(self) -> "ResumeJournal":
         self.open()

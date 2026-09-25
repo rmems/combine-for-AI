@@ -11,9 +11,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from benchmarks.datasets import DatasetSpec
 from benchmarks.journal import ResumeJournal
 from benchmarks.matrix import MatrixDefinition, MatrixError, RetryPolicy
-from benchmarks.matrix_session import SessionContext, execute_session
+from benchmarks.matrix_session import SessionContext, execute_session, resolve_dataset
 from benchmarks.matrix_types import (
     CellStatus,
     CrashPlan,
@@ -38,6 +39,19 @@ def load_matrix_config(path: Path) -> MatrixDefinition:
         raw = json.load(handle)
     if not isinstance(raw, dict):
         raise MatrixError("matrix config must be a JSON object")
+    datasets = []
+    for item in raw.get("datasets") or []:
+        if not isinstance(item, dict):
+            datasets.append(item)
+            continue
+        copied = dict(item)
+        spec = resolve_dataset(
+            DatasetSpec.from_dict(copied),
+            path.parent,
+        )
+        copied["path"] = spec.path
+        datasets.append(copied)
+    raw = {**raw, "datasets": datasets}
     return MatrixDefinition.from_dict(raw)
 
 

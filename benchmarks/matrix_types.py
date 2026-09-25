@@ -43,6 +43,7 @@ class CellStatus:
     artifact_checksum: str | None = None
     fingerprint: str | None = None
     artifact_path: str | None = None
+    inputs_checksum: str | None = None
     error: str | None = None
     started_at: str | None = None
     finished_at: str | None = None

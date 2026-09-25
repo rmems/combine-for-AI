@@ -10,6 +10,7 @@ import hashlib
 import json
 import re
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Mapping, TypeVar
 
 from benchmarks.datasets import DatasetSpec
@@ -40,6 +41,23 @@ def canonical_dumps(value: Any) -> str:
 def sha256_hex(value: str | bytes) -> str:
     payload = value if isinstance(value, bytes) else value.encode("utf-8")
     return hashlib.sha256(payload).hexdigest()
+
+
+def inputs_checksum(dataset: DatasetSpec) -> str | None:
+    """Digest of dataset file bytes, or of the HF identity when there is no path."""
+
+    if dataset.path:
+        path = Path(dataset.path)
+        if not path.is_file():
+            return None
+        return sha256_hex(path.read_bytes())
+    payload = {
+        "hf_id": dataset.hf_id,
+        "hf_subset": dataset.hf_subset,
+        "max_samples": dataset.max_samples,
+        "source": dataset.source,
+    }
+    return sha256_hex(canonical_dumps(payload))
 
 
 def validate_matrix_name(name: str) -> str:
