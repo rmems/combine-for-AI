@@ -1,13 +1,37 @@
 from __future__ import annotations
 
 import csv
+import json
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
 from benchmarks.jsonio import ensure_dir, json_safe, write_json
 from benchmarks.metrics import MetricsSummary
-from benchmarks.telemetry import TelemetrySnapshot
+from benchmarks.telemetry import SystemSnapshot, TelemetrySnapshot, telemetry_to_dict
+
+
+_TELEMETRY_SCALAR_KEYS = (
+    "routing_entropy",
+    "spike_density",
+    "latent_stability",
+    "dv_dt_reductions",
+    "event_rate",
+    "firing_rate",
+    "membrane_pressure",
+    "saaq_delta_q",
+    "saaq_delta_q_last",
+    "saaq_delta_q_legacy",
+    "saaq_delta_q_v15",
+    "kernel_occupancy",
+    "vram_bandwidth_gbps",
+    "notes",
+    "saaq_rule",
+    "saaq_model_family",
+    "saaq_delta_q_trajectory",
+    "saaq_delta_q_legacy_trajectory",
+    "saaq_delta_q_v15_trajectory",
+)
 
 
 _CSV_FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
@@ -41,39 +65,32 @@ def metrics_to_row(metrics: MetricsSummary) -> dict[str, Any]:
 def telemetry_to_row(telemetry: TelemetrySnapshot | None) -> dict[str, Any]:
     """Flatten telemetry into prefixed CSV/JSON-safe fields."""
     if telemetry is None:
-        return {
-            "telemetry_sys_cpu_count_logical": None,
-            "telemetry_sys_cpu_count_physical": None,
-            "telemetry_sys_memory_total_gb": None,
-            "telemetry_sys_memory_available_gb": None,
-            "telemetry_sys_gpu_count": None,
-            "telemetry_sys_gpu_names": None,
-            "telemetry_sys_gpu_driver_version": None,
-            "telemetry_sys_cuda_version": None,
-            "telemetry_sys_platform": None,
-            "telemetry_sys_python_version": None,
-            "telemetry_routing_entropy": None,
-            "telemetry_spike_density": None,
-            "telemetry_latent_stability": None,
-            "telemetry_dv_dt_reductions": None,
-            "telemetry_event_rate": None,
-            "telemetry_kernel_occupancy": None,
-            "telemetry_vram_bandwidth_gbps": None,
-            "telemetry_notes": None,
-        }
-    d: dict[str, Any] = {}
-    sys_dict = asdict(telemetry.system)
-    for k, v in sys_dict.items():
-        d[f"telemetry_sys_{k}"] = v
-    d["telemetry_routing_entropy"] = telemetry.routing.routing_entropy if telemetry.routing else None
-    d["telemetry_spike_density"] = telemetry.routing.spike_density if telemetry.routing else None
-    d["telemetry_latent_stability"] = telemetry.routing.latent_stability if telemetry.routing else None
-    d["telemetry_dv_dt_reductions"] = telemetry.routing.dv_dt_reductions if telemetry.routing else None
-    d["telemetry_event_rate"] = telemetry.routing.event_rate if telemetry.routing else None
-    d["telemetry_kernel_occupancy"] = telemetry.kernel_occupancy
-    d["telemetry_vram_bandwidth_gbps"] = telemetry.vram_bandwidth_gbps
-    d["telemetry_notes"] = telemetry.notes
-    return d
+        return _empty_telemetry_row()
+    row: dict[str, Any] = {}
+    for key, value in telemetry_to_dict(telemetry).items():
+        if key == "gpu_metrics":
+            continue
+        if key == "telemetry_notes":
+            row["telemetry_notes"] = value
+            continue
+        if key.endswith("_trajectory"):
+            row[f"telemetry_{key}"] = _trajectory_cell(tuple(value) if value else None)
+            continue
+        row[f"telemetry_{key}"] = value
+    return row
+
+
+def _trajectory_cell(values: tuple[float, ...] | None) -> str | None:
+    if not values:
+        return None
+    return json.dumps(list(values))
+
+
+def _empty_telemetry_row() -> dict[str, Any]:
+    row = {f"telemetry_sys_{key}": None for key in SystemSnapshot.__dataclass_fields__}
+    for key in _TELEMETRY_SCALAR_KEYS:
+        row[f"telemetry_{key}"] = None
+    return row
 
 
 __all__ = [

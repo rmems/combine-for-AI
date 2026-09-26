@@ -54,6 +54,16 @@ Manifest-driven artifact smoke (GGUF / HF / AWQ / GPTQ / **GOZ1**):
 
 Reports land under `reports/json` and `reports/csv` by default.
 
+Attach a corinth-canal SAAQ run directory (dual-SAAQ `latent_telemetry.csv` plus `summary.json` / `run_manifest.json`):
+
+```bash
+python scripts/benchmark.py \
+  --config configs/benchmark.sample.json \
+  --corinth-canal-dir /path/to/corinth-canal/artifacts/<run>
+```
+
+Or set `telemetry.corinth_canal_dir` (or legacy `telemetry.corinth_canal_path`) in the benchmark config. Missing SAAQ files are skipped.
+
 ## GOZ1 / MoE-SNN metrics
 
 Beyond accuracy/perplexity, the report schema supports (nullable) fields used by grok-ozempic science:
