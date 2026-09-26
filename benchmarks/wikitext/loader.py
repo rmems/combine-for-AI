@@ -2,11 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from benchmarks.dataset_support import (
-    MappedDatasetLoader,
-    canonical_record,
-    register_row_mapper,
-)
+from benchmarks.dataset_jsonl import canonical_record
+from benchmarks.dataset_support import MappedDatasetLoader, register_row_mapper
 from benchmarks.dataset_types import DatasetRecord
 
 

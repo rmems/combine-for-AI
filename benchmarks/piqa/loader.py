@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from typing import Any
 
+from benchmarks.dataset_jsonl import canonical_record
 from benchmarks.dataset_support import (
     MappedDatasetLoader,
-    canonical_record,
     multiple_choice_accuracy,
     register_row_mapper,
 )

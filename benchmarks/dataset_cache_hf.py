@@ -10,7 +10,8 @@ from benchmarks.dataset_cache_models import (
     normalize_license,
     requested_revision,
 )
-from benchmarks.dataset_support import mapper_for, row_as_dict
+from benchmarks.dataset_jsonl import row_as_dict
+from benchmarks.dataset_support import mapper_for
 from benchmarks.dataset_types import DatasetRecord, DatasetSpec, validate_dataset_record
 
 try:

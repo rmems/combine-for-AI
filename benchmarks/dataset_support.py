@@ -5,18 +5,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Literal, Never
 
-from benchmarks.dataset_jsonl import (
-    canonical_record as canonical_record,
-    records_from_jsonl,
-    require_canonical_record,
-    row_as_dict as row_as_dict,
-)
-from benchmarks.dataset_mapped_cache import (
-    cache_sidecar_path as cache_sidecar_path,
-    hf_load_dataset as hf_load_dataset,
-    normalized_cache_path as normalized_cache_path,
-    records_from_hf,
-)
+from benchmarks.dataset_jsonl import records_from_jsonl, require_canonical_record
+from benchmarks.dataset_mapped_cache import records_from_hf
 from benchmarks.dataset_types import (
     CatalogEntry,
     DatasetRecord,

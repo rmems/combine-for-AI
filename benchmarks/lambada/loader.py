@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from typing import Any
 
+from benchmarks.dataset_jsonl import canonical_record
 from benchmarks.dataset_support import (
     CATALOG,
     MappedDatasetLoader,
-    canonical_record,
     register_row_mapper,
     sample_path_for,
 )

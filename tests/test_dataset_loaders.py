@@ -5,15 +5,17 @@ from pathlib import Path
 
 import pytest
 
+from benchmarks.dataset_mapped_cache import (
+    cache_sidecar_path,
+    normalized_cache_path,
+)
 from benchmarks.dataset_support import (
     CATALOG,
     HuggingFaceDatasetLoader,
     JsonlDatasetLoader,
     ROW_MAPPERS,
     _register_entry,
-    cache_sidecar_path,
     mapper_for,
-    normalized_cache_path,
     sample_path_for,
     validate_loaded,
 )
