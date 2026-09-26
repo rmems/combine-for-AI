@@ -39,7 +39,7 @@ def test_wikitext_hf_rows_skip_empty(tmp_path, monkeypatch) -> None:
         {"text": "   "},
     ]
     monkeypatch.setattr(
-        "benchmarks.dataset_support.hf_load_dataset",
+        "benchmarks.dataset_mapped_cache.hf_load_dataset",
         lambda *args, **kwargs: rows,
     )
     dataset = WikiText2Loader().load(

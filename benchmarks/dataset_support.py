@@ -1,12 +1,22 @@
 from __future__ import annotations
 
-import hashlib
-import json
 import os
-from collections.abc import Callable, Iterable
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Literal, Never
 
+from benchmarks.dataset_jsonl import (
+    canonical_record as canonical_record,
+    records_from_jsonl,
+    require_canonical_record,
+    row_as_dict as row_as_dict,
+)
+from benchmarks.dataset_mapped_cache import (
+    cache_sidecar_path as cache_sidecar_path,
+    hf_load_dataset as hf_load_dataset,
+    normalized_cache_path as normalized_cache_path,
+    records_from_hf,
+)
 from benchmarks.dataset_types import (
     CatalogEntry,
     DatasetRecord,
@@ -14,11 +24,6 @@ from benchmarks.dataset_types import (
     LoadedDataset,
     TaskKind,
 )
-
-try:
-    from datasets import load_dataset as hf_load_dataset
-except ImportError:
-    hf_load_dataset = None
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 ROW_MAPPERS: dict[str, Callable[[dict[str, Any]], DatasetRecord | None]] = {}
@@ -156,231 +161,8 @@ def resolve_cache_dir(spec: DatasetSpec) -> Path:
     return default_cache_dir()
 
 
-def canonical_record(row: dict[str, Any]) -> DatasetRecord | None:
-    if "prompt" not in row or row["prompt"] is None:
-        return None
-    choices = row.get("choices")
-    if choices is not None:
-        choices = [str(choice) for choice in choices]
-    answer_index = row.get("answer_index")
-    if answer_index is not None:
-        answer_index = int(answer_index)
-    reference = row.get("reference")
-    return DatasetRecord(
-        prompt=str(row["prompt"]),
-        reference=None if reference is None else str(reference),
-        choices=choices,
-        answer_index=answer_index,
-    )
-
-
-def row_as_dict(row: Any) -> dict[str, Any]:
-    if isinstance(row, dict):
-        return row
-    if hasattr(row, "keys"):
-        return {key: row[key] for key in row.keys()}
-    raise TypeError(f"cannot convert dataset row of type {type(row)!r} to dict")
-
-
-def apply_max_samples(
-    records: list[DatasetRecord], max_samples: int | None
-) -> list[DatasetRecord]:
-    if max_samples is None:
-        return records
-    if max_samples < 0:
-        raise ValueError("max_samples must be non-negative")
-    return records[:max_samples]
-
-
-def iter_jsonl_payloads(path: Path) -> Iterable[tuple[int, dict[str, Any]]]:
-    with path.open("r", encoding="utf-8") as handle:
-        for line_number, line in enumerate(handle, start=1):
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                payload = json.loads(line)
-            except json.JSONDecodeError as exc:
-                raise ValueError(
-                    f"invalid json on line {line_number} in {path}"
-                ) from exc
-            if not isinstance(payload, dict):
-                raise ValueError(
-                    f"jsonl object on line {line_number} in {path} must be a mapping"
-                )
-            yield line_number, payload
-
-
-def require_canonical_record(row: dict[str, Any]) -> DatasetRecord:
-    record = canonical_record(row)
-    if record is None:
-        raise ValueError("missing required field 'prompt'")
-    return record
-
-
 def mapper_for(name: str) -> Callable[[dict[str, Any]], DatasetRecord | None]:
     return ROW_MAPPERS.get(canonical_catalog_name(name), require_canonical_record)
-
-
-def _map_jsonl_row(
-    map_row: Callable[[dict[str, Any]], DatasetRecord | None],
-    payload: dict[str, Any],
-    *,
-    line_number: int,
-    path: Path,
-) -> DatasetRecord | None:
-    try:
-        return map_row(payload)
-    except ValueError as exc:
-        raise ValueError(f"{exc} on line {line_number} in {path}") from exc
-
-
-def _normalized_max_samples(max_samples: int | None) -> int | None:
-    if max_samples is None:
-        return None
-    if max_samples < 0:
-        raise ValueError("max_samples must be non-negative")
-    return max_samples
-
-
-def records_from_jsonl(
-    path: Path,
-    map_row: Callable[[dict[str, Any]], DatasetRecord | None],
-    max_samples: int | None,
-) -> list[DatasetRecord]:
-    if not path.exists():
-        raise FileNotFoundError(f"dataset file not found: {path}")
-    limit = _normalized_max_samples(max_samples)
-    if limit == 0:
-        return []
-
-    records: list[DatasetRecord] = []
-    for line_number, payload in iter_jsonl_payloads(path):
-        record = _map_jsonl_row(
-            map_row, payload, line_number=line_number, path=path
-        )
-        if record is None:
-            continue
-        records.append(record)
-        if limit is not None and len(records) >= limit:
-            break
-    return records
-
-
-NORMALIZED_CACHE_SCHEMA = "combine.normalized_hf_cache.v1"
-
-
-def write_normalized_jsonl(path: Path, records: list[DatasetRecord]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8") as handle:
-        for record in records:
-            handle.write(json.dumps(record.to_payload(), ensure_ascii=False))
-            handle.write("\n")
-
-
-def cache_key_digest(hf_id: str, subset: str | None, split: str) -> str:
-    key = f"{hf_id}\0{subset or ''}\0{split}"
-    return hashlib.sha256(key.encode("utf-8")).hexdigest()
-
-
-def normalized_cache_path(
-    cache_dir: Path, name: str, hf_id: str, subset: str | None, split: str
-) -> Path:
-    digest = cache_key_digest(hf_id, subset, split)
-    return cache_dir / "normalized" / name / split / f"{digest}.jsonl"
-
-
-def cache_sidecar_path(jsonl_path: Path) -> Path:
-    return jsonl_path.with_suffix(".meta.json")
-
-
-def write_cache_sidecar(
-    jsonl_path: Path,
-    *,
-    name: str,
-    hf_id: str,
-    subset: str | None,
-    split: str,
-    row_count: int,
-) -> None:
-    digest = cache_key_digest(hf_id, subset, split)
-    payload = {
-        "schema": NORMALIZED_CACHE_SCHEMA,
-        "name": name,
-        "hf_id": hf_id,
-        "hf_subset": subset,
-        "split": split,
-        "digest": digest,
-        "row_count": row_count,
-    }
-    sidecar = cache_sidecar_path(jsonl_path)
-    sidecar.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
-
-
-def _sidecar_matches(
-    sidecar: dict[str, Any],
-    *,
-    name: str,
-    hf_id: str,
-    subset: str | None,
-    split: str,
-    row_count: int,
-) -> bool:
-    expected = cache_key_digest(hf_id, subset, split)
-    return (
-        sidecar.get("schema") == NORMALIZED_CACHE_SCHEMA
-        and sidecar.get("name") == name
-        and sidecar.get("hf_id") == hf_id
-        and sidecar.get("hf_subset") == subset
-        and sidecar.get("split") == split
-        and sidecar.get("digest") == expected
-        and sidecar.get("row_count") == row_count
-    )
-
-
-def _cache_records_valid(records: list[DatasetRecord]) -> bool:
-    return all(str(record.prompt).strip() for record in records)
-
-
-def read_validated_cache(
-    jsonl_path: Path,
-    *,
-    name: str,
-    hf_id: str,
-    subset: str | None,
-    split: str,
-    max_samples: int | None,
-) -> list[DatasetRecord] | None:
-    sidecar_path = cache_sidecar_path(jsonl_path)
-    if not jsonl_path.exists() or not sidecar_path.exists():
-        return None
-    try:
-        sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
-        return None
-    if not isinstance(sidecar, dict):
-        return None
-    records = records_from_jsonl(jsonl_path, canonical_record, None)
-    if not _sidecar_matches(
-        sidecar,
-        name=name,
-        hf_id=hf_id,
-        subset=subset,
-        split=split,
-        row_count=len(records),
-    ):
-        return None
-    if not _cache_records_valid(records):
-        return None
-    return apply_max_samples(records, max_samples)
-
-
-def discard_invalid_cache(jsonl_path: Path) -> None:
-    sidecar = cache_sidecar_path(jsonl_path)
-    if jsonl_path.exists():
-        jsonl_path.unlink()
-    if sidecar.exists():
-        sidecar.unlink()
 
 
 def resolve_hf_split(spec: DatasetSpec, entry: CatalogEntry | None) -> str:
@@ -389,99 +171,6 @@ def resolve_hf_split(spec: DatasetSpec, entry: CatalogEntry | None) -> str:
     if spec.split == "validation" and entry.default_split != "validation":
         return entry.default_split
     return spec.split
-
-
-def _require_hf_loader() -> Callable[..., Any]:
-    if hf_load_dataset is None:
-        raise ImportError(
-            "datasets is required for Hugging Face sources; "
-            "install with `pip install datasets`"
-        )
-    return hf_load_dataset
-
-
-def _load_hf_rows(
-    hf_id: str,
-    hf_subset: str | None,
-    split: str,
-    hf_cache: Path,
-) -> Iterable[Any]:
-    loader = _require_hf_loader()
-    hf_cache.mkdir(parents=True, exist_ok=True)
-    kwargs: dict[str, Any] = {"split": split, "cache_dir": str(hf_cache)}
-    try:
-        if hf_subset:
-            return loader(hf_id, hf_subset, **kwargs)
-        return loader(hf_id, **kwargs)
-    except ImportError:
-        raise
-    except Exception as exc:
-        raise RuntimeError(
-            f"failed to load Hugging Face dataset {hf_id}: {exc}"
-        ) from exc
-
-
-def records_from_hf(
-    *,
-    name: str,
-    hf_id: str,
-    hf_subset: str | None,
-    split: str,
-    map_row: Callable[[dict[str, Any]], DatasetRecord | None],
-    max_samples: int | None,
-    cache_dir: Path,
-) -> tuple[list[DatasetRecord], dict]:
-    if not hf_id:
-        raise ValueError(f"hf dataset '{name}' is missing hf_id")
-    if max_samples is not None and max_samples < 0:
-        raise ValueError("max_samples must be non-negative")
-
-    normalized_path = normalized_cache_path(cache_dir, name, hf_id, hf_subset, split)
-    cached = read_validated_cache(
-        normalized_path,
-        name=name,
-        hf_id=hf_id,
-        subset=hf_subset,
-        split=split,
-        max_samples=max_samples,
-    )
-    if cached is not None:
-        return cached, {
-            "source": "hf_cache",
-            "path": str(normalized_path),
-            "hf_id": hf_id,
-            "hf_subset": hf_subset,
-            "split": split,
-        }
-    discard_invalid_cache(normalized_path)
-
-    mapped: list[DatasetRecord] = []
-    skipped = 0
-    for row in _load_hf_rows(hf_id, hf_subset, split, cache_dir / "hf"):
-        record = map_row(row_as_dict(row))
-        if record is None:
-            skipped += 1
-            continue
-        mapped.append(record)
-
-    write_normalized_jsonl(normalized_path, mapped)
-    write_cache_sidecar(
-        normalized_path,
-        name=name,
-        hf_id=hf_id,
-        subset=hf_subset,
-        split=split,
-        row_count=len(mapped),
-    )
-    records = apply_max_samples(mapped, max_samples)
-    return records, {
-        "source": "hf",
-        "hf_id": hf_id,
-        "hf_subset": hf_subset,
-        "split": split,
-        "skipped": skipped,
-        "cached_path": str(normalized_path),
-    }
 
 
 def resolve_jsonl_path(

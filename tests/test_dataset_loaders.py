@@ -162,7 +162,7 @@ def test_hf_cache_avoids_redownload(
         calls["n"] += 1
         return [{"text": "She walked to the store"}]
 
-    monkeypatch.setattr("benchmarks.dataset_support.hf_load_dataset", fake_load)
+    monkeypatch.setattr("benchmarks.dataset_mapped_cache.hf_load_dataset", fake_load)
     spec = DatasetSpec(
         name="lambada",
         source="hf",
@@ -190,7 +190,7 @@ def test_hf_cache_rejects_tampered_sidecar(
         calls["n"] += 1
         return [{"text": "She walked to the store"}]
 
-    monkeypatch.setattr("benchmarks.dataset_support.hf_load_dataset", fake_load)
+    monkeypatch.setattr("benchmarks.dataset_mapped_cache.hf_load_dataset", fake_load)
     spec = DatasetSpec(
         name="lambada",
         source="hf",
@@ -211,7 +211,7 @@ def test_hf_cache_rejects_tampered_sidecar(
 def test_hf_falls_back_to_sample_when_datasets_missing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr("benchmarks.dataset_support.hf_load_dataset", None)
+    monkeypatch.setattr("benchmarks.dataset_mapped_cache.hf_load_dataset", None)
     dataset = HuggingFaceDatasetLoader().load(
         DatasetSpec(name="piqa", source="hf")
     )
@@ -223,7 +223,7 @@ def test_hf_falls_back_to_sample_when_datasets_missing(
 def test_hf_without_fallback_raises(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr("benchmarks.dataset_support.hf_load_dataset", None)
+    monkeypatch.setattr("benchmarks.dataset_mapped_cache.hf_load_dataset", None)
     with pytest.raises(ImportError, match="datasets is required"):
         HuggingFaceDatasetLoader().load(
             DatasetSpec(

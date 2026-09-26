@@ -42,7 +42,7 @@ def test_lambada_loader_from_sample_jsonl() -> None:
 
 
 def test_lambada_loader_offline_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("benchmarks.dataset_support.hf_load_dataset", None)
+    monkeypatch.setattr("benchmarks.dataset_mapped_cache.hf_load_dataset", None)
     loader = LAMBADALoader()
     dataset = loader.load(DatasetSpec(name="lambada", source="lambada"))
 
