@@ -1,0 +1,36 @@
+{
+  "matrix_name": "fixture-resume",
+  "config_revision": "rev1",
+  "seed": 7,
+  "retry": {
+    "retry_failed": false,
+    "max_attempts": 1
+  },
+  "models": [
+    {
+      "backend": "mock",
+      "name": "toy-alpha",
+      "revision": "r1"
+    }
+  ],
+  "quantization": [
+    "fp16",
+    "awq"
+  ],
+  "datasets": [
+    {
+      "name": "lambada",
+      "source": "jsonl",
+      "path": "datasets/lambada.sample.jsonl",
+      "split": "validation",
+      "max_samples": 1
+    },
+    {
+      "name": "piqa",
+      "source": "jsonl",
+      "path": "datasets/piqa.sample.jsonl",
+      "split": "validation",
+      "max_samples": 1
+    }
+  ]
+}
