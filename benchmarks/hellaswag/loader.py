@@ -21,6 +21,7 @@ def _hellaswag_prompt(row: dict[str, Any]) -> str:
 
 
 def map_hellaswag_row(row: dict[str, Any]) -> DatasetRecord | None:
+    """Map HellaSwag using lm-eval ``hellaswag`` fields: ctx/endings/label."""
     record = canonical_record(row)
     if record is not None:
         return record
@@ -44,7 +45,7 @@ register_row_mapper("hellaswag", map_hellaswag_row)
 
 
 class HellaSwagLoader(MappedDatasetLoader):
-    """Load HellaSwag as a multiple-choice commonsense completion task."""
+    """Load HellaSwag (lm-eval ``hellaswag``) as a multiple-choice task."""
 
     catalog_name = "hellaswag"
 

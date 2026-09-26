@@ -12,6 +12,7 @@ from benchmarks.dataset_types import DatasetRecord
 
 
 def map_piqa_row(row: dict[str, Any]) -> DatasetRecord | None:
+    """Map PIQA using lm-eval ``piqa`` fields: goal/sol1/sol2/label."""
     record = canonical_record(row)
     if record is not None:
         return record
@@ -33,7 +34,7 @@ register_row_mapper("piqa", map_piqa_row)
 
 
 class PIQALoader(MappedDatasetLoader):
-    """Load PIQA as a two-choice physical commonsense task."""
+    """Load PIQA (lm-eval ``piqa``) as a two-choice physical-reasoning task."""
 
     catalog_name = "piqa"
 

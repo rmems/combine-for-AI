@@ -34,11 +34,14 @@ def _as_str_list(value: Any) -> list[str]:
     return [str(item) for item in value or []]
 
 
-def _aligned_arc_labels(texts: list[str], labels: list[str]) -> list[str] | None:
+def _aligned_arc_labels(texts: list[str], labels: list[str]) -> list[str]:
     if not labels:
         return [str(index) for index in range(len(texts))]
     if len(labels) != len(texts):
-        return None
+        raise ValueError(
+            f"ARC choices.label length {len(labels)} != choices.text length "
+            f"{len(texts)}"
+        )
     return labels
 
 
@@ -49,12 +52,11 @@ def _arc_choice_lists(choices: Any) -> tuple[list[str], list[str]] | None:
     if len(texts) < 2:
         return None
     labels = _aligned_arc_labels(texts, _as_str_list(choices.get("label")))
-    if labels is None:
-        return None
     return texts, labels
 
 
 def map_arc_easy_row(row: dict[str, Any]) -> DatasetRecord | None:
+    """Map ARC-Easy using lm-eval ``arc_easy`` question/choices/answerKey."""
     record = canonical_record(row)
     if record is not None:
         return record
@@ -65,10 +67,16 @@ def map_arc_easy_row(row: dict[str, Any]) -> DatasetRecord | None:
     if question is None or parsed is None or answer_key is None:
         return None
     texts, labels = parsed
+    answer_index = _arc_answer_index(answer_key, labels)
+    if not 0 <= answer_index < len(texts):
+        raise ValueError(
+            f"ARC answer index {answer_index} is out of range for "
+            f"{len(texts)} choices"
+        )
     return DatasetRecord(
         prompt=str(question).strip(),
         choices=texts,
-        answer_index=_arc_answer_index(answer_key, labels),
+        answer_index=answer_index,
     )
 
 
@@ -76,7 +84,7 @@ register_row_mapper("arc_easy", map_arc_easy_row)
 
 
 class ARCEasyLoader(MappedDatasetLoader):
-    """Load ARC-Easy science questions as multiple-choice records."""
+    """Load ARC-Easy (lm-eval ``arc_easy``) science multiple-choice items."""
 
     catalog_name = "arc_easy"
 

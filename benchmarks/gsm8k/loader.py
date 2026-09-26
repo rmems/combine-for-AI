@@ -35,6 +35,7 @@ def format_gsm8k_prompt(question: str) -> str:
 
 
 def map_gsm8k_row(row: dict[str, Any]) -> DatasetRecord | None:
+    """Map GSM8K using lm-eval ``gsm8k`` ``question`` / ``answer`` (``####``)."""
     record = canonical_record(row)
     if record is not None:
         return record
@@ -56,7 +57,7 @@ register_row_mapper("gsm8k", map_gsm8k_row)
 
 
 class GSM8KLoader(MappedDatasetLoader):
-    """Load GSM8K with a chain-of-thought cue and extracted numeric answers."""
+    """Load GSM8K (lm-eval ``gsm8k``) with a CoT cue and extracted answers."""
 
     catalog_name = "gsm8k"
 

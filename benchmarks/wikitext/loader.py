@@ -11,6 +11,7 @@ from benchmarks.dataset_types import DatasetRecord
 
 
 def map_wikitext_row(row: dict[str, Any]) -> DatasetRecord | None:
+    """Map WikiText-2 using lm-eval ``wikitext`` ``text`` documents."""
     record = canonical_record(row)
     if record is not None:
         return record
@@ -28,7 +29,7 @@ register_row_mapper("wikitext2", map_wikitext_row)
 
 
 class WikiText2Loader(MappedDatasetLoader):
-    """Load WikiText-2 documents for token-level language-model perplexity."""
+    """Load WikiText-2 (lm-eval ``wikitext``) for token-level perplexity."""
 
     catalog_name = "wikitext2"
 

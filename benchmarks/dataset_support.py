@@ -28,7 +28,29 @@ Prefer = Literal["auto", "jsonl", "hf"]
 CATALOG: dict[str, CatalogEntry] = {}
 
 
+def _alias_collision_message(alias: str, owner: CatalogEntry) -> str:
+    return (
+        f"alias {alias!r} collides with primary catalog name {owner.name!r}"
+    )
+
+
+def _check_alias(alias: str, entry: CatalogEntry) -> None:
+    if alias == entry.name:
+        return
+    existing = CATALOG.get(alias)
+    if existing is None:
+        return
+    if existing.name == alias and existing.name != entry.name:
+        raise ValueError(_alias_collision_message(alias, existing))
+    if existing.name != entry.name:
+        raise ValueError(
+            f"alias {alias!r} is already bound to catalog entry {existing.name!r}"
+        )
+
+
 def _register_entry(entry: CatalogEntry) -> CatalogEntry:
+    for alias in entry.aliases:
+        _check_alias(alias, entry)
     CATALOG[entry.name] = entry
     for alias in entry.aliases:
         CATALOG[alias] = entry
@@ -99,17 +121,20 @@ _register_entry(
 def register_row_mapper(
     name: str, mapper: Callable[[dict[str, Any]], DatasetRecord | None]
 ) -> None:
-    ROW_MAPPERS[name] = mapper
-    entry = CATALOG.get(name)
-    if entry is None:
-        return
-    for alias in entry.aliases:
-        ROW_MAPPERS[alias] = mapper
-    ROW_MAPPERS[entry.name] = mapper
+    # Store only on the canonical catalog name. Aliases resolve in mapper_for
+    # so registration order cannot leave an alias without a mapper.
+    ROW_MAPPERS[canonical_catalog_name(name)] = mapper
 
 
 def catalog_entry(name: str) -> CatalogEntry | None:
     return CATALOG.get(name)
+
+
+def canonical_catalog_name(name: str) -> str:
+    entry = CATALOG.get(name)
+    if entry is None:
+        return name
+    return entry.name
 
 
 def sample_path_for(entry: CatalogEntry) -> Path:
@@ -126,6 +151,8 @@ def default_cache_dir() -> Path:
 def resolve_cache_dir(spec: DatasetSpec) -> Path:
     if spec.cache_dir:
         return Path(spec.cache_dir)
+    if spec.cache_root:
+        return Path(spec.cache_root)
     return default_cache_dir()
 
 
@@ -192,7 +219,7 @@ def require_canonical_record(row: dict[str, Any]) -> DatasetRecord:
 
 
 def mapper_for(name: str) -> Callable[[dict[str, Any]], DatasetRecord | None]:
-    return ROW_MAPPERS.get(name, require_canonical_record)
+    return ROW_MAPPERS.get(canonical_catalog_name(name), require_canonical_record)
 
 
 def _map_jsonl_row(
@@ -240,6 +267,9 @@ def records_from_jsonl(
     return records
 
 
+NORMALIZED_CACHE_SCHEMA = "combine.normalized_hf_cache.v1"
+
+
 def write_normalized_jsonl(path: Path, records: list[DatasetRecord]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as handle:
@@ -248,12 +278,109 @@ def write_normalized_jsonl(path: Path, records: list[DatasetRecord]) -> None:
             handle.write("\n")
 
 
+def cache_key_digest(hf_id: str, subset: str | None, split: str) -> str:
+    key = f"{hf_id}\0{subset or ''}\0{split}"
+    return hashlib.sha256(key.encode("utf-8")).hexdigest()
+
+
 def normalized_cache_path(
     cache_dir: Path, name: str, hf_id: str, subset: str | None, split: str
 ) -> Path:
-    key = f"{hf_id}\0{subset or ''}\0{split}"
-    digest = hashlib.sha256(key.encode("utf-8")).hexdigest()
+    digest = cache_key_digest(hf_id, subset, split)
     return cache_dir / "normalized" / name / split / f"{digest}.jsonl"
+
+
+def cache_sidecar_path(jsonl_path: Path) -> Path:
+    return jsonl_path.with_suffix(".meta.json")
+
+
+def write_cache_sidecar(
+    jsonl_path: Path,
+    *,
+    name: str,
+    hf_id: str,
+    subset: str | None,
+    split: str,
+    row_count: int,
+) -> None:
+    digest = cache_key_digest(hf_id, subset, split)
+    payload = {
+        "schema": NORMALIZED_CACHE_SCHEMA,
+        "name": name,
+        "hf_id": hf_id,
+        "hf_subset": subset,
+        "split": split,
+        "digest": digest,
+        "row_count": row_count,
+    }
+    sidecar = cache_sidecar_path(jsonl_path)
+    sidecar.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
+
+
+def _sidecar_matches(
+    sidecar: dict[str, Any],
+    *,
+    name: str,
+    hf_id: str,
+    subset: str | None,
+    split: str,
+    row_count: int,
+) -> bool:
+    expected = cache_key_digest(hf_id, subset, split)
+    return (
+        sidecar.get("schema") == NORMALIZED_CACHE_SCHEMA
+        and sidecar.get("name") == name
+        and sidecar.get("hf_id") == hf_id
+        and sidecar.get("hf_subset") == subset
+        and sidecar.get("split") == split
+        and sidecar.get("digest") == expected
+        and sidecar.get("row_count") == row_count
+    )
+
+
+def _cache_records_valid(records: list[DatasetRecord]) -> bool:
+    return all(str(record.prompt).strip() for record in records)
+
+
+def read_validated_cache(
+    jsonl_path: Path,
+    *,
+    name: str,
+    hf_id: str,
+    subset: str | None,
+    split: str,
+    max_samples: int | None,
+) -> list[DatasetRecord] | None:
+    sidecar_path = cache_sidecar_path(jsonl_path)
+    if not jsonl_path.exists() or not sidecar_path.exists():
+        return None
+    try:
+        sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(sidecar, dict):
+        return None
+    records = records_from_jsonl(jsonl_path, canonical_record, None)
+    if not _sidecar_matches(
+        sidecar,
+        name=name,
+        hf_id=hf_id,
+        subset=subset,
+        split=split,
+        row_count=len(records),
+    ):
+        return None
+    if not _cache_records_valid(records):
+        return None
+    return apply_max_samples(records, max_samples)
+
+
+def discard_invalid_cache(jsonl_path: Path) -> None:
+    sidecar = cache_sidecar_path(jsonl_path)
+    if jsonl_path.exists():
+        jsonl_path.unlink()
+    if sidecar.exists():
+        sidecar.unlink()
 
 
 def resolve_hf_split(spec: DatasetSpec, entry: CatalogEntry | None) -> str:
@@ -310,15 +437,23 @@ def records_from_hf(
         raise ValueError("max_samples must be non-negative")
 
     normalized_path = normalized_cache_path(cache_dir, name, hf_id, hf_subset, split)
-    if normalized_path.exists():
-        records = records_from_jsonl(normalized_path, canonical_record, max_samples)
-        return records, {
+    cached = read_validated_cache(
+        normalized_path,
+        name=name,
+        hf_id=hf_id,
+        subset=hf_subset,
+        split=split,
+        max_samples=max_samples,
+    )
+    if cached is not None:
+        return cached, {
             "source": "hf_cache",
             "path": str(normalized_path),
             "hf_id": hf_id,
             "hf_subset": hf_subset,
             "split": split,
         }
+    discard_invalid_cache(normalized_path)
 
     mapped: list[DatasetRecord] = []
     skipped = 0
@@ -330,6 +465,14 @@ def records_from_hf(
         mapped.append(record)
 
     write_normalized_jsonl(normalized_path, mapped)
+    write_cache_sidecar(
+        normalized_path,
+        name=name,
+        hf_id=hf_id,
+        subset=hf_subset,
+        split=split,
+        row_count=len(mapped),
+    )
     records = apply_max_samples(mapped, max_samples)
     return records, {
         "source": "hf",

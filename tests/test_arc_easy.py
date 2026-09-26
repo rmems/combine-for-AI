@@ -69,7 +69,7 @@ def test_map_arc_easy_unknown_key() -> None:
 
 
 def test_map_arc_easy_rejects_mismatched_choice_lengths() -> None:
-    assert (
+    with pytest.raises(ValueError, match="choices.label length 2 != choices.text length 4"):
         map_arc_easy_row(
             {
                 "question": "Q?",
@@ -80,8 +80,6 @@ def test_map_arc_easy_rejects_mismatched_choice_lengths() -> None:
                 "answerKey": "2",
             }
         )
-        is None
-    )
 
 
 def test_score_arc_easy() -> None:

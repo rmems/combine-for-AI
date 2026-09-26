@@ -15,6 +15,7 @@ xai-dissect ──manifests──► grok-ozempic ──GOZ1 packs──► comb
 | Manifest ingestion | Validate magere-style handoff JSON/YAML; dispatch by artifact format |
 | GOZ1 header sniff | Magic/version/tensor_count only — no dequant (format SoT in grok-ozempic) |
 | Benchmark runner | Mock (CI) + future import adapters for grok-ozempic experiment JSON |
+| Matrix runner | Config-driven models × quant × datasets campaign; comparison + family reports |
 | Telemetry | Local GPU snapshot + optional corinth/myelin overlay |
 | Reports | JSON/CSV (+ markdown generators); MoE/SNN fields nullable |
 
@@ -73,6 +74,43 @@ Selection priority for **existing** generated artifacts: **GOZ1 → AWQ → GPTQ
 
 GOZ1 success path uses quantization profile **`saaq`** and attaches header fields to the report row.
 
+## Dataset case protocol
+
+Loader rows remain `DatasetRecord` (`prompt`, `reference`, `choices`, `answer_index`) so the benchmark runner and `MetricsAccumulator` stay unchanged.
+
+The canonical scored unit is `benchmarks.cases.DatasetCase`:
+
+| Field | Role |
+|-------|------|
+| `example_id` | Stable id, `{dataset}:{split}:{index:04d}` when a fixture omits one |
+| `dataset` / `split` | Family name (`lambada`, `hellaswag`, `wikitext2`, `gsm8k`, `piqa`, `arc_easy`) and split |
+| `prompt` | Model input |
+| `choices` / `answer_index` | Present only for classification (HellaSwag, PIQA, ARC-Easy) |
+| `expected` | Cloze word, WikiText continuation, or GSM8K final answer |
+| `task` | `classification` · `cloze` · `perplexity` · `exact_match_math` |
+| `source` / `metadata` | `jsonl` plus local path, row index, and documented HF id (never fetched here) |
+
+Adapters: `record_to_case`, `case_to_record`, `cases_from_loaded`. Offline samples live in `configs/datasets/*.sample.jsonl` and load through `benchmarks.case_loading.load_sample_cases` with no network access.
+
+Golden scorers (`benchmarks.scorers`) are deterministic. Failures always name `dataset`, `example_id`, `expected`, and `observed`. Inputs and expected outputs are pinned in `tests/fixtures/golden_scorers.json`.
+
+## Experiment matrix
+
+Config: `configs/matrix/*.json` or `*.toml`. Cartesian product of `models` × `quantization` (per-model override allowed) × `datasets`, with optional `select` / `exclude` plus CLI filters (`--models`, `--families`, `--quant-methods`, `--datasets`).
+
+`MatrixRunner` (`src/combine_for_ai/matrix_runner.py`) iterates cells, invokes `run_benchmarks_from_config` for each, writes `reports/cells/<cell_id>/`, and aggregates:
+
+- `relative_accuracy_drop` = `(baseline_acc - treatment_acc) / baseline_acc`
+- `compression_ratio` = `baseline_bits / treatment_bits`
+- `throughput_gain` = `treatment_throughput / baseline_throughput`
+- `vram_savings` = `(baseline_vram - treatment_vram) / baseline_vram`
+
+Baseline is `baseline_quantization` (default `fp16`) for the same model+dataset. Progress is `matrix-progress.json` so interrupted campaigns resume. Family grouping uses `models[].family` (corinth-canal: `olmoe`, `qwen3moe`, `gemma4`, `deepseek2`, `llamamoe`, `zaya`).
+
+CLI: `python scripts/run_matrix.py --config configs/matrix/corinth_canal.sample.json`.
+
+Environment fingerprints for matrix cells (compatibility warnings when pooling runs) live in `combine_for_ai.matrix_fingerprint` with probes in `combine_for_ai.environment`.
+
 ## Metrics
 
 ### LLM baseline
@@ -115,9 +153,45 @@ CLI: `scripts/import_goz_experiment.py`. Output rows map:
 
 Payload includes `benchmark_linkage.grok_ozempic_report_path` and optional decision/provenance.
 
+## Hybrid comparison runner
+
+`combine_for_ai.compare` builds matrices from imported or raw experiment rows:
+
+- Baseline arm (default `fp16_control`) vs treatment (default `expert_only`)
+- Paired by `block_index` with deltas for route top-1/2, cosine, residual drift, etc.
+- CLI: `scripts/compare_runs.py` → `*.compare.json`, `*.compare-by-block.csv`, `*.compare.md`
+
 ## Telemetry
 
 See `benchmarks/telemetry.py`: `SystemSnapshot`, `GPUMetrics` (optional `pynvml`), `RoutingMetrics`, upstream merge for corinth-canal / myelin-accelerator.
+
+### corinth-canal SAAQ ingest
+
+`benchmarks/corinth_canal.py` parses a validation run directory (or a single artifact) and overlays SAAQ scalars onto combine metrics/reports.
+
+Canonical filenames from `saaq_latent_calibration`:
+
+| File | Role |
+|------|------|
+| `latent_telemetry.csv` | Dual-SAAQ trajectory (`saaq_delta_q_{legacy,v15}_{prev,target}` plus primary compatibility columns) |
+| `summary.json` | `ExperimentSummary` (rule, family, tick/row counts) |
+| `run_manifest.json` | Full `ExperimentManifest` |
+| `tick_telemetry.txt` | Per-tick `tick=… elapsed_us=…` lines |
+
+Config:
+
+```json
+"telemetry": {
+  "corinth_canal_dir": "/path/to/corinth-canal/run",
+  "corinth_canal_path": "optional/legacy-or-summary.json"
+}
+```
+
+CLI: `--corinth-canal-dir PATH` overrides the config. Missing files are skipped; a GOZ1-only run is unaffected.
+
+Mapped report fields (JSON + CSV): `firing_rate`, `membrane_pressure`, `saaq_delta_q`, `saaq_delta_q_last`, `saaq_delta_q_legacy`, `saaq_delta_q_v15`, `saaq_rule`. JSON `run.telemetry` also carries the dual Δq trajectories.
+
+`membrane_pressure` uses the SAAQ 1.0 scale `clamp(membrane_dv_dt / 12, -1, 1)`.
 
 ## Quantization registry
 

@@ -9,12 +9,20 @@ from benchmarks.dataset_support import (
     CATALOG,
     HuggingFaceDatasetLoader,
     JsonlDatasetLoader,
+    ROW_MAPPERS,
+    _register_entry,
+    cache_sidecar_path,
     mapper_for,
     normalized_cache_path,
     sample_path_for,
     validate_loaded,
 )
-from benchmarks.dataset_types import DatasetRecord, LoadedDataset, TaskKind
+from benchmarks.dataset_types import (
+    CatalogEntry,
+    DatasetRecord,
+    LoadedDataset,
+    TaskKind,
+)
 from benchmarks.datasets import DatasetSpec, default_dataset_registry
 from benchmarks.runner import load_datasets
 
@@ -169,6 +177,35 @@ def test_hf_cache_avoids_redownload(
     assert first.metadata["source"] == "hf"
     assert second.metadata["source"] == "hf_cache"
     assert second.records == first.records
+    sidecar = cache_sidecar_path(Path(first.metadata["cached_path"]))
+    assert sidecar.exists()
+
+
+def test_hf_cache_rejects_tampered_sidecar(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls = {"n": 0}
+
+    def fake_load(*args, **kwargs):
+        calls["n"] += 1
+        return [{"text": "She walked to the store"}]
+
+    monkeypatch.setattr("benchmarks.dataset_support.hf_load_dataset", fake_load)
+    spec = DatasetSpec(
+        name="lambada",
+        source="hf",
+        hf_id="EleutherAI/lambada_openai",
+        cache_dir=str(tmp_path),
+    )
+    loader = HuggingFaceDatasetLoader()
+    first = loader.load(spec)
+    sidecar = cache_sidecar_path(Path(first.metadata["cached_path"]))
+    payload = json.loads(sidecar.read_text(encoding="utf-8"))
+    payload["digest"] = "0" * 64
+    sidecar.write_text(json.dumps(payload), encoding="utf-8")
+    second = loader.load(spec)
+    assert calls["n"] == 2
+    assert second.metadata["source"] == "hf"
 
 
 def test_hf_falls_back_to_sample_when_datasets_missing(
@@ -207,11 +244,19 @@ def test_dataset_spec_from_dict_reads_optional_fields() -> None:
             "min_samples": 2,
             "max_samples": 8,
             "cache_dir": "/tmp/cache",
+            "cache_root": "/tmp/cache-root",
+            "cache_mode": "prefer-cache",
+            "revision": "main",
+            "upstream_license": "cc-by-4.0",
         }
     )
     assert spec.min_samples == 2
     assert spec.max_samples == 8
     assert spec.cache_dir == "/tmp/cache"
+    assert spec.cache_root == "/tmp/cache-root"
+    assert spec.cache_mode == "prefer-cache"
+    assert spec.revision == "main"
+    assert spec.upstream_license == "cc-by-4.0"
     assert spec.hf_id == "EleutherAI/lambada_openai"
 
 
@@ -222,8 +267,24 @@ def test_unknown_source_is_rejected() -> None:
 
 def test_row_mappers_cover_catalog_aliases() -> None:
     default_dataset_registry()
+    ROW_MAPPERS.pop("wikitext", None)
+    ROW_MAPPERS.pop("arc-easy", None)
     assert mapper_for("wikitext") is mapper_for("wikitext2")
     assert mapper_for("arc-easy") is mapper_for("arc_easy")
+
+
+def test_alias_cannot_collide_with_another_primary_name() -> None:
+    with pytest.raises(ValueError, match="collides with primary catalog name"):
+        _register_entry(
+            CatalogEntry(
+                name="__tmp_collision__",
+                task=TaskKind.GENERIC,
+                hf_id="x",
+                sample_relpath="x.jsonl",
+                aliases=("lambada",),
+            )
+        )
+    assert "__tmp_collision__" not in CATALOG
 
 
 def test_normalized_cache_path_uses_full_sha256(tmp_path: Path) -> None:

@@ -15,6 +15,12 @@ from benchmarks.dataset_types import DatasetRecord, DatasetSpec
 
 
 def map_lambada_row(row: dict[str, Any]) -> DatasetRecord | None:
+    """Map a LAMBADA row to a cloze pair.
+
+    Field mapping follows EleutherAI lm-evaluation-harness ``lambada_openai``:
+    Hub rows expose ``text``; the last whitespace-delimited token is the target.
+    Canonical ``prompt`` / ``reference`` JSONL is passed through unchanged.
+    """
     record = canonical_record(row)
     if record is not None:
         return record
@@ -54,7 +60,7 @@ def load_lambada_sample(
 
 
 class LAMBADALoader(MappedDatasetLoader):
-    """Load LAMBADA from HuggingFace or local JSONL as cloze pairs."""
+    """Load LAMBADA (lm-eval ``lambada_openai``) as last-word cloze pairs."""
 
     catalog_name = "lambada"
 
