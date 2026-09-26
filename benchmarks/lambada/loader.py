@@ -1,109 +1,71 @@
 from __future__ import annotations
 
-import random
+from typing import Any
 
-from benchmarks.datasets import DatasetRecord, DatasetSpec, LoadedDataset
-
-# Synthetic cloze pairs for smoke (not HF LAMBADA). Kept at module scope so the
-# loader stays short for complexity scanners.
-_SYNTHETIC_CLOZE_EXAMPLES: tuple[tuple[str, str], ...] = (
-    ("She walked to the ", "store"),
-    ("He sat on the ", "chair"),
-    ("The cat chased the ", "mouse"),
-    ("She opened the ", "door"),
-    ("He drove the ", "car"),
-    ("The sun shines in the ", "sky"),
-    ("She wrote a ", "letter"),
-    ("He played the ", "piano"),
-    ("The bird flew into the ", "tree"),
-    ("She drank a cup of ", "coffee"),
-    ("He read the ", "book"),
-    ("The dog barked at the ", "mailman"),
-    ("She cooked a delicious ", "meal"),
-    ("He fixed the broken ", "window"),
-    ("The children played in the ", "park"),
-    ("She painted a beautiful ", "picture"),
-    ("He built a tall ", "tower"),
-    ("The river flows through the ", "valley"),
-    ("She sang a lovely ", "song"),
-    ("He climbed the tall ", "mountain"),
-    ("The train arrived at the ", "station"),
-    ("She planted flowers in the ", "garden"),
-    ("He caught a big ", "fish"),
-    ("The plane flew over the ", "ocean"),
-    ("She baked a chocolate ", "cake"),
-    ("He repaired the old ", "bicycle"),
-    ("The wind blew through the ", "trees"),
-    ("She knitted a warm ", "sweater"),
-    ("He solved the difficult ", "problem"),
-    ("The moon shines at ", "night"),
-    ("She washed the dirty ", "dishes"),
-    ("He cleaned the entire ", "house"),
-    ("The fire burned in the ", "fireplace"),
-    ("She organized her messy ", "desk"),
-    ("He painted the white ", "fence"),
-    ("The rain fell from the ", "clouds"),
-    ("She packed her suitcase for the ", "trip"),
-    ("He fixed the leaky ", "faucet"),
-    ("The snow covered the entire ", "ground"),
-    ("She decorated the Christmas ", "tree"),
-    ("He learned to play the ", "guitar"),
-    ("The stars twinkle in the ", "sky"),
-    ("She prepared a healthy ", "salad"),
-    ("He installed the new ", "software"),
-    ("The leaves fell from the ", "trees"),
-    ("She designed a beautiful ", "dress"),
-    ("He completed the challenging ", "puzzle"),
-    ("The waves crashed on the ", "shore"),
-    ("She taught the eager ", "students"),
-    ("He won the chess ", "tournament"),
+from benchmarks.dataset_jsonl import canonical_record
+from benchmarks.dataset_support import (
+    CATALOG,
+    MappedDatasetLoader,
+    register_row_mapper,
+    sample_path_for,
 )
+from benchmarks.dataset_types import DatasetRecord, DatasetSpec
+
+# LAMBADA is last-word cloze: the final whitespace-delimited token is the target.
 
 
-def load_lambada_sample(sample_size: int = 50, seed: int = 42) -> list[DatasetRecord]:
-    """Load a deterministic synthetic cloze sample (not real LAMBADA; see #11)."""
-    # Deterministic shuffle for smoke reproducibility — not crypto (Bandit B311).
-    rng = random.Random(seed)  # nosec B311
-    examples = list(_SYNTHETIC_CLOZE_EXAMPLES)
-    rng.shuffle(examples)
-    selected = examples[:sample_size]
-    return [
-        DatasetRecord(prompt=prompt, reference=reference)
-        for prompt, reference in selected
-    ]
+def map_lambada_row(row: dict[str, Any]) -> DatasetRecord | None:
+    """Map a LAMBADA row to a cloze pair.
+
+    Field mapping follows EleutherAI lm-evaluation-harness ``lambada_openai``:
+    Hub rows expose ``text``; the last whitespace-delimited token is the target.
+    Canonical ``prompt`` / ``reference`` JSONL is passed through unchanged.
+    """
+    record = canonical_record(row)
+    if record is not None:
+        return record
+
+    text = row.get("text")
+    if text is None:
+        return None
+    stripped = str(text).strip()
+    if not stripped:
+        return None
+    parts = stripped.rsplit(None, 1)
+    if len(parts) != 2:
+        return None
+    prefix, target = parts
+    target = target.strip(".,!?;:\"'")
+    if not target:
+        return None
+    return DatasetRecord(prompt=f"{prefix} ", reference=target)
 
 
-class LAMBADALoader:
-    """Synthetic cloze loader registered as ``lambada`` for smoke paths (not HF LAMBADA)."""
+register_row_mapper("lambada", map_lambada_row)
 
-    def __init__(self, sample_size: int = 50, seed: int = 42):
-        if sample_size < 0:
-            raise ValueError("sample_size must be non-negative")
-        self.sample_size = sample_size
-        self.seed = seed
 
-    def load(self, spec: DatasetSpec) -> LoadedDataset:
-        if spec.max_samples is None:
-            sample_size = self.sample_size
-        else:
-            sample_size = spec.max_samples
-        if sample_size < 0:
-            raise ValueError("sample_size must be non-negative")
+def load_lambada_sample(
+    sample_size: int | None = None, seed: int = 42
+) -> list[DatasetRecord]:
+    """Load cloze records from the bundled LAMBADA sample JSONL."""
+    _ = seed  # kept for call-site compatibility with the old synthetic helper
+    entry = CATALOG["lambada"]
+    spec = DatasetSpec(
+        name="lambada",
+        source="lambada",
+        path=str(sample_path_for(entry)),
+        max_samples=sample_size,
+    )
+    return LAMBADALoader().load(spec).records
 
-        records = load_lambada_sample(
-            sample_size=sample_size,
-            seed=self.seed,
-        )
 
-        return LoadedDataset(
-            spec=spec,
-            records=records,
-            metadata={
-                "source": "synthetic_cloze_sample",
-                "sample_size": len(records),
-                "seed": self.seed,
-            },
-        )
+class LAMBADALoader(MappedDatasetLoader):
+    """Load LAMBADA (lm-eval ``lambada_openai``) as last-word cloze pairs."""
+
+    catalog_name = "lambada"
+
+    def map_row(self, row: dict[str, Any]) -> DatasetRecord | None:
+        return map_lambada_row(row)
 
 
 def calculate_cloze_accuracy(
@@ -115,7 +77,9 @@ def calculate_cloze_accuracy(
     if not predictions:
         return 0.0
 
-    correct = sum(1 for pred, ref in zip(predictions, references, strict=True) if pred == ref)
+    correct = sum(
+        1 for pred, ref in zip(predictions, references, strict=True) if pred == ref
+    )
     return correct / len(predictions)
 
 

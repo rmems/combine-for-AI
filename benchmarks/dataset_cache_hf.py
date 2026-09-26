@@ -10,6 +10,8 @@ from benchmarks.dataset_cache_models import (
     normalize_license,
     requested_revision,
 )
+from benchmarks.dataset_jsonl import row_as_dict
+from benchmarks.dataset_support import mapper_for
 from benchmarks.dataset_types import DatasetRecord, DatasetSpec, validate_dataset_record
 
 try:
@@ -84,13 +86,22 @@ def load_hf_split(
     )
 
 
-def record_from_row(row: dict[str, Any]) -> DatasetRecord:
-    record = DatasetRecord(
-        prompt=row["prompt"],
-        reference=row.get("reference"),
-        choices=row.get("choices"),
-        answer_index=row.get("answer_index"),
-    )
+def record_from_row(
+    row: dict[str, Any], spec: DatasetSpec | None = None
+) -> DatasetRecord:
+    payload = row_as_dict(row)
+    if spec is None:
+        record = DatasetRecord(
+            prompt=payload["prompt"],
+            reference=payload.get("reference"),
+            choices=payload.get("choices"),
+            answer_index=payload.get("answer_index"),
+        )
+    else:
+        mapped = mapper_for(spec.name)(payload)
+        if mapped is None:
+            raise ValueError(f"unrecognized {spec.name} Hugging Face row")
+        record = mapped
     validate_dataset_record(record)
     return record
 
@@ -115,7 +126,14 @@ def fetch_huggingface_dataset(spec: DatasetSpec) -> FetchResult:
         spec.split,
         resolved_revision,
     )
-    records = [record_from_row(row) for row in dataset]
+    records: list[DatasetRecord] = []
+    for row in dataset:
+        payload = row_as_dict(row)
+        mapped = mapper_for(spec.name)(payload)
+        if mapped is None:
+            continue
+        validate_dataset_record(mapped)
+        records.append(mapped)
     return FetchResult(
         records=records,
         source_uri=huggingface_source_uri(spec, resolved_revision=resolved_revision),
