@@ -402,7 +402,7 @@ class MappedDatasetLoader:
             spec,
             entry=entry,
             map_row=self.map_row,
-            prefer="auto",
+            prefer="jsonl" if spec.path else "hf",
         )
         loaded = LoadedDataset(spec=spec, records=records, metadata=metadata)
         validate_loaded(loaded, entry)
