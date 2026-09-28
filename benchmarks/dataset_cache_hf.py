@@ -123,7 +123,7 @@ def fetch_huggingface_dataset(spec: DatasetSpec) -> FetchResult:
     dataset = load_hf_split(
         spec.hf_id,
         spec.hf_subset,
-        spec.split,
+        spec.generic_split(),
         resolved_revision,
     )
     records: list[DatasetRecord] = []

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterable
+from dataclasses import replace
 from pathlib import Path
 from typing import Protocol
 
@@ -31,10 +32,18 @@ class DatasetLoader(Protocol):
         ...
 
 
+def _with_generic_split(spec: DatasetSpec) -> DatasetSpec:
+    split = spec.generic_split()
+    if spec.split == split:
+        return spec
+    return replace(spec, split=split)
+
+
 class JsonlDatasetLoader:
     """Canonical-prompt JSONL loader with cache provenance metadata."""
 
     def load(self, spec: DatasetSpec) -> LoadedDataset:
+        spec = _with_generic_split(spec)
         path = _jsonl_path(spec)
         records = _read_jsonl_records(path, spec.max_samples)
         return LoadedDataset(
@@ -102,6 +111,7 @@ class HuggingFaceDatasetLoader:
         if not spec.hf_id:
             raise ValueError(f"hf dataset '{spec.name}' is missing hf_id")
 
+        spec = _with_generic_split(spec)
         cache = DatasetCache.for_spec(spec)
         loaded = cache.load(spec, fetch=self._fetch)
         records = loaded.records

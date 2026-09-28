@@ -323,6 +323,17 @@ def test_normalized_cache_path_uses_full_sha256(tmp_path: Path) -> None:
     assert path.suffix == ".jsonl"
 
 
+def test_generic_jsonl_omitted_split_defaults_to_validation(tmp_path: Path) -> None:
+    from benchmarks.datasets import JsonlDatasetLoader as GenericJsonl
+
+    path = tmp_path / "row.jsonl"
+    path.write_text(json.dumps({"prompt": "q", "reference": "a"}) + "\n", encoding="utf-8")
+    loaded = GenericJsonl().load(
+        DatasetSpec(name="demo", source="jsonl", path=str(path))
+    )
+    assert loaded.spec.split == "validation"
+
+
 def test_omitted_split_uses_catalog_default() -> None:
     from benchmarks.dataset_support import catalog_entry, resolve_hf_split
 

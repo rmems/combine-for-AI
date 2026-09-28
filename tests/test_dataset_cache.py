@@ -646,7 +646,7 @@ def test_movable_hf_revision_is_pinned_before_key_and_fetch(
     assert observed["load"] == (
         spec.hf_id,
         None,
-        spec.split,
+        spec.generic_split(),
         resolved_revision,
     )
 

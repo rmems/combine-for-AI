@@ -40,6 +40,10 @@ class DatasetSpec:
             if self.max_samples < 0:
                 raise ValueError("max_samples must be non-negative")
 
+    def generic_split(self) -> str:
+        """Split used by generic jsonl/hf sources when none was requested."""
+        return self.split or "validation"
+
     @staticmethod
     def from_dict(raw: dict) -> "DatasetSpec":
         return DatasetSpec(
