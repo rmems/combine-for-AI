@@ -24,15 +24,18 @@ def test_wikitext_sample_jsonl() -> None:
     assert dataset.records[1].reference == "Paris."
 
 
-def test_map_wikitext_native_skips_empty() -> None:
-    assert map_wikitext_row({"text": " \n"}) is None
+def test_map_wikitext_native_preserves_raw_text() -> None:
+    blank = map_wikitext_row({"text": " \n"})
+    assert blank is not None
+    assert blank.prompt == " \n"
+    assert blank.reference is None
     record = map_wikitext_row({"text": "  The capital city of France is Paris.  "})
     assert record is not None
-    assert record.prompt == "The capital city of France is Paris."
-    assert record.reference == record.prompt
+    assert record.prompt == "  The capital city of France is Paris.  "
+    assert record.reference is None
 
 
-def test_wikitext_hf_rows_skip_empty(tmp_path, monkeypatch) -> None:
+def test_wikitext_hf_rows_preserve_blank_separators(tmp_path, monkeypatch) -> None:
     rows = [
         {"text": ""},
         {"text": "In 1969, the Apollo 11 mission landed on the moon."},
@@ -46,11 +49,13 @@ def test_wikitext_hf_rows_skip_empty(tmp_path, monkeypatch) -> None:
         DatasetSpec(
             name="wikitext2",
             source="hf",
-            hf_id="wikitext",
+            hf_id="Salesforce/wikitext",
             hf_subset="wikitext-2-raw-v1",
             cache_dir=str(tmp_path),
         )
     )
-    assert len(dataset.records) == 1
-    assert dataset.metadata["skipped"] == 2
-    assert dataset.records[0].prompt.startswith("In 1969")
+    assert len(dataset.records) == 3
+    assert dataset.metadata["skipped"] == 0
+    assert concatenate_documents(dataset.records) == (
+        "In 1969, the Apollo 11 mission landed on the moon.   "
+    )

@@ -295,6 +295,36 @@ def test_normalized_cache_path_uses_full_sha256(tmp_path: Path) -> None:
     assert path.suffix == ".jsonl"
 
 
+def test_catalog_hub_ids_match_case_families() -> None:
+    assert CATALOG["piqa"].hf_id == "ybisk/piqa"
+    assert CATALOG["wikitext2"].hf_id == "Salesforce/wikitext"
+
+
+def test_runner_named_source_without_path_fetches_hf(tmp_path, monkeypatch) -> None:
+    calls = {"n": 0}
+
+    def fake_hf(spec, map_row, *, allow_fetch=True):
+        calls["n"] += 1
+        assert allow_fetch is True
+        return [DatasetRecord(prompt="hub ", reference="answer")], {"source": "hf"}
+
+    monkeypatch.setattr("benchmarks.dataset_support.records_from_hf", fake_hf)
+    loaded = load_datasets(
+        {
+            "datasets": [
+                {
+                    "name": "lambada",
+                    "source": "lambada",
+                    "cache_dir": str(tmp_path),
+                }
+            ]
+        },
+        tmp_path,
+    )
+    assert calls["n"] == 1
+    assert loaded[0].metadata["source"] == "hf"
+
+
 def test_catalog_task_kinds_cover_all_named_datasets() -> None:
     expected = {
         "lambada": TaskKind.CLOZE,
@@ -340,7 +370,7 @@ def _hub_stub_for(name: str) -> tuple[list[DatasetRecord], dict]:
 def test_named_loader_without_path_fetches_hf(name, monkeypatch, tmp_path) -> None:
     calls = {"n": 0}
 
-    def fake_hf(**kwargs):
+    def fake_hf(*args, **kwargs):
         calls["n"] += 1
         return _hub_stub_for(name)
 

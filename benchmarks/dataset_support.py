@@ -11,7 +11,7 @@ from benchmarks.dataset_cache_models import (
     parse_cache_mode,
 )
 from benchmarks.dataset_jsonl import records_from_jsonl, require_canonical_record
-from benchmarks.dataset_mapped_cache import records_from_hf
+from benchmarks.dataset_mapped_cache import MappedHfSpec, records_from_hf
 from benchmarks.dataset_types import (
     CatalogEntry,
     DatasetRecord,
@@ -79,7 +79,7 @@ _register_entry(
     CatalogEntry(
         name="wikitext2",
         task=TaskKind.LANGUAGE_MODELING,
-        hf_id="wikitext",
+        hf_id="Salesforce/wikitext",
         hf_subset="wikitext-2-raw-v1",
         sample_relpath="configs/datasets/wikitext2.sample.jsonl",
         default_split="validation",
@@ -100,7 +100,7 @@ _register_entry(
     CatalogEntry(
         name="piqa",
         task=TaskKind.MULTIPLE_CHOICE,
-        hf_id="piqa",
+        hf_id="ybisk/piqa",
         sample_relpath="configs/datasets/piqa.sample.jsonl",
         default_split="validation",
     )
@@ -270,14 +270,16 @@ def load_with_fallback(
 
     try:
         return records_from_hf(
-            name=spec.name,
-            hf_id=hf_id,
-            hf_subset=hf_subset,
-            split=split,
-            map_row=map_row,
-            max_samples=spec.max_samples,
-            cache_dir=cache_dir,
-            revision=spec.revision,
+            MappedHfSpec(
+                name=spec.name,
+                hf_id=hf_id,
+                hf_subset=hf_subset,
+                split=split,
+                revision=spec.revision,
+                max_samples=spec.max_samples,
+                cache_dir=cache_dir,
+            ),
+            map_row,
             allow_fetch=_may_fetch_hf(spec),
         )
     except (ImportError, OSError, RuntimeError, ValueError, TypeError) as exc:
@@ -313,7 +315,7 @@ def _validate_generic(record: DatasetRecord, label: str) -> None:
 
 
 def _validate_record(record: DatasetRecord, task: TaskKind, label: str) -> None:
-    if not str(record.prompt).strip():
+    if task is not TaskKind.LANGUAGE_MODELING and not str(record.prompt).strip():
         raise ValueError(f"{label} has an empty prompt")
     match task:
         case TaskKind.CLOZE | TaskKind.MATH:

@@ -8,18 +8,19 @@ from benchmarks.dataset_types import DatasetRecord
 
 
 def map_wikitext_row(row: dict[str, Any]) -> DatasetRecord | None:
-    """Map WikiText-2 using lm-eval ``wikitext`` ``text`` documents."""
+    """Map WikiText-2 using lm-eval ``wikitext`` ``text`` documents.
+
+    Raw Hub rows keep their original ``text`` (including blank separators) as
+    the perplexity prompt and do not copy it into ``reference``, so the runner
+    scores token-level NLL rather than exact document reproduction.
+    """
     record = canonical_record(row)
     if record is not None:
         return record
 
-    text = row.get("text")
-    if text is None:
+    if "text" not in row or row["text"] is None:
         return None
-    stripped = str(text).strip()
-    if not stripped:
-        return None
-    return DatasetRecord(prompt=stripped, reference=stripped)
+    return DatasetRecord(prompt=str(row["text"]))
 
 
 register_row_mapper("wikitext2", map_wikitext_row)
@@ -35,5 +36,5 @@ class WikiText2Loader(MappedDatasetLoader):
 
 
 def concatenate_documents(records: list[DatasetRecord]) -> str:
-    """Join non-empty documents for token-level perplexity scoring."""
-    return "\n".join(record.prompt for record in records if record.prompt.strip())
+    """Concatenate the raw WikiText stream without inserting extra separators."""
+    return "".join(record.prompt for record in records)

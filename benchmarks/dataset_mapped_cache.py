@@ -7,6 +7,7 @@ import json
 import os
 import tempfile
 from collections.abc import Callable, Iterable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +26,17 @@ except ImportError:
 
 NORMALIZED_CACHE_SCHEMA = "combine.normalized_hf_cache.v1"
 RowMapper = Callable[[dict[str, Any]], DatasetRecord | None]
+
+
+@dataclass(frozen=True)
+class MappedHfSpec:
+    name: str
+    hf_id: str
+    hf_subset: str | None
+    split: str
+    revision: str | None = None
+    max_samples: int | None = None
+    cache_dir: Path | None = None
 
 
 def write_normalized_jsonl(path: Path, records: list[DatasetRecord]) -> None:
@@ -192,33 +204,26 @@ def _load_hf_rows(
 
 
 def _hf_cache_hit(
-    path: Path,
-    *,
-    name: str,
-    hf_id: str,
-    hf_subset: str | None,
-    split: str,
-    revision: str | None = None,
-    max_samples: int | None,
+    path: Path, spec: MappedHfSpec
 ) -> tuple[list[DatasetRecord], dict] | None:
     cached = read_validated_cache(
         path,
-        name=name,
-        hf_id=hf_id,
-        subset=hf_subset,
-        split=split,
-        revision=revision,
-        max_samples=max_samples,
+        name=spec.name,
+        hf_id=spec.hf_id,
+        subset=spec.hf_subset,
+        split=spec.split,
+        revision=spec.revision,
+        max_samples=spec.max_samples,
     )
     if cached is None:
         return None
     return cached, {
         "source": "hf_cache",
         "path": str(path),
-        "hf_id": hf_id,
-        "hf_subset": hf_subset,
-        "split": split,
-        "revision": revision,
+        "hf_id": spec.hf_id,
+        "hf_subset": spec.hf_subset,
+        "split": spec.split,
+        "revision": spec.revision,
     }
 
 
@@ -277,80 +282,66 @@ def _persist_mapped_cache(
 
 
 def _fetch_mapped_from_hf(
-    path: Path,
-    *,
-    name: str,
-    hf_id: str,
-    hf_subset: str | None,
-    split: str,
-    revision: str | None,
-    map_row: RowMapper,
-    max_samples: int | None,
-    cache_dir: Path,
+    path: Path, spec: MappedHfSpec, map_row: RowMapper
 ) -> tuple[list[DatasetRecord], dict]:
     discard_invalid_cache(path)
+    cache_dir = spec.cache_dir
+    if cache_dir is None:
+        raise ValueError(f"hf dataset '{spec.name}' is missing cache_dir")
     mapped, skipped = _map_hf_split(
-        hf_id=hf_id,
-        hf_subset=hf_subset,
-        split=split,
-        revision=revision,
+        hf_id=spec.hf_id,
+        hf_subset=spec.hf_subset,
+        split=spec.split,
+        revision=spec.revision,
         cache_dir=cache_dir,
         map_row=map_row,
     )
     _persist_mapped_cache(
-        path, mapped, name=name, hf_id=hf_id, hf_subset=hf_subset, split=split,
-        revision=revision,
+        path,
+        mapped,
+        name=spec.name,
+        hf_id=spec.hf_id,
+        hf_subset=spec.hf_subset,
+        split=spec.split,
+        revision=spec.revision,
     )
-    return apply_max_samples(mapped, max_samples), {
+    return apply_max_samples(mapped, spec.max_samples), {
         "source": "hf",
-        "hf_id": hf_id,
-        "hf_subset": hf_subset,
-        "split": split,
-        "revision": revision,
+        "hf_id": spec.hf_id,
+        "hf_subset": spec.hf_subset,
+        "split": spec.split,
+        "revision": spec.revision,
         "skipped": skipped,
         "cached_path": str(path),
     }
 
 
 def records_from_hf(
-    *,
-    name: str,
-    hf_id: str,
-    hf_subset: str | None,
-    split: str,
-    revision: str | None = None,
+    spec: MappedHfSpec,
     map_row: RowMapper,
-    max_samples: int | None,
-    cache_dir: Path,
+    *,
     allow_fetch: bool = True,
 ) -> tuple[list[DatasetRecord], dict]:
-    if not hf_id:
-        raise ValueError(f"hf dataset '{name}' is missing hf_id")
-    if max_samples is not None and max_samples < 0:
+    if not spec.hf_id:
+        raise ValueError(f"hf dataset '{spec.name}' is missing hf_id")
+    if spec.max_samples is not None and spec.max_samples < 0:
         raise ValueError("max_samples must be non-negative")
+    if spec.cache_dir is None:
+        raise ValueError(f"hf dataset '{spec.name}' is missing cache_dir")
 
-    path = normalized_cache_path(cache_dir, name, hf_id, hf_subset, split, revision)
-    hit = _hf_cache_hit(
-        path,
-        name=name,
-        hf_id=hf_id,
-        hf_subset=hf_subset,
-        split=split,
-        revision=revision,
-        max_samples=max_samples,
+    path = normalized_cache_path(
+        spec.cache_dir,
+        spec.name,
+        spec.hf_id,
+        spec.hf_subset,
+        spec.split,
+        spec.revision,
     )
+    hit = _hf_cache_hit(path, spec)
     if hit is not None:
         return hit
     if not allow_fetch:
-        raise RuntimeError(f"offline cache miss for Hugging Face dataset {hf_id}")
-    return _fetch_mapped_from_hf(
-        path,
-        name=name,
-        hf_id=hf_id,
-        hf_subset=hf_subset,
-        split=split,
-        revision=revision,
-        map_row=map_row,
-        max_samples=max_samples,
-        cache_dir=cache_dir,
-    )
+        raise RuntimeError(
+            f"offline cache miss for Hugging Face dataset {spec.hf_id}"
+        )
+    return _fetch_mapped_from_hf(path, spec, map_row)
