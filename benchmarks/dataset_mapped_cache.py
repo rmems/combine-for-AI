@@ -24,7 +24,7 @@ try:
 except ImportError:
     hf_load_dataset = None
 
-NORMALIZED_CACHE_SCHEMA = "combine.normalized_hf_cache.v1"
+NORMALIZED_CACHE_SCHEMA = "combine.normalized_hf_cache.v2"
 RowMapper = Callable[[dict[str, Any]], DatasetRecord | None]
 
 
@@ -66,6 +66,10 @@ def cache_sidecar_path(jsonl_path: Path) -> Path:
     return jsonl_path.with_suffix(".meta.json")
 
 
+def jsonl_content_digest(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
 def write_cache_sidecar(
     jsonl_path: Path,
     *,
@@ -85,6 +89,7 @@ def write_cache_sidecar(
         "split": split,
         "revision": revision,
         "digest": digest,
+        "content_sha256": jsonl_content_digest(jsonl_path),
         "row_count": row_count,
     }
     cache_sidecar_path(jsonl_path).write_text(
@@ -113,10 +118,6 @@ def _sidecar_matches(
         and sidecar.get("digest") == expected
         and sidecar.get("row_count") == row_count
     )
-
-
-def _cache_records_valid(records: list[DatasetRecord]) -> bool:
-    return all(str(record.prompt).strip() for record in records)
 
 
 def _read_sidecar(path: Path) -> dict[str, Any] | None:
@@ -159,7 +160,11 @@ def read_validated_cache(
         row_count=len(records),
     ):
         return None
-    if not _cache_records_valid(records):
+    try:
+        digest = jsonl_content_digest(jsonl_path)
+    except OSError:
+        return None
+    if sidecar.get("content_sha256") != digest:
         return None
     return apply_max_samples(records, max_samples)
 

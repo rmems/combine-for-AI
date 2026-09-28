@@ -210,6 +210,34 @@ def test_hf_cache_rejects_tampered_sidecar(
     assert second.metadata["source"] == "hf"
 
 
+def test_hf_cache_rejects_tampered_jsonl_content(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls = {"n": 0}
+
+    def fake_load(*args, **kwargs):
+        calls["n"] += 1
+        return [{"text": "She walked to the store"}]
+
+    monkeypatch.setattr("benchmarks.dataset_mapped_cache.hf_load_dataset", fake_load)
+    spec = DatasetSpec(
+        name="lambada",
+        source="hf",
+        hf_id="EleutherAI/lambada_openai",
+        cache_dir=str(tmp_path),
+    )
+    loader = HuggingFaceDatasetLoader()
+    first = loader.load(spec)
+    path = Path(first.metadata["cached_path"])
+    payload = json.loads(path.read_text(encoding="utf-8").splitlines()[0])
+    payload["reference"] = "tampered"
+    path.write_text(json.dumps(payload) + "\n", encoding="utf-8")
+    second = loader.load(spec)
+    assert calls["n"] == 2
+    assert second.metadata["source"] == "hf"
+    assert second.records[0].reference == "store"
+
+
 def test_hf_falls_back_to_sample_when_datasets_missing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
