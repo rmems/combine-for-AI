@@ -21,12 +21,18 @@ def _parse_answer_index(answer_index: Any) -> int:
         raise ValueError("answer_index must be an integer or integer string") from exc
 
 
+def _parse_choices(choices: Any) -> list[str]:
+    if isinstance(choices, (str, bytes)) or not isinstance(choices, Iterable):
+        raise ValueError("choices must be a list of strings")
+    return [str(choice) for choice in choices]
+
+
 def canonical_record(row: dict[str, Any]) -> DatasetRecord | None:
     if "prompt" not in row or row["prompt"] is None:
         return None
     choices = row.get("choices")
     if choices is not None:
-        choices = [str(choice) for choice in choices]
+        choices = _parse_choices(choices)
     answer_index = row.get("answer_index")
     if answer_index is not None:
         answer_index = _parse_answer_index(answer_index)

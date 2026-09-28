@@ -374,6 +374,22 @@ def test_canonical_answer_index_rejects_invalid_values(answer_index) -> None:
         canonical_record({"prompt": "Question", "answer_index": answer_index})
 
 
+@pytest.mark.parametrize("choices", ["ab", b"ab", 1])
+def test_canonical_choices_rejects_non_lists(choices) -> None:
+    from benchmarks.dataset_jsonl import canonical_record
+
+    with pytest.raises(ValueError, match="choices must be a list"):
+        canonical_record({"prompt": "Question", "choices": choices})
+
+
+def test_canonical_choices_keeps_list_items() -> None:
+    from benchmarks.dataset_jsonl import canonical_record
+
+    record = canonical_record({"prompt": "Question", "choices": ["yes", "no"]})
+    assert record is not None
+    assert record.choices == ["yes", "no"]
+
+
 @pytest.mark.parametrize("answer_index", [0, 1, "0", " 1 "])
 def test_canonical_answer_index_accepts_integers(answer_index) -> None:
     from benchmarks.dataset_jsonl import canonical_record
