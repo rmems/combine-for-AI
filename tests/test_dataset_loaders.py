@@ -354,6 +354,59 @@ def test_named_loader_without_path_fetches_hf(name, monkeypatch, tmp_path) -> No
 
 
 @pytest.mark.parametrize("name", NAMED_DATASETS)
+def test_named_loader_offline_miss_skips_hf(name, monkeypatch, tmp_path) -> None:
+    def unexpected_hf(*args, **kwargs):
+        raise AssertionError("offline mode must not call Hugging Face")
+
+    monkeypatch.setattr("benchmarks.dataset_mapped_cache.hf_load_dataset", unexpected_hf)
+    loaded = default_dataset_registry().loader_for(name).load(
+        DatasetSpec(
+            name=name,
+            source=name,
+            cache_mode="offline",
+            cache_dir=str(tmp_path),
+        )
+    )
+    assert loaded.records
+    assert loaded.metadata["source"] == "jsonl"
+    assert loaded.metadata.get("fallback") is True
+    assert "offline cache miss" in loaded.metadata["hf_error"]
+
+
+def test_named_loader_offline_hit_skips_hf(tmp_path, monkeypatch) -> None:
+    calls = {"n": 0}
+
+    def fake_load(*args, **kwargs):
+        calls["n"] += 1
+        return [{"text": "She walked to the store"}]
+
+    monkeypatch.setattr("benchmarks.dataset_mapped_cache.hf_load_dataset", fake_load)
+    spec = DatasetSpec(
+        name="lambada",
+        source="lambada",
+        cache_dir=str(tmp_path),
+    )
+    first = default_dataset_registry().loader_for("lambada").load(spec)
+    assert calls["n"] == 1
+    assert first.metadata["source"] == "hf"
+
+    def unexpected_hf(*args, **kwargs):
+        raise AssertionError("offline mode must not refetch Hugging Face")
+
+    monkeypatch.setattr("benchmarks.dataset_mapped_cache.hf_load_dataset", unexpected_hf)
+    second = default_dataset_registry().loader_for("lambada").load(
+        DatasetSpec(
+            name="lambada",
+            source="lambada",
+            cache_mode="offline",
+            cache_dir=str(tmp_path),
+        )
+    )
+    assert second.metadata["source"] == "hf_cache"
+    assert second.records == first.records
+
+
+@pytest.mark.parametrize("name", NAMED_DATASETS)
 def test_named_loader_without_path_falls_back_to_sample(name, monkeypatch) -> None:
     monkeypatch.setattr("benchmarks.dataset_mapped_cache.hf_load_dataset", None)
     loaded = default_dataset_registry().loader_for(name).load(

@@ -5,6 +5,11 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Literal, Never
 
+from benchmarks.dataset_cache_models import (
+    DEFAULT_CACHE_MODE,
+    CacheMode,
+    parse_cache_mode,
+)
 from benchmarks.dataset_jsonl import records_from_jsonl, require_canonical_record
 from benchmarks.dataset_mapped_cache import records_from_hf
 from benchmarks.dataset_types import (
@@ -216,6 +221,11 @@ def _fallback_jsonl(
     return records, _jsonl_metadata(fallback_path, fallback=str(exc))
 
 
+def _may_fetch_hf(spec: DatasetSpec) -> bool:
+    raw = spec.cache_mode or os.environ.get("COMBINE_DATASET_CACHE_MODE")
+    return parse_cache_mode(raw or DEFAULT_CACHE_MODE) is not CacheMode.OFFLINE
+
+
 def _hf_request(
     spec: DatasetSpec, entry: CatalogEntry | None
 ) -> tuple[str | None, str | None, str, Path]:
@@ -268,6 +278,7 @@ def load_with_fallback(
             max_samples=spec.max_samples,
             cache_dir=cache_dir,
             revision=spec.revision,
+            allow_fetch=_may_fetch_hf(spec),
         )
     except (ImportError, OSError, RuntimeError, ValueError, TypeError) as exc:
         return _fallback_jsonl(spec, jsonl_path, map_row, exc)

@@ -276,34 +276,18 @@ def _persist_mapped_cache(
         temporary_sidecar.unlink(missing_ok=True)
 
 
-def records_from_hf(
+def _fetch_mapped_from_hf(
+    path: Path,
     *,
     name: str,
     hf_id: str,
     hf_subset: str | None,
     split: str,
-    revision: str | None = None,
+    revision: str | None,
     map_row: RowMapper,
     max_samples: int | None,
     cache_dir: Path,
 ) -> tuple[list[DatasetRecord], dict]:
-    if not hf_id:
-        raise ValueError(f"hf dataset '{name}' is missing hf_id")
-    if max_samples is not None and max_samples < 0:
-        raise ValueError("max_samples must be non-negative")
-
-    path = normalized_cache_path(cache_dir, name, hf_id, hf_subset, split, revision)
-    hit = _hf_cache_hit(
-        path,
-        name=name,
-        hf_id=hf_id,
-        hf_subset=hf_subset,
-        split=split,
-        revision=revision,
-        max_samples=max_samples,
-    )
-    if hit is not None:
-        return hit
     discard_invalid_cache(path)
     mapped, skipped = _map_hf_split(
         hf_id=hf_id,
@@ -326,3 +310,47 @@ def records_from_hf(
         "skipped": skipped,
         "cached_path": str(path),
     }
+
+
+def records_from_hf(
+    *,
+    name: str,
+    hf_id: str,
+    hf_subset: str | None,
+    split: str,
+    revision: str | None = None,
+    map_row: RowMapper,
+    max_samples: int | None,
+    cache_dir: Path,
+    allow_fetch: bool = True,
+) -> tuple[list[DatasetRecord], dict]:
+    if not hf_id:
+        raise ValueError(f"hf dataset '{name}' is missing hf_id")
+    if max_samples is not None and max_samples < 0:
+        raise ValueError("max_samples must be non-negative")
+
+    path = normalized_cache_path(cache_dir, name, hf_id, hf_subset, split, revision)
+    hit = _hf_cache_hit(
+        path,
+        name=name,
+        hf_id=hf_id,
+        hf_subset=hf_subset,
+        split=split,
+        revision=revision,
+        max_samples=max_samples,
+    )
+    if hit is not None:
+        return hit
+    if not allow_fetch:
+        raise RuntimeError(f"offline cache miss for Hugging Face dataset {hf_id}")
+    return _fetch_mapped_from_hf(
+        path,
+        name=name,
+        hf_id=hf_id,
+        hf_subset=hf_subset,
+        split=split,
+        revision=revision,
+        map_row=map_row,
+        max_samples=max_samples,
+        cache_dir=cache_dir,
+    )
