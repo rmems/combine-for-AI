@@ -241,7 +241,7 @@ def load_with_fallback(
             map_row,
             missing_message=f"jsonl dataset '{spec.name}' is missing a path",
         )
-    if prefer == "auto" and jsonl_path is not None:
+    if prefer == "auto" and spec.path:
         return _load_jsonl_or_raise(
             jsonl_path,
             spec,

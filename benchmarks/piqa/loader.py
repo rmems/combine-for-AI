@@ -11,6 +11,19 @@ from benchmarks.dataset_support import (
 from benchmarks.dataset_types import DatasetRecord
 
 
+def _piqa_answer_index(label: Any) -> int | None:
+    if label is None:
+        return None
+    if isinstance(label, str) and not label.strip():
+        return None
+    answer_index = int(label)
+    if answer_index == -1:
+        return None
+    if answer_index not in (0, 1):
+        raise ValueError("PIQA label must be 0 or 1")
+    return answer_index
+
+
 def map_piqa_row(row: dict[str, Any]) -> DatasetRecord | None:
     """Map PIQA using lm-eval ``piqa`` fields: goal/sol1/sol2/label."""
     record = canonical_record(row)
@@ -20,16 +33,9 @@ def map_piqa_row(row: dict[str, Any]) -> DatasetRecord | None:
     goal = row.get("goal")
     sol1 = row.get("sol1")
     sol2 = row.get("sol2")
-    label = row.get("label")
-    if goal is None or sol1 is None or sol2 is None or label is None:
+    answer_index = _piqa_answer_index(row.get("label"))
+    if goal is None or sol1 is None or sol2 is None or answer_index is None:
         return None
-    if isinstance(label, str) and not label.strip():
-        return None
-    answer_index = int(label)
-    if answer_index == -1:
-        return None
-    if answer_index not in (0, 1):
-        raise ValueError("PIQA label must be 0 or 1")
     return DatasetRecord(
         prompt=str(goal).strip(),
         choices=[str(sol1), str(sol2)],

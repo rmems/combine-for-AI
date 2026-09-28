@@ -325,18 +325,43 @@ def test_canonical_answer_index_accepts_integers(answer_index) -> None:
     assert record.answer_index == int(answer_index)
 
 
-@pytest.mark.parametrize("name", NAMED_DATASETS)
-def test_named_loader_uses_catalog_sample_without_explicit_path(name, monkeypatch) -> None:
-    def unexpected_hf(*args, **kwargs):
-        raise AssertionError("HF must not be called when a catalog sample is available")
+def _hub_stub_for(name: str) -> tuple[list[DatasetRecord], dict]:
+    task = CATALOG[name].task
+    if task is TaskKind.MULTIPLE_CHOICE:
+        record = DatasetRecord(prompt="hub", choices=["a", "b"], answer_index=0)
+    elif task is TaskKind.LANGUAGE_MODELING:
+        record = DatasetRecord(prompt="hub document")
+    else:
+        record = DatasetRecord(prompt="hub ", reference="answer")
+    return [record], {"source": "hf", "hf_id": CATALOG[name].hf_id}
 
-    monkeypatch.setattr("benchmarks.dataset_support.records_from_hf", unexpected_hf)
+
+@pytest.mark.parametrize("name", NAMED_DATASETS)
+def test_named_loader_without_path_fetches_hf(name, monkeypatch, tmp_path) -> None:
+    calls = {"n": 0}
+
+    def fake_hf(**kwargs):
+        calls["n"] += 1
+        return _hub_stub_for(name)
+
+    monkeypatch.setattr("benchmarks.dataset_support.records_from_hf", fake_hf)
+    loaded = default_dataset_registry().loader_for(name).load(
+        DatasetSpec(name=name, source=name, cache_dir=str(tmp_path))
+    )
+    assert calls["n"] == 1
+    assert loaded.metadata["source"] == "hf"
+    assert loaded.records
+
+
+@pytest.mark.parametrize("name", NAMED_DATASETS)
+def test_named_loader_without_path_falls_back_to_sample(name, monkeypatch) -> None:
+    monkeypatch.setattr("benchmarks.dataset_mapped_cache.hf_load_dataset", None)
     loaded = default_dataset_registry().loader_for(name).load(
         DatasetSpec(name=name, source=name)
     )
     assert loaded.records
     assert loaded.metadata["source"] == "jsonl"
-    assert "fallback" not in loaded.metadata
+    assert loaded.metadata.get("fallback") is True
 
 
 @pytest.mark.parametrize("label", ["bad", []])

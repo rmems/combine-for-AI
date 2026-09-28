@@ -12,6 +12,15 @@ from benchmarks.dataset_types import DatasetRecord
 RowMapper = Callable[[dict[str, Any]], DatasetRecord | None]
 
 
+def _parse_answer_index(answer_index: Any) -> int:
+    if isinstance(answer_index, bool) or not isinstance(answer_index, (int, str)):
+        raise ValueError("answer_index must be an integer or integer string")
+    try:
+        return int(answer_index)
+    except ValueError as exc:
+        raise ValueError("answer_index must be an integer or integer string") from exc
+
+
 def canonical_record(row: dict[str, Any]) -> DatasetRecord | None:
     if "prompt" not in row or row["prompt"] is None:
         return None
@@ -20,12 +29,7 @@ def canonical_record(row: dict[str, Any]) -> DatasetRecord | None:
         choices = [str(choice) for choice in choices]
     answer_index = row.get("answer_index")
     if answer_index is not None:
-        if isinstance(answer_index, bool) or not isinstance(answer_index, (int, str)):
-            raise ValueError("answer_index must be an integer or integer string")
-        try:
-            answer_index = int(answer_index)
-        except ValueError as exc:
-            raise ValueError("answer_index must be an integer or integer string") from exc
+        answer_index = _parse_answer_index(answer_index)
     reference = row.get("reference")
     return DatasetRecord(
         prompt=str(row["prompt"]),
