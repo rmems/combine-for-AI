@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 
 from benchmarks.dataset_support import CATALOG, HuggingFaceDatasetLoader, sample_path_for
@@ -35,7 +37,8 @@ def test_lambada_loader_from_sample_jsonl() -> None:
     )
     dataset = loader.load(spec)
 
-    assert dataset.spec == spec
+    assert dataset.spec == replace(spec, split="test")
+    assert dataset.spec.split == "test"
     assert len(dataset.records) == 2
     assert dataset.metadata["source"] == "jsonl"
     assert dataset.records[0].reference == "dog"

@@ -193,7 +193,7 @@ def cache_key_for(
         dataset_name=spec.name,
         hf_id=spec.hf_id or "",
         configuration=spec.hf_subset or "",
-        split=spec.split,
+        split=spec.split or "validation",
         revision=resolved_revision or requested_revision(spec),
         schema_version=schema_version,
     )

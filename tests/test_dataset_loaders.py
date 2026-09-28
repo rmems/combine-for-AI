@@ -323,6 +323,21 @@ def test_normalized_cache_path_uses_full_sha256(tmp_path: Path) -> None:
     assert path.suffix == ".jsonl"
 
 
+def test_omitted_split_uses_catalog_default() -> None:
+    from benchmarks.dataset_support import catalog_entry, resolve_hf_split
+
+    spec = DatasetSpec(name="gsm8k", source="gsm8k")
+    assert spec.split is None
+    assert resolve_hf_split(spec, catalog_entry("gsm8k")) == "test"
+
+
+def test_explicit_validation_split_is_preserved() -> None:
+    from benchmarks.dataset_support import catalog_entry, resolve_hf_split
+
+    spec = DatasetSpec(name="gsm8k", source="gsm8k", split="validation")
+    assert resolve_hf_split(spec, catalog_entry("gsm8k")) == "validation"
+
+
 def test_catalog_hub_ids_match_case_families() -> None:
     assert CATALOG["piqa"].hf_id == "ybisk/piqa"
     assert CATALOG["wikitext2"].hf_id == "Salesforce/wikitext"
@@ -374,7 +389,7 @@ def test_canonical_answer_index_rejects_invalid_values(answer_index) -> None:
         canonical_record({"prompt": "Question", "answer_index": answer_index})
 
 
-@pytest.mark.parametrize("choices", ["ab", b"ab", 1])
+@pytest.mark.parametrize("choices", ["ab", b"ab", 1, {"0": "first", "1": "second"}])
 def test_canonical_choices_rejects_non_lists(choices) -> None:
     from benchmarks.dataset_jsonl import canonical_record
 

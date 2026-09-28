@@ -18,7 +18,7 @@ class TaskKind(Enum):
 @dataclass(frozen=True)
 class DatasetSpec:
     name: str
-    split: str = "validation"
+    split: str | None = None
     source: str = "jsonl"
     path: str | None = None
     hf_id: str | None = None
@@ -44,7 +44,7 @@ class DatasetSpec:
     def from_dict(raw: dict) -> "DatasetSpec":
         return DatasetSpec(
             name=raw["name"],
-            split=raw.get("split", "validation"),
+            split=raw.get("split"),
             source=raw.get("source", "jsonl"),
             path=raw.get("path"),
             hf_id=raw.get("hf_id"),

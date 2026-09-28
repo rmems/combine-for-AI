@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Literal, Never
 
@@ -161,11 +162,20 @@ def mapper_for(name: str) -> Callable[[dict[str, Any]], DatasetRecord | None]:
 
 
 def resolve_hf_split(spec: DatasetSpec, entry: CatalogEntry | None) -> str:
-    if entry is None:
+    if spec.split is not None:
         return spec.split
-    if spec.split == "validation" and entry.default_split != "validation":
+    if entry is not None:
         return entry.default_split
-    return spec.split
+    return "validation"
+
+
+def apply_resolved_split(
+    spec: DatasetSpec, entry: CatalogEntry | None
+) -> DatasetSpec:
+    split = resolve_hf_split(spec, entry)
+    if spec.split == split:
+        return spec
+    return replace(spec, split=split)
 
 
 def resolve_jsonl_path(
@@ -363,6 +373,7 @@ class JsonlDatasetLoader:
         if not spec.path:
             raise ValueError(f"jsonl dataset '{spec.name}' is missing a path")
         entry = catalog_entry(spec.name)
+        spec = apply_resolved_split(spec, entry)
         records, metadata = load_with_fallback(
             spec,
             entry=entry,
@@ -377,6 +388,7 @@ class JsonlDatasetLoader:
 class HuggingFaceDatasetLoader:
     def load(self, spec: DatasetSpec) -> LoadedDataset:
         entry = catalog_entry(spec.name)
+        spec = apply_resolved_split(spec, entry)
         records, metadata = load_with_fallback(
             spec,
             entry=entry,
@@ -398,6 +410,7 @@ class MappedDatasetLoader:
         if spec.max_samples is not None and spec.max_samples < 0:
             raise ValueError("max_samples must be non-negative")
         entry = catalog_entry(self.catalog_name)
+        spec = apply_resolved_split(spec, entry)
         records, metadata = load_with_fallback(
             spec,
             entry=entry,

@@ -22,7 +22,7 @@ def _parse_answer_index(answer_index: Any) -> int:
 
 
 def _parse_choices(choices: Any) -> list[str]:
-    if isinstance(choices, (str, bytes)) or not isinstance(choices, Iterable):
+    if not isinstance(choices, list):
         raise ValueError("choices must be a list of strings")
     return [str(choice) for choice in choices]
 
