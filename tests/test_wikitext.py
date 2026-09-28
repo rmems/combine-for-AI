@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from benchmarks.dataset_support import CATALOG, sample_path_for
+from benchmarks.dataset_support import CATALOG, HuggingFaceDatasetLoader, sample_path_for
 from benchmarks.datasets import DatasetSpec
 from benchmarks.wikitext.loader import (
     WikiText2Loader,
@@ -42,10 +42,10 @@ def test_wikitext_hf_rows_skip_empty(tmp_path, monkeypatch) -> None:
         "benchmarks.dataset_mapped_cache.hf_load_dataset",
         lambda *args, **kwargs: rows,
     )
-    dataset = WikiText2Loader().load(
+    dataset = HuggingFaceDatasetLoader().load(
         DatasetSpec(
             name="wikitext2",
-            source="wikitext2",
+            source="hf",
             hf_id="wikitext",
             hf_subset="wikitext-2-raw-v1",
             cache_dir=str(tmp_path),

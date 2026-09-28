@@ -23,10 +23,17 @@ def map_piqa_row(row: dict[str, Any]) -> DatasetRecord | None:
     label = row.get("label")
     if goal is None or sol1 is None or sol2 is None or label is None:
         return None
+    if isinstance(label, str) and not label.strip():
+        return None
+    answer_index = int(label)
+    if answer_index == -1:
+        return None
+    if answer_index not in (0, 1):
+        raise ValueError("PIQA label must be 0 or 1")
     return DatasetRecord(
         prompt=str(goal).strip(),
         choices=[str(sol1), str(sol2)],
-        answer_index=int(label),
+        answer_index=answer_index,
     )
 
 

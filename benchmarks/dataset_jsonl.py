@@ -20,7 +20,12 @@ def canonical_record(row: dict[str, Any]) -> DatasetRecord | None:
         choices = [str(choice) for choice in choices]
     answer_index = row.get("answer_index")
     if answer_index is not None:
-        answer_index = int(answer_index)
+        if isinstance(answer_index, bool) or not isinstance(answer_index, (int, str)):
+            raise ValueError("answer_index must be an integer or integer string")
+        try:
+            answer_index = int(answer_index)
+        except ValueError as exc:
+            raise ValueError("answer_index must be an integer or integer string") from exc
     reference = row.get("reference")
     return DatasetRecord(
         prompt=str(row["prompt"]),

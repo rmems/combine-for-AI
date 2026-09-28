@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from benchmarks.dataset_support import CATALOG, sample_path_for
+from benchmarks.dataset_support import CATALOG, HuggingFaceDatasetLoader, sample_path_for
 from benchmarks.datasets import DatasetRecord, DatasetSpec, default_dataset_registry
 from benchmarks.lambada.loader import (
     LAMBADALoader,
@@ -41,10 +41,12 @@ def test_lambada_loader_from_sample_jsonl() -> None:
     assert dataset.records[0].reference == "dog"
 
 
-def test_lambada_loader_offline_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_lambada_loader_offline_fallback(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("benchmarks.dataset_mapped_cache.hf_load_dataset", None)
-    loader = LAMBADALoader()
-    dataset = loader.load(DatasetSpec(name="lambada", source="lambada"))
+    loader = HuggingFaceDatasetLoader()
+    dataset = loader.load(
+        DatasetSpec(name="lambada", source="hf", cache_dir=str(tmp_path))
+    )
 
     assert len(dataset.records) == 2
     assert dataset.metadata["source"] == "jsonl"

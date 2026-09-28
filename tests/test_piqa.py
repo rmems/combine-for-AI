@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from benchmarks.dataset_support import CATALOG, sample_path_for
 from benchmarks.datasets import DatasetSpec
 from benchmarks.piqa.loader import PIQALoader, map_piqa_row, score_piqa
@@ -37,3 +39,21 @@ def test_map_piqa_native_fields() -> None:
 
 def test_score_piqa() -> None:
     assert score_piqa([0, 1], [0, 0]) == 0.5
+
+
+@pytest.mark.parametrize("label", [None, "", "  ", -1, "-1", " -1 "])
+def test_piqa_skips_unlabeled_rows(label) -> None:
+    assert map_piqa_row({"goal": "Question", "sol1": "a", "sol2": "b", "label": label}) is None
+
+
+@pytest.mark.parametrize("label", [0, 1, "0", "1"])
+def test_piqa_converts_valid_labels(label) -> None:
+    record = map_piqa_row({"goal": "Question", "sol1": "a", "sol2": "b", "label": label})
+    assert record is not None
+    assert record.answer_index == int(label)
+
+
+@pytest.mark.parametrize("label", [-2, 2])
+def test_piqa_rejects_out_of_range_labels(label) -> None:
+    with pytest.raises(ValueError, match="label"):
+        map_piqa_row({"goal": "Question", "sol1": "a", "sol2": "b", "label": label})

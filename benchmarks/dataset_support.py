@@ -241,7 +241,7 @@ def load_with_fallback(
             map_row,
             missing_message=f"jsonl dataset '{spec.name}' is missing a path",
         )
-    if prefer == "auto" and spec.path:
+    if prefer == "auto" and jsonl_path is not None:
         return _load_jsonl_or_raise(
             jsonl_path,
             spec,
@@ -267,8 +267,9 @@ def load_with_fallback(
             map_row=map_row,
             max_samples=spec.max_samples,
             cache_dir=cache_dir,
+            revision=spec.revision,
         )
-    except (ImportError, OSError, FileNotFoundError, ConnectionError, RuntimeError) as exc:
+    except (ImportError, OSError, RuntimeError, ValueError, TypeError) as exc:
         return _fallback_jsonl(spec, jsonl_path, map_row, exc)
 
 

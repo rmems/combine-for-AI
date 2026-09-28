@@ -306,3 +306,175 @@ def test_catalog_task_kinds_cover_all_named_datasets() -> None:
     }
     for name, task in expected.items():
         assert CATALOG[name].task is task
+
+
+@pytest.mark.parametrize("answer_index", [True, False, 1.2, 1.0, [], {}, "", "1.2", "bad"])
+def test_canonical_answer_index_rejects_invalid_values(answer_index) -> None:
+    from benchmarks.dataset_jsonl import canonical_record
+
+    with pytest.raises(ValueError, match="answer_index"):
+        canonical_record({"prompt": "Question", "answer_index": answer_index})
+
+
+@pytest.mark.parametrize("answer_index", [0, 1, "0", " 1 "])
+def test_canonical_answer_index_accepts_integers(answer_index) -> None:
+    from benchmarks.dataset_jsonl import canonical_record
+
+    record = canonical_record({"prompt": "Question", "answer_index": answer_index})
+    assert record is not None
+    assert record.answer_index == int(answer_index)
+
+
+@pytest.mark.parametrize("name", NAMED_DATASETS)
+def test_named_loader_uses_catalog_sample_without_explicit_path(name, monkeypatch) -> None:
+    def unexpected_hf(*args, **kwargs):
+        raise AssertionError("HF must not be called when a catalog sample is available")
+
+    monkeypatch.setattr("benchmarks.dataset_support.records_from_hf", unexpected_hf)
+    loaded = default_dataset_registry().loader_for(name).load(
+        DatasetSpec(name=name, source=name)
+    )
+    assert loaded.records
+    assert loaded.metadata["source"] == "jsonl"
+    assert "fallback" not in loaded.metadata
+
+
+@pytest.mark.parametrize("label", ["bad", []])
+def test_hf_mapping_errors_fall_back_to_jsonl(tmp_path, monkeypatch, label) -> None:
+    monkeypatch.setattr(
+        "benchmarks.dataset_mapped_cache.hf_load_dataset",
+        lambda *args, **kwargs: [{"goal": "Question", "sol1": "a", "sol2": "b", "label": label}],
+    )
+    loaded = HuggingFaceDatasetLoader().load(
+        DatasetSpec(name="piqa", source="hf", cache_dir=str(tmp_path))
+    )
+    assert loaded.metadata["source"] == "jsonl"
+    assert loaded.metadata["fallback"] is True
+    assert loaded.metadata["hf_error"]
+    assert loaded.records
+
+
+@pytest.mark.parametrize("subset", [None, "subset"])
+def test_hf_revisions_are_requested_and_cached_separately(tmp_path, monkeypatch, subset) -> None:
+    calls = []
+
+    def fake_load(hf_id, *args, **kwargs):
+        calls.append((hf_id, args, kwargs["revision"]))
+        return [{"prompt": kwargs["revision"]}]
+
+    monkeypatch.setattr("benchmarks.dataset_mapped_cache.hf_load_dataset", fake_load)
+    loader = HuggingFaceDatasetLoader()
+    results = []
+    for revision in ("first", "second", "first"):
+        results.append(loader.load(DatasetSpec(
+            name="custom", source="hf", hf_id="org/data", hf_subset=subset,
+            revision=revision, cache_dir=str(tmp_path),
+        )))
+    assert calls == [("org/data", (subset,) if subset else (), rev) for rev in ("first", "second")]
+    assert [result.records[0].prompt for result in results] == ["first", "second", "first"]
+    assert results[-1].metadata["source"] == "hf_cache"
+    assert results[0].metadata["cached_path"] != results[1].metadata["cached_path"]
+    path = Path(results[0].metadata["cached_path"])
+    sidecar = cache_sidecar_path(path)
+    payload = json.loads(sidecar.read_text())
+    assert payload["revision"] == "first"
+    payload["revision"] = "second"
+    sidecar.write_text(json.dumps(payload))
+    from benchmarks.dataset_mapped_cache import read_validated_cache
+
+    assert read_validated_cache(
+        path, name="custom", hf_id="org/data", subset=subset,
+        split="validation", revision="first", max_samples=None,
+    ) is None
+
+
+@pytest.mark.parametrize("damage", ["missing_jsonl", "missing_sidecar", "truncated", "bad_row", "bad_sidecar", "invalid_utf8"])
+def test_damaged_mapped_cache_refetches(tmp_path, monkeypatch, damage) -> None:
+    calls = []
+
+    def fake_load(*args, **kwargs):
+        calls.append(1)
+        return [{"prompt": "One"}, {"prompt": "Two"}]
+
+    monkeypatch.setattr("benchmarks.dataset_mapped_cache.hf_load_dataset", fake_load)
+    spec = DatasetSpec(name="custom", source="hf", hf_id="org/data", cache_dir=str(tmp_path))
+    loader = HuggingFaceDatasetLoader()
+    first = loader.load(spec)
+    path = Path(first.metadata["cached_path"])
+    sidecar = cache_sidecar_path(path)
+    if damage == "missing_jsonl":
+        path.unlink()
+    elif damage == "missing_sidecar":
+        sidecar.unlink()
+    elif damage == "truncated":
+        path.write_text('{"prompt": "One"}\n{"prompt":')
+    elif damage == "bad_row":
+        path.write_text('{"prompt": "One", "choices": 1}\n')
+    elif damage == "invalid_utf8":
+        path.write_bytes(b'\xff')
+    else:
+        sidecar.write_text('{')
+    second = loader.load(spec)
+    assert len(calls) == 2
+    assert second.records == first.records
+    assert second.metadata["source"] == "hf"
+
+
+def test_cache_files_disappearing_during_read_are_misses(tmp_path, monkeypatch) -> None:
+    from benchmarks import dataset_mapped_cache as cache
+
+    path = tmp_path / "records.jsonl"
+    cache._persist_mapped_cache(
+        path, [DatasetRecord(prompt="One")], name="custom", hf_id="org/data",
+        hf_subset=None, split="validation",
+    )
+    original_read = Path.read_text
+
+    def disappearing_sidecar(self, *args, **kwargs):
+        self.unlink()
+        return original_read(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", disappearing_sidecar)
+    assert cache.read_validated_cache(
+        path, name="custom", hf_id="org/data", subset=None,
+        split="validation", max_samples=None,
+    ) is None
+
+
+@pytest.mark.parametrize("fail_publish", [None, 0, 1])
+def test_mapped_cache_publishes_complete_files_and_sidecar_last(tmp_path, monkeypatch, fail_publish) -> None:
+    from benchmarks import dataset_mapped_cache as cache
+
+    path = tmp_path / "records.jsonl"
+    sidecar = cache.cache_sidecar_path(path)
+    published = []
+    replace = cache.os.replace
+
+    def observe_replace(source, destination):
+        assert source.parent == destination.parent == tmp_path
+        assert source != destination
+        json.loads(source.read_text())
+        if fail_publish == len(published):
+            raise OSError("interrupted publication")
+        published.append(destination)
+        replace(source, destination)
+
+    monkeypatch.setattr(cache.os, "replace", observe_replace)
+
+    def persist():
+        cache._persist_mapped_cache(
+            path, [DatasetRecord(prompt="One")], name="custom", hf_id="org/data",
+            hf_subset=None, split="validation",
+        )
+
+    if fail_publish is None:
+        persist()
+        assert published == [path, sidecar]
+    else:
+        with pytest.raises(OSError, match="interrupted publication"):
+            persist()
+        assert cache.read_validated_cache(
+            path, name="custom", hf_id="org/data", subset=None,
+            split="validation", max_samples=None,
+        ) is None
+    assert set(tmp_path.iterdir()) == set(published)
