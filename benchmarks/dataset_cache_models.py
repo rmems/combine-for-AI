@@ -261,6 +261,9 @@ def provenance_from_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
         "dataset_source_uri": metadata.get("source_uri") or metadata.get("path"),
         "dataset_resolved_revision": metadata.get("resolved_revision"),
         "dataset_cache_key": metadata.get("cache_key_digest"),
+        "dataset_load_source": metadata.get("source"),
+        "dataset_fallback": bool(metadata.get("fallback")),
+        "dataset_hf_error": metadata.get("hf_error"),
     }
 
 

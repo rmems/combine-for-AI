@@ -7,6 +7,15 @@ from enum import Enum
 from typing import Protocol
 
 
+def _require_non_negative_int(name: str, value: int | None) -> None:
+    if value is None:
+        return
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(f"{name} must be an integer")
+    if value < 0:
+        raise ValueError(f"{name} must be non-negative")
+
+
 class TaskKind(Enum):
     CLOZE = "cloze"
     MULTIPLE_CHOICE = "multiple_choice"
@@ -32,13 +41,8 @@ class DatasetSpec:
     upstream_license: str | None = None
 
     def __post_init__(self) -> None:
-        if self.max_samples is not None:
-            if not isinstance(self.max_samples, int) or isinstance(
-                self.max_samples, bool
-            ):
-                raise ValueError("max_samples must be an integer")
-            if self.max_samples < 0:
-                raise ValueError("max_samples must be non-negative")
+        _require_non_negative_int("max_samples", self.max_samples)
+        _require_non_negative_int("min_samples", self.min_samples)
 
     def generic_split(self) -> str:
         """Split used by generic jsonl/hf sources when none was requested."""

@@ -4,7 +4,7 @@ import json
 from collections.abc import Iterable
 from dataclasses import replace
 from pathlib import Path
-from typing import Protocol
+from typing import Protocol, cast
 
 from benchmarks.arc_easy.loader import ARCEasyLoader
 from benchmarks.dataset_cache import (
@@ -14,6 +14,7 @@ from benchmarks.dataset_cache import (
     jsonl_provenance_metadata,
     normalize_license,
 )
+from benchmarks.dataset_support import validate_loaded
 from benchmarks.dataset_types import (
     DatasetRecord,
     DatasetSpec,
@@ -36,7 +37,7 @@ def _with_generic_split(spec: DatasetSpec) -> DatasetSpec:
     split = spec.generic_split()
     if spec.split == split:
         return spec
-    return replace(spec, split=split)
+    return cast(DatasetSpec, replace(spec, split=split))
 
 
 class JsonlDatasetLoader:
@@ -46,11 +47,13 @@ class JsonlDatasetLoader:
         spec = _with_generic_split(spec)
         path = _jsonl_path(spec)
         records = _read_jsonl_records(path, spec.max_samples)
-        return LoadedDataset(
+        loaded = LoadedDataset(
             spec=spec,
             records=records,
             metadata=jsonl_provenance_metadata(spec, path, len(records)),
         )
+        validate_loaded(loaded, None)
+        return loaded
 
 
 def _jsonl_path(spec: DatasetSpec) -> Path:
@@ -124,7 +127,9 @@ class HuggingFaceDatasetLoader:
             metadata["dataset_upstream_license"] = normalize_license(
                 spec.upstream_license
             )
-        return LoadedDataset(spec=spec, records=records, metadata=metadata)
+        loaded = LoadedDataset(spec=spec, records=records, metadata=metadata)
+        validate_loaded(loaded, None)
+        return loaded
 
 
 class DatasetRegistry:

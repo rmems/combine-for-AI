@@ -42,6 +42,18 @@ def test_map_arc_easy_native_letter_key() -> None:
     assert record.answer_index == 0
 
 
+def test_map_arc_easy_missing_labels_are_one_based() -> None:
+    record = map_arc_easy_row(
+        {
+            "question": "Which object is best for measuring temperature?",
+            "choices": {"text": ["thermometer", "ruler"]},
+            "answerKey": "1",
+        }
+    )
+    assert record is not None
+    assert record.answer_index == 0
+
+
 def test_map_arc_easy_numeric_key() -> None:
     record = map_arc_easy_row(
         {

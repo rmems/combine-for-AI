@@ -61,6 +61,9 @@ class DatasetResult:
     dataset_source_uri: str | None = None
     dataset_resolved_revision: str | None = None
     dataset_cache_key: str | None = None
+    dataset_load_source: str | None = None
+    dataset_fallback: bool = False
+    dataset_hf_error: str | None = None
 
 
 def load_config(path: Path) -> dict[str, Any]:
@@ -187,6 +190,8 @@ def _apply_dataset_cache_defaults(
         updates["cache_root"] = _resolve_cache_root(spec.cache_root, base_path)
     elif cache_cfg.get("root"):
         updates["cache_root"] = _resolve_cache_root(str(cache_cfg["root"]), base_path)
+    if spec.cache_dir:
+        updates["cache_dir"] = _resolve_cache_root(spec.cache_dir, base_path)
     if updates:
         return replace(spec, **updates)
     return spec
@@ -372,6 +377,9 @@ def _evaluate_dataset(
         dataset_source_uri=provenance["dataset_source_uri"],
         dataset_resolved_revision=provenance["dataset_resolved_revision"],
         dataset_cache_key=provenance["dataset_cache_key"],
+        dataset_load_source=provenance["dataset_load_source"],
+        dataset_fallback=provenance["dataset_fallback"],
+        dataset_hf_error=provenance["dataset_hf_error"],
     )
 
 
@@ -406,6 +414,9 @@ def write_reports(
             "dataset_source_uri": result.dataset_source_uri,
             "dataset_resolved_revision": result.dataset_resolved_revision,
             "dataset_cache_key": result.dataset_cache_key,
+            "dataset_load_source": result.dataset_load_source,
+            "dataset_fallback": result.dataset_fallback,
+            "dataset_hf_error": result.dataset_hf_error,
             "quantization": result.quantization.name,
             "precision": result.quantization.precision,
             "quantization_format": result.quantization.format,

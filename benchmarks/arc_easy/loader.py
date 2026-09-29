@@ -36,7 +36,7 @@ def _as_str_list(value: Any) -> list[str]:
 
 def _aligned_arc_labels(texts: list[str], labels: list[str]) -> list[str]:
     if not labels:
-        return [str(index) for index in range(len(texts))]
+        return [str(index) for index in range(1, len(texts) + 1)]
     if len(labels) != len(texts):
         raise ValueError(
             f"ARC choices.label length {len(labels)} != choices.text length "

@@ -4,7 +4,7 @@ import os
 from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
-from typing import Any, Literal, Never
+from typing import Any, Literal, Never, cast
 
 from benchmarks.dataset_cache_models import (
     DEFAULT_CACHE_MODE,
@@ -175,7 +175,7 @@ def apply_resolved_split(
     split = resolve_hf_split(spec, entry)
     if spec.split == split:
         return spec
-    return replace(spec, split=split)
+    return cast(DatasetSpec, replace(spec, split=split))
 
 
 def resolve_jsonl_path(

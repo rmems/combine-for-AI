@@ -323,6 +323,54 @@ def test_normalized_cache_path_uses_full_sha256(tmp_path: Path) -> None:
     assert path.suffix == ".jsonl"
 
 
+def test_min_samples_rejects_bool() -> None:
+    with pytest.raises(ValueError, match="min_samples must be an integer"):
+        DatasetSpec(name="demo", min_samples=True)  # type: ignore[arg-type]
+
+
+def test_generic_jsonl_enforces_min_samples(tmp_path: Path) -> None:
+    from benchmarks.datasets import JsonlDatasetLoader as GenericJsonl
+
+    path = tmp_path / "row.jsonl"
+    path.write_text(json.dumps({"prompt": "q", "reference": "a"}) + "\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="at least 2"):
+        GenericJsonl().load(
+            DatasetSpec(
+                name="demo", source="jsonl", path=str(path), min_samples=2
+            )
+        )
+
+
+def test_relative_cache_dir_resolves_against_config_dir(tmp_path: Path) -> None:
+    config_dir = tmp_path / "configs"
+    config_dir.mkdir()
+    loaded = load_datasets(
+        {
+            "datasets": [
+                {
+                    "name": "lambada",
+                    "source": "lambada",
+                    "path": str(sample_path_for(CATALOG["lambada"])),
+                    "cache_dir": "cache",
+                }
+            ]
+        },
+        config_dir,
+    )
+    assert loaded[0].spec.cache_dir == str((config_dir / "cache").resolve())
+
+
+def test_fallback_metadata_reaches_provenance() -> None:
+    from benchmarks.dataset_cache_models import provenance_from_metadata
+
+    provenance = provenance_from_metadata(
+        {"source": "jsonl", "fallback": True, "hf_error": "offline", "path": "/tmp/x"}
+    )
+    assert provenance["dataset_load_source"] == "jsonl"
+    assert provenance["dataset_fallback"] is True
+    assert provenance["dataset_hf_error"] == "offline"
+
+
 def test_generic_jsonl_omitted_split_defaults_to_validation(tmp_path: Path) -> None:
     from benchmarks.datasets import JsonlDatasetLoader as GenericJsonl
 
