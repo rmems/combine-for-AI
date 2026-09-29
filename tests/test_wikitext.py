@@ -1,12 +1,37 @@
 from __future__ import annotations
 
+import math
+
 from benchmarks.dataset_support import CATALOG, HuggingFaceDatasetLoader, sample_path_for
 from benchmarks.datasets import DatasetSpec
+from benchmarks.metrics import MetricsAccumulator
+from benchmarks.models import Prediction
 from benchmarks.wikitext.loader import (
     WikiText2Loader,
     concatenate_documents,
     map_wikitext_row,
 )
+from benchmarks.wikitext.scoring import language_model_prediction
+
+
+def test_wikitext_runner_scores_token_nll_not_exact_match() -> None:
+    record = map_wikitext_row({"text": "The capital city of France is Paris."})
+    assert record is not None
+    assert record.reference is None
+    prediction = language_model_prediction(record)
+    assert prediction.token_logprobs is not None
+    assert len(prediction.token_logprobs) == len(record.prompt.split())
+    missed = Prediction(output="not the document", logprob=-9.0, tokens=1)
+    exact = MetricsAccumulator()
+    exact.add(record, missed)
+    assert exact.summary(1.0, 1.0).accuracy == 0.0
+    scored = MetricsAccumulator()
+    scored.add(record, prediction, language_modeling=True)
+    assert prediction.token_logprobs is not None
+    expected = math.exp(-sum(prediction.token_logprobs) / len(prediction.token_logprobs))
+    summary = scored.summary(1.0, 1.0)
+    assert summary.accuracy == 0.0
+    assert summary.perplexity == expected
 
 
 def test_wikitext_sample_jsonl() -> None:

@@ -138,6 +138,7 @@ class Prediction:
     output: str | int
     logprob: float
     tokens: int
+    token_logprobs: tuple[float, ...] | None = None
 
 
 class ModelAdapter(Protocol):

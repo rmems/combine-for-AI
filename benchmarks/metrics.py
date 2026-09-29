@@ -53,9 +53,12 @@ class MetricsSummary:
 class MetricsAccumulator:
     def __init__(self) -> None:
         self._total = 0
+        self._scored = 0
         self._correct = 0
         self._logprob_sum = 0.0
         self._token_count = 0
+        self._lm_logprob_sum = 0.0
+        self._lm_tokens = 0
         self._choice_counts: Counter[str] = Counter()
         self._saaq: SaaqMetricOverlay | None = None
 
@@ -64,8 +67,18 @@ class MetricsAccumulator:
 
         self._saaq = overlay
 
-    def add(self, record: DatasetRecord, prediction: Prediction) -> None:
+    def add(
+        self,
+        record: DatasetRecord,
+        prediction: Prediction,
+        *,
+        language_modeling: bool = False,
+    ) -> None:
         self._total += 1
+        if language_modeling:
+            self._add_language_model(prediction)
+            return
+        self._scored += 1
         self._logprob_sum += prediction.logprob
         self._token_count += prediction.tokens
 
@@ -81,10 +94,20 @@ class MetricsAccumulator:
             else:
                 self._choice_counts["incorrect"] += 1
 
+    def _add_language_model(self, prediction: Prediction) -> None:
+        values = prediction.token_logprobs or ()
+        self._lm_logprob_sum += sum(values)
+        self._lm_tokens += len(values)
+        self._token_count += len(values)
+
     def summary(self, total_time_s: float, vram_gb: float) -> MetricsSummary:
-        accuracy = self._correct / self._total if self._total else 0.0
-        avg_logprob = self._logprob_sum / self._total if self._total else 0.0
-        perplexity = math.exp(-avg_logprob) if self._total else 0.0
+        accuracy = self._correct / self._scored if self._scored else 0.0
+        if self._lm_tokens:
+            perplexity = math.exp(-self._lm_logprob_sum / self._lm_tokens)
+        elif self._scored:
+            perplexity = math.exp(-self._logprob_sum / self._scored)
+        else:
+            perplexity = 0.0
         throughput = self._token_count / total_time_s if total_time_s else 0.0
         latency_ms = (total_time_s / self._total * 1000.0) if self._total else 0.0
 

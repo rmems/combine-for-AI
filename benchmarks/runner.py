@@ -12,6 +12,8 @@ from pathlib import Path
 from typing import Any
 
 from benchmarks.dataset_cache import provenance_from_metadata
+from benchmarks.dataset_support import catalog_entry
+from benchmarks.dataset_types import TaskKind
 from benchmarks.datasets import DatasetSpec, LoadedDataset, default_dataset_registry
 from benchmarks.metrics import MetricsAccumulator, MetricsSummary
 from benchmarks.models import (
@@ -21,6 +23,7 @@ from benchmarks.models import (
     default_quantization_registry,
     scoped_seed,
 )
+from benchmarks.wikitext.scoring import language_model_prediction
 from benchmarks.reporting import metrics_to_row, telemetry_to_row, write_csv, write_json
 from benchmarks.telemetry import (
     CorinthCanalArtifact,
@@ -355,12 +358,18 @@ def _evaluate_dataset(
     accumulator = MetricsAccumulator()
     if ctx.corinth is not None:
         accumulator.apply_saaq(ctx.corinth.to_saaq_overlay())
+    entry = catalog_entry(dataset.spec.name)
+    language_modeling = entry is not None and entry.task is TaskKind.LANGUAGE_MODELING
     for index, record in enumerate(dataset.records):
         # Deterministic benchmark RNG — not crypto (Bandit B311).
         record_rng = random.Random(  # nosec B311
             scoped_seed(scoped, str(index), profile.name)
         )
-        accumulator.add(record, adapter.predict(record, record_rng))
+        if language_modeling:
+            prediction = language_model_prediction(record)
+        else:
+            prediction = adapter.predict(record, record_rng)
+        accumulator.add(record, prediction, language_modeling=language_modeling)
     total_time = (
         accumulator.token_count / profile.speed_tps if profile.speed_tps else 0.0
     )
