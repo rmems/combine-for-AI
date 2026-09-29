@@ -35,7 +35,6 @@ def map_lambada_row(row: dict[str, Any]) -> DatasetRecord | None:
     if len(parts) != 2:
         return None
     prefix, target = parts
-    target = target.strip(".,!?;:\"'")
     if not target:
         return None
     return DatasetRecord(prompt=f"{prefix} ", reference=target)

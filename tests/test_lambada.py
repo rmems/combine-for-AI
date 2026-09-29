@@ -68,6 +68,13 @@ def test_lambada_loader_with_max_samples() -> None:
     assert len(dataset.records) == 1
 
 
+def test_map_lambada_keeps_trailing_punctuation() -> None:
+    record = map_lambada_row({"text": "She walked home."})
+    assert record is not None
+    assert record.prompt == "She walked "
+    assert record.reference == "home."
+
+
 def test_map_lambada_native_text() -> None:
     record = map_lambada_row({"text": "She walked to the store"})
     assert record is not None
