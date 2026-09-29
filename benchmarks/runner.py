@@ -348,6 +348,14 @@ def _evaluate_matrix_cell(
     return results
 
 
+def _language_modeling(dataset: LoadedDataset) -> bool:
+    task = dataset.metadata.get("task")
+    if task == TaskKind.LANGUAGE_MODELING.value:
+        return True
+    entry = catalog_entry(dataset.spec.source) or catalog_entry(dataset.spec.name)
+    return entry is not None and entry.task is TaskKind.LANGUAGE_MODELING
+
+
 def _evaluate_dataset(
     adapter: Any,
     profile: QuantizationProfile,
@@ -358,8 +366,7 @@ def _evaluate_dataset(
     accumulator = MetricsAccumulator()
     if ctx.corinth is not None:
         accumulator.apply_saaq(ctx.corinth.to_saaq_overlay())
-    entry = catalog_entry(dataset.spec.name)
-    language_modeling = entry is not None and entry.task is TaskKind.LANGUAGE_MODELING
+    language_modeling = _language_modeling(dataset)
     for index, record in enumerate(dataset.records):
         # Deterministic benchmark RNG — not crypto (Bandit B311).
         record_rng = random.Random(  # nosec B311

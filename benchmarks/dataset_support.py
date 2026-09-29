@@ -197,6 +197,14 @@ def resolve_jsonl_path(
     return None
 
 
+def _with_catalog_task(metadata: dict, entry: CatalogEntry | None) -> dict:
+    if entry is None:
+        return metadata
+    stamped = dict(metadata)
+    stamped["task"] = entry.task.value
+    return stamped
+
+
 def _jsonl_metadata(path: Path, *, fallback: str | None = None) -> dict:
     metadata: dict = {"source": "jsonl", "path": str(path)}
     if fallback:
@@ -380,7 +388,11 @@ class JsonlDatasetLoader:
             map_row=mapper_for(spec.name),
             prefer="jsonl",
         )
-        loaded = LoadedDataset(spec=spec, records=records, metadata=metadata)
+        loaded = LoadedDataset(
+            spec=spec,
+            records=records,
+            metadata=_with_catalog_task(metadata, entry),
+        )
         validate_loaded(loaded, entry)
         return loaded
 
@@ -395,7 +407,11 @@ class HuggingFaceDatasetLoader:
             map_row=mapper_for(spec.name),
             prefer="hf",
         )
-        loaded = LoadedDataset(spec=spec, records=records, metadata=metadata)
+        loaded = LoadedDataset(
+            spec=spec,
+            records=records,
+            metadata=_with_catalog_task(metadata, entry),
+        )
         validate_loaded(loaded, entry)
         return loaded
 
@@ -417,7 +433,11 @@ class MappedDatasetLoader:
             map_row=self.map_row,
             prefer="jsonl" if spec.path else "hf",
         )
-        loaded = LoadedDataset(spec=spec, records=records, metadata=metadata)
+        loaded = LoadedDataset(
+            spec=spec,
+            records=records,
+            metadata=_with_catalog_task(metadata, entry),
+        )
         validate_loaded(loaded, entry)
         return loaded
 

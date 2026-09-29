@@ -3,9 +3,10 @@ from __future__ import annotations
 import math
 
 from benchmarks.dataset_support import CATALOG, HuggingFaceDatasetLoader, sample_path_for
-from benchmarks.datasets import DatasetSpec
+from benchmarks.datasets import DatasetSpec, default_dataset_registry
 from benchmarks.metrics import MetricsAccumulator
 from benchmarks.models import MockModelAdapter, ModelSpec, QuantizationProfile
+from benchmarks.runner import _language_modeling
 from benchmarks.wikitext.loader import (
     WikiText2Loader,
     concatenate_documents,
@@ -56,6 +57,18 @@ def test_wikitext_runner_scores_token_nll_not_exact_match() -> None:
     summary = scored.summary(1.0, 1.0)
     assert summary.accuracy == 0.0
     assert summary.perplexity == expected
+
+
+def test_custom_named_wikitext_source_stays_language_modeling() -> None:
+    loaded = default_dataset_registry().loader_for("wikitext2").load(
+        DatasetSpec(
+            name="wiki_eval",
+            source="wikitext2",
+            path=str(sample_path_for(CATALOG["wikitext2"])),
+        )
+    )
+    assert loaded.metadata["task"] == "language_modeling"
+    assert _language_modeling(loaded) is True
 
 
 def test_wikitext_sample_jsonl() -> None:
