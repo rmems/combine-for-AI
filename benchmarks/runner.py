@@ -366,7 +366,7 @@ def _evaluate_dataset(
             scoped_seed(scoped, str(index), profile.name)
         )
         if language_modeling:
-            prediction = language_model_prediction(record)
+            prediction = language_model_prediction(adapter, record)
         else:
             prediction = adapter.predict(record, record_rng)
         accumulator.add(record, prediction, language_modeling=language_modeling)

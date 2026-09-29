@@ -5,7 +5,7 @@ import math
 from benchmarks.dataset_support import CATALOG, HuggingFaceDatasetLoader, sample_path_for
 from benchmarks.datasets import DatasetSpec
 from benchmarks.metrics import MetricsAccumulator
-from benchmarks.models import Prediction
+from benchmarks.models import MockModelAdapter, ModelSpec, QuantizationProfile
 from benchmarks.wikitext.loader import (
     WikiText2Loader,
     concatenate_documents,
@@ -18,17 +18,41 @@ def test_wikitext_runner_scores_token_nll_not_exact_match() -> None:
     record = map_wikitext_row({"text": "The capital city of France is Paris."})
     assert record is not None
     assert record.reference is None
-    prediction = language_model_prediction(record)
-    assert prediction.token_logprobs is not None
-    assert len(prediction.token_logprobs) == len(record.prompt.split())
-    missed = Prediction(output="not the document", logprob=-9.0, tokens=1)
-    exact = MetricsAccumulator()
-    exact.add(record, missed)
-    assert exact.summary(1.0, 1.0).accuracy == 0.0
+    fp16 = QuantizationProfile(
+        name="fp16",
+        precision="fp16",
+        format="baseline",
+        bits=16,
+        supported=True,
+        speed_tps=1000.0,
+        vram_gb=14.0,
+        notes="",
+    )
+    awq = QuantizationProfile(
+        name="awq",
+        precision="int4",
+        format="awq",
+        bits=4,
+        supported=True,
+        speed_tps=2000.0,
+        vram_gb=6.0,
+        notes="",
+    )
+    fp16_prediction = language_model_prediction(
+        MockModelAdapter(ModelSpec(backend="mock", name="toy"), fp16), record
+    )
+    awq_prediction = language_model_prediction(
+        MockModelAdapter(ModelSpec(backend="mock", name="toy"), awq), record
+    )
+    assert fp16_prediction.token_logprobs is not None
+    assert awq_prediction.token_logprobs is not None
+    assert len(fp16_prediction.token_logprobs) == len(record.prompt.split())
+    assert fp16_prediction.token_logprobs != awq_prediction.token_logprobs
     scored = MetricsAccumulator()
-    scored.add(record, prediction, language_modeling=True)
-    assert prediction.token_logprobs is not None
-    expected = math.exp(-sum(prediction.token_logprobs) / len(prediction.token_logprobs))
+    scored.add(record, fp16_prediction, language_modeling=True)
+    expected = math.exp(
+        -sum(fp16_prediction.token_logprobs) / len(fp16_prediction.token_logprobs)
+    )
     summary = scored.summary(1.0, 1.0)
     assert summary.accuracy == 0.0
     assert summary.perplexity == expected

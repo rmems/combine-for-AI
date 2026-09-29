@@ -145,6 +145,10 @@ class ModelAdapter(Protocol):
     def predict(self, record: DatasetRecord, rng: random.Random) -> Prediction:
         ...
 
+    def token_logprobs(self, text: str) -> tuple[float, ...]:
+        """Natural-log token likelihoods for ``text`` under this model."""
+        ...
+
     @property
     def profile(self) -> QuantizationProfile:
         ...
@@ -184,6 +188,13 @@ class MockModelAdapter:
             token_budget += len(str(output).split())
 
         return Prediction(output=output, logprob=logprob, tokens=max(token_budget, 1))
+
+    def token_logprobs(self, text: str) -> tuple[float, ...]:
+        pieces = text.split()
+        if not pieces:
+            return ()
+        value = math.log(self._correct_rate()) - (len(self._spec.name) % 7) * 0.01
+        return tuple(value for _ in pieces)
 
     def _correct_rate(self) -> float:
         rates = {
