@@ -14,7 +14,8 @@ from benchmarks.dataset_cache import (
     jsonl_provenance_metadata,
     normalize_license,
 )
-from benchmarks.dataset_support import validate_loaded
+from benchmarks.dataset_support import catalog_entry
+from benchmarks.dataset_validation import validate_loaded
 from benchmarks.dataset_types import (
     DatasetRecord,
     DatasetSpec,
@@ -128,7 +129,7 @@ class HuggingFaceDatasetLoader:
                 spec.upstream_license
             )
         loaded = LoadedDataset(spec=spec, records=records, metadata=metadata)
-        validate_loaded(loaded, None)
+        validate_loaded(loaded, catalog_entry(spec.name))
         return loaded
 
 

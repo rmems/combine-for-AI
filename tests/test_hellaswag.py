@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import math
+
+import pytest
+
 from benchmarks.dataset_support import CATALOG, sample_path_for
 from benchmarks.datasets import DatasetSpec
 from benchmarks.hellaswag.loader import (
@@ -57,5 +61,16 @@ def test_map_hellaswag_ctx_a_b() -> None:
 
 
 def test_score_hellaswag() -> None:
-    assert score_hellaswag([0, 1, 0], [0, 1, 1]) == 2 / 3
-    assert score_hellaswag([], []) == 0.0
+    assert math.isclose(score_hellaswag([0, 1, 0], [0, 1, 1]), 2 / 3)
+    assert math.isclose(score_hellaswag([], []), 0.0)
+
+
+def test_hellaswag_test_split_is_not_scored(monkeypatch) -> None:
+    def boom(*args, **kwargs):
+        raise AssertionError("unlabeled test split must not be fetched")
+
+    monkeypatch.setattr("benchmarks.dataset_mapped_cache.hf_load_dataset", boom)
+    with pytest.raises(ValueError, match="validation"):
+        HellaSwagLoader().load(
+            DatasetSpec(name="hellaswag", source="hellaswag", split="test")
+        )

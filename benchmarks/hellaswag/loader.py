@@ -5,10 +5,12 @@ from typing import Any
 from benchmarks.dataset_jsonl import canonical_record
 from benchmarks.dataset_support import (
     MappedDatasetLoader,
-    multiple_choice_accuracy,
+    apply_resolved_split,
+    catalog_entry,
     register_row_mapper,
 )
-from benchmarks.dataset_types import DatasetRecord
+from benchmarks.dataset_types import DatasetRecord, DatasetSpec, LoadedDataset
+from benchmarks.dataset_validation import multiple_choice_accuracy
 
 
 def _hellaswag_prompt(row: dict[str, Any]) -> str:
@@ -45,12 +47,25 @@ register_row_mapper("hellaswag", map_hellaswag_row)
 
 
 class HellaSwagLoader(MappedDatasetLoader):
-    """Load HellaSwag (lm-eval ``hellaswag``) as a multiple-choice task."""
+    """Load HellaSwag (lm-eval ``hellaswag``) as a multiple-choice task.
+
+    The public ``test`` split has no gold labels, so scoring uses ``validation``.
+    """
 
     catalog_name = "hellaswag"
 
     def map_row(self, row: dict[str, Any]) -> DatasetRecord | None:
         return map_hellaswag_row(row)
+
+    def load(self, spec: DatasetSpec) -> LoadedDataset:
+        entry = catalog_entry(self.catalog_name)
+        resolved = apply_resolved_split(spec, entry)
+        if resolved.split == "test":
+            raise ValueError(
+                "HellaSwag split 'test' is unlabeled and cannot be scored; "
+                "use split 'validation'"
+            )
+        return super().load(spec)
 
 
 def score_hellaswag(

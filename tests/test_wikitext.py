@@ -55,8 +55,8 @@ def test_wikitext_runner_scores_token_nll_not_exact_match() -> None:
         -sum(fp16_prediction.token_logprobs) / len(fp16_prediction.token_logprobs)
     )
     summary = scored.summary(1.0, 1.0)
-    assert summary.accuracy == 0.0
-    assert summary.perplexity == expected
+    assert math.isclose(summary.accuracy, 0.0)
+    assert math.isclose(summary.perplexity, expected)
 
 
 def test_custom_named_wikitext_source_stays_language_modeling() -> None:
@@ -121,3 +121,54 @@ def test_wikitext_hf_rows_preserve_blank_separators(tmp_path, monkeypatch) -> No
     assert concatenate_documents(dataset.records) == (
         "In 1969, the Apollo 11 mission landed on the moon.   "
     )
+
+
+def test_mock_token_logprobs_depend_on_document_text() -> None:
+    profile = QuantizationProfile(
+        name="fp16",
+        precision="fp16",
+        format="baseline",
+        bits=16,
+        supported=True,
+        speed_tps=1000.0,
+        vram_gb=14.0,
+        notes="",
+    )
+    adapter = MockModelAdapter(ModelSpec(backend="mock", name="toy"), profile)
+    paris = adapter.token_logprobs("Paris is in France")
+    other = adapter.token_logprobs("a completely different document")
+    assert len(paris) == len(other) == 4
+    assert paris != other
+    assert all(value < 0 for value in paris)
+    assert all(value < 0 for value in other)
+
+
+def test_generic_hf_wikitext_keeps_blank_separators(tmp_path, monkeypatch) -> None:
+    from benchmarks.datasets import HuggingFaceDatasetLoader as GenericHfLoader
+
+    rows = [{"text": "first"}, {"text": ""}, {"text": "second"}]
+
+    def load_dataset(path, name=None, *, split, revision):
+        assert path == "Salesforce/wikitext"
+        assert name == "wikitext-2-raw-v1"
+        assert revision == "c" * 40
+        return rows
+
+    monkeypatch.setattr("benchmarks.dataset_cache_hf.hf_load_dataset", load_dataset)
+    monkeypatch.setattr(
+        "benchmarks.dataset_cache_hf.resolve_huggingface_revision",
+        lambda spec: "c" * 40,
+    )
+    loaded = GenericHfLoader().load(
+        DatasetSpec(
+            name="wikitext2",
+            source="hf",
+            hf_id="Salesforce/wikitext",
+            hf_subset="wikitext-2-raw-v1",
+            cache_root=str(tmp_path),
+            cache_mode="online",
+        )
+    )
+    assert [record.prompt for record in loaded.records] == ["first", "", "second"]
+    assert loaded.metadata["resolved_revision"] == "c" * 40
+    assert loaded.metadata["source_uri"].endswith("@" + "c" * 40)

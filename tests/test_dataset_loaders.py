@@ -6,15 +6,18 @@ from pathlib import Path
 import pytest
 
 from benchmarks.dataset_mapped_cache import (
+    MappedHfSpec,
     cache_sidecar_path,
     normalized_cache_path,
 )
+from benchmarks.dataset_cache_models import provenance_from_metadata
 from benchmarks.dataset_support import (
     CATALOG,
     HuggingFaceDatasetLoader,
     JsonlDatasetLoader,
     ROW_MAPPERS,
     _register_entry,
+    load_with_fallback,
     mapper_for,
     sample_path_for,
     validate_loaded,
@@ -318,7 +321,15 @@ def test_alias_cannot_collide_with_another_primary_name() -> None:
 
 
 def test_normalized_cache_path_uses_full_sha256(tmp_path: Path) -> None:
-    path = normalized_cache_path(tmp_path, "lambada", "org/name", None, "test")
+    path = normalized_cache_path(
+        MappedHfSpec(
+            name="lambada",
+            hf_id="org/name",
+            hf_subset=None,
+            split="test",
+            cache_dir=tmp_path,
+        )
+    )
     assert len(path.stem) == 64
     assert path.suffix == ".jsonl"
 
@@ -609,8 +620,15 @@ def test_hf_revisions_are_requested_and_cached_separately(tmp_path, monkeypatch,
     from benchmarks.dataset_mapped_cache import read_validated_cache
 
     assert read_validated_cache(
-        path, name="custom", hf_id="org/data", subset=subset,
-        split="validation", revision="first", max_samples=None,
+        path,
+        MappedHfSpec(
+            name="custom",
+            hf_id="org/data",
+            hf_subset=subset,
+            split="validation",
+            revision="first",
+            cache_dir=tmp_path,
+        ),
     ) is None
 
 
@@ -650,10 +668,14 @@ def test_cache_files_disappearing_during_read_are_misses(tmp_path, monkeypatch) 
     from benchmarks import dataset_mapped_cache as cache
 
     path = tmp_path / "records.jsonl"
-    cache._persist_mapped_cache(
-        path, [DatasetRecord(prompt="One")], name="custom", hf_id="org/data",
-        hf_subset=None, split="validation",
+    spec = MappedHfSpec(
+        name="custom",
+        hf_id="org/data",
+        hf_subset=None,
+        split="validation",
+        cache_dir=tmp_path,
     )
+    cache._persist_mapped_cache(path, [DatasetRecord(prompt="One")], spec, None)
     original_read = Path.read_text
 
     def disappearing_sidecar(self, *args, **kwargs):
@@ -661,10 +683,7 @@ def test_cache_files_disappearing_during_read_are_misses(tmp_path, monkeypatch) 
         return original_read(self, *args, **kwargs)
 
     monkeypatch.setattr(Path, "read_text", disappearing_sidecar)
-    assert cache.read_validated_cache(
-        path, name="custom", hf_id="org/data", subset=None,
-        split="validation", max_samples=None,
-    ) is None
+    assert cache.read_validated_cache(path, spec) is None
 
 
 @pytest.mark.parametrize("fail_publish", [None, 0, 1])
@@ -687,10 +706,17 @@ def test_mapped_cache_publishes_complete_files_and_sidecar_last(tmp_path, monkey
 
     monkeypatch.setattr(cache.os, "replace", observe_replace)
 
+    spec = MappedHfSpec(
+        name="custom",
+        hf_id="org/data",
+        hf_subset=None,
+        split="validation",
+        cache_dir=tmp_path,
+    )
+
     def persist():
         cache._persist_mapped_cache(
-            path, [DatasetRecord(prompt="One")], name="custom", hf_id="org/data",
-            hf_subset=None, split="validation",
+            path, [DatasetRecord(prompt="One")], spec, None
         )
 
     if fail_publish is None:
@@ -699,8 +725,151 @@ def test_mapped_cache_publishes_complete_files_and_sidecar_last(tmp_path, monkey
     else:
         with pytest.raises(OSError, match="interrupted publication"):
             persist()
-        assert cache.read_validated_cache(
-            path, name="custom", hf_id="org/data", subset=None,
-            split="validation", max_samples=None,
-        ) is None
+        assert cache.read_validated_cache(path, spec) is None
     assert set(tmp_path.iterdir()) == set(published)
+
+
+def test_auto_prefer_uses_resolved_sample_without_hub(monkeypatch) -> None:
+    def boom(*args, **kwargs):
+        raise AssertionError("auto must not fetch when a local file resolves")
+
+    monkeypatch.setattr("benchmarks.dataset_mapped_cache.hf_load_dataset", boom)
+    records, metadata = load_with_fallback(
+        DatasetSpec(name="piqa", source="piqa"),
+        entry=CATALOG["piqa"],
+        map_row=mapper_for("piqa"),
+        prefer="auto",
+    )
+    assert records
+    assert metadata["source"] == "jsonl"
+    assert metadata.get("fallback") is None
+
+
+def test_movable_revision_refetches_when_hub_commit_changes(tmp_path, monkeypatch) -> None:
+    commits = iter(("a" * 40, "b" * 40))
+
+    def remote(_spec):
+        return next(commits)
+
+    def fake_load(hf_id, *args, **kwargs):
+        return [{"prompt": kwargs["revision"]}]
+
+    monkeypatch.setattr("benchmarks.dataset_mapped_cache._remote_commit", remote)
+    monkeypatch.setattr("benchmarks.dataset_mapped_cache.hf_load_dataset", fake_load)
+    loader = HuggingFaceDatasetLoader()
+    spec = DatasetSpec(
+        name="custom",
+        source="hf",
+        hf_id="org/data",
+        revision="main",
+        cache_dir=str(tmp_path),
+    )
+    first = loader.load(spec)
+    second = loader.load(spec)
+    assert first.records[0].prompt == "a" * 40
+    assert first.metadata["source"] == "hf"
+    assert first.metadata["resolved_revision"] == "a" * 40
+    assert first.metadata["source_uri"] == f"hf://datasets/org/data@{'a' * 40}"
+    provenance = provenance_from_metadata(first.metadata)
+    assert provenance["dataset_source_uri"] == first.metadata["source_uri"]
+    assert provenance["dataset_resolved_revision"] == "a" * 40
+    assert second.metadata["source"] == "hf"
+    assert second.records[0].prompt == "b" * 40
+    assert second.metadata["resolved_revision"] == "b" * 40
+
+
+def test_offline_movable_cache_does_not_resolve_hub(tmp_path, monkeypatch) -> None:
+    def remote(_spec):
+        raise AssertionError("offline mode must not resolve a Hub revision")
+
+    def fake_load(*args, **kwargs):
+        return [{"prompt": "cached"}]
+
+    monkeypatch.setattr("benchmarks.dataset_mapped_cache.hf_load_dataset", fake_load)
+    spec = DatasetSpec(
+        name="custom",
+        source="hf",
+        hf_id="org/data",
+        revision="main",
+        cache_dir=str(tmp_path),
+    )
+    HuggingFaceDatasetLoader().load(spec)
+    monkeypatch.setattr("benchmarks.dataset_mapped_cache._remote_commit", remote)
+    monkeypatch.setattr(
+        "benchmarks.dataset_mapped_cache.hf_load_dataset",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("refetch")),
+    )
+    loaded = HuggingFaceDatasetLoader().load(
+        DatasetSpec(
+            name="custom",
+            source="hf",
+            hf_id="org/data",
+            revision="main",
+            cache_mode="offline",
+            cache_dir=str(tmp_path),
+        )
+    )
+    assert loaded.metadata["source"] == "hf_cache"
+    assert loaded.records[0].prompt == "cached"
+
+
+def test_failed_refresh_keeps_valid_cache(tmp_path, monkeypatch) -> None:
+    from benchmarks import dataset_mapped_cache as cache
+
+    spec = MappedHfSpec(
+        name="piqa",
+        hf_id="ybisk/piqa",
+        hf_subset=None,
+        split="validation",
+        revision="main",
+        cache_dir=tmp_path,
+    )
+    path = cache.normalized_cache_path(spec)
+    cache._persist_mapped_cache(
+        path,
+        [DatasetRecord(prompt="keep", choices=["a", "b"], answer_index=0)],
+        spec,
+        "a" * 40,
+    )
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("hub down")
+
+    monkeypatch.setattr(cache, "hf_load_dataset", boom)
+    monkeypatch.setattr(cache, "_remote_commit", lambda _spec: "b" * 40)
+    with pytest.raises(RuntimeError, match="hub down"):
+        cache.records_from_hf(spec, lambda row: DatasetRecord(prompt="new"))
+    cached = cache.read_validated_cache(path, spec)
+    assert cached is not None
+    assert cached[0].prompt == "keep"
+
+
+def test_lambada_mapper_version_ignores_stale_cache(tmp_path, monkeypatch) -> None:
+    from benchmarks.dataset_mapped_cache import records_from_hf
+    from benchmarks.lambada.loader import LAMBADALoader, map_lambada_row
+
+    calls = {"n": 0}
+
+    def fake_load(*args, **kwargs):
+        calls["n"] += 1
+        return [{"text": "She walked home."}]
+
+    monkeypatch.setattr("benchmarks.dataset_mapped_cache.hf_load_dataset", fake_load)
+    entry = CATALOG["lambada"]
+    records_from_hf(
+        MappedHfSpec(
+            name="lambada",
+            hf_id=entry.hf_id,
+            hf_subset=entry.hf_subset,
+            split=entry.default_split,
+            cache_dir=tmp_path,
+            mapper_version="1",
+        ),
+        map_lambada_row,
+    )
+    loaded = LAMBADALoader().load(
+        DatasetSpec(name="lambada", source="lambada", cache_dir=str(tmp_path))
+    )
+    assert calls["n"] == 2
+    assert loaded.records[0].reference == "home."
+    assert loaded.metadata["source"] == "hf"

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+
 import pytest
 
 from benchmarks.arc_easy.loader import (
@@ -95,4 +97,4 @@ def test_map_arc_easy_rejects_mismatched_choice_lengths() -> None:
 
 
 def test_score_arc_easy() -> None:
-    assert score_arc_easy([0, 2], [0, 2]) == 1.0
+    assert math.isclose(score_arc_easy([0, 2], [0, 2]), 1.0)

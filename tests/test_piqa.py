@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+
 import pytest
 
 from benchmarks.dataset_support import CATALOG, sample_path_for
@@ -38,7 +40,7 @@ def test_map_piqa_native_fields() -> None:
 
 
 def test_score_piqa() -> None:
-    assert score_piqa([0, 1], [0, 0]) == 0.5
+    assert math.isclose(score_piqa([0, 1], [0, 0]), 0.5)
 
 
 @pytest.mark.parametrize("label", [None, "", "  ", -1, "-1", " -1 "])

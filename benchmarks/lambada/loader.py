@@ -24,20 +24,24 @@ def map_lambada_row(row: dict[str, Any]) -> DatasetRecord | None:
     record = canonical_record(row)
     if record is not None:
         return record
+    return _lambada_from_text(row.get("text"))
 
-    text = row.get("text")
-    if text is None:
-        return None
-    stripped = str(text).strip()
-    if not stripped:
-        return None
-    parts = stripped.rsplit(None, 1)
-    if len(parts) != 2:
+
+def _lambada_from_text(text: Any) -> DatasetRecord | None:
+    parts = _cloze_parts(text)
+    if parts is None:
         return None
     prefix, target = parts
-    if not target:
-        return None
     return DatasetRecord(prompt=f"{prefix} ", reference=target)
+
+
+def _cloze_parts(text: Any) -> tuple[str, str] | None:
+    if text is None:
+        return None
+    parts = str(text).strip().rsplit(None, 1)
+    if len(parts) != 2 or not parts[1]:
+        return None
+    return parts[0], parts[1]
 
 
 register_row_mapper("lambada", map_lambada_row)

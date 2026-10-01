@@ -69,10 +69,7 @@ def iter_jsonl_payloads(path: Path) -> Iterable[tuple[int, dict[str, Any]]]:
             line = line.strip()
             if not line:
                 continue
-            try:
-                payload = json_loads_object(line, line_number, path)
-            except ValueError:
-                raise
+            payload = json_loads_object(line, line_number, path)
             yield line_number, payload
 
 

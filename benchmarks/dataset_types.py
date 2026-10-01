@@ -118,13 +118,24 @@ class CatalogEntry:
     default_split: str = "validation"
     min_samples: int = 1
     aliases: tuple[str, ...] = ()
+    mapper_version: str = "1"
 
 
-def validate_dataset_record(record: DatasetRecord) -> None:
-    _require_text_field(record.prompt, "prompt")
+def validate_dataset_record(
+    record: DatasetRecord, *, allow_empty_prompt: bool = False
+) -> None:
+    _require_prompt(record.prompt, allow_empty=allow_empty_prompt)
     if record.reference is not None and not isinstance(record.reference, str):
         raise ValueError("dataset record reference must be a string")
     _require_choice_fields(record)
+
+
+def _require_prompt(value: object, *, allow_empty: bool) -> None:
+    if allow_empty:
+        if not isinstance(value, str):
+            raise ValueError("dataset record prompt must be a string")
+        return
+    _require_text_field(value, "prompt")
 
 
 def _require_text_field(value: object, field: str) -> None:

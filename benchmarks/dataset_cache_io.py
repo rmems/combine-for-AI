@@ -204,7 +204,9 @@ def records_if_valid(
     _require_schema(entry, key, manifest)
     _require_cache_key(entry, key, manifest)
     _require_license_scope(entry, manifest)
-    records = decode_records(payload, entry)
+    records = decode_records(
+        payload, entry, allow_empty_prompt=manifest.allow_empty_prompt
+    )
     if len(records) != manifest.row_count:
         raise CacheValidationError(
             f"row count mismatch at {entry / RECORDS_FILENAME}",
@@ -261,7 +263,9 @@ def _require_license_scope(entry: Path, manifest: CacheManifest) -> None:
         )
 
 
-def decode_records(payload: bytes, entry: Path) -> list[DatasetRecord]:
+def decode_records(
+    payload: bytes, entry: Path, *, allow_empty_prompt: bool = False
+) -> list[DatasetRecord]:
     records: list[DatasetRecord] = []
     try:
         text = payload.decode("utf-8")
@@ -276,7 +280,9 @@ def decode_records(payload: bytes, entry: Path) -> list[DatasetRecord]:
             continue
         try:
             raw = json.loads(line)
-            records.append(deserialize_record(raw))
+            records.append(
+                deserialize_record(raw, allow_empty_prompt=allow_empty_prompt)
+            )
         except (json.JSONDecodeError, KeyError, TypeError) as exc:
             raise CacheValidationError(
                 f"invalid record on line {line_number} in {entry / RECORDS_FILENAME}",

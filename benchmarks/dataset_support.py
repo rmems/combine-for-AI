@@ -4,7 +4,7 @@ import os
 from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
-from typing import Any, Literal, Never, cast
+from typing import Any, Literal, cast
 
 from benchmarks.dataset_cache_models import (
     DEFAULT_CACHE_MODE,
@@ -20,6 +20,7 @@ from benchmarks.dataset_types import (
     LoadedDataset,
     TaskKind,
 )
+from benchmarks.dataset_validation import validate_loaded
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 ROW_MAPPERS: dict[str, Callable[[dict[str, Any]], DatasetRecord | None]] = {}
@@ -65,6 +66,8 @@ _register_entry(
         hf_id="EleutherAI/lambada_openai",
         sample_relpath="configs/datasets/lambada.sample.jsonl",
         default_split="test",
+        # v2 keeps the gold last token verbatim, including punctuation.
+        mapper_version="2",
     )
 )
 _register_entry(
@@ -181,14 +184,25 @@ def apply_resolved_split(
 def resolve_jsonl_path(
     spec: DatasetSpec, entry: CatalogEntry | None
 ) -> Path | None:
-    if spec.path:
-        path = Path(spec.path)
-        if path.exists():
-            return path
-        repo_path = REPO_ROOT / spec.path
-        if repo_path.exists():
-            return repo_path
+    explicit = _explicit_jsonl_path(spec)
+    if explicit is not None:
+        return explicit
+    return _sample_jsonl_path(entry)
+
+
+def _explicit_jsonl_path(spec: DatasetSpec) -> Path | None:
+    if not spec.path:
+        return None
+    path = Path(spec.path)
+    if path.exists():
         return path
+    repo_path = REPO_ROOT / spec.path
+    if repo_path.exists():
+        return repo_path
+    return path
+
+
+def _sample_jsonl_path(entry: CatalogEntry | None) -> Path | None:
     if entry is None:
         return None
     sample = sample_path_for(entry)
@@ -226,11 +240,16 @@ def _load_jsonl_or_raise(
     return records, _jsonl_metadata(path)
 
 
+HfLoadError = (
+    ImportError | OSError | RuntimeError | ValueError | TypeError
+)
+
+
 def _fallback_jsonl(
     spec: DatasetSpec,
     jsonl_path: Path | None,
     map_row: Callable[[dict[str, Any]], DatasetRecord | None],
-    exc: Exception,
+    exc: HfLoadError,
 ) -> tuple[list[DatasetRecord], dict]:
     fallback_path = jsonl_path if jsonl_path is not None and jsonl_path.exists() else None
     if fallback_path is None:
@@ -254,14 +273,18 @@ def _hf_request(
     return hf_id, hf_subset, resolve_hf_split(spec, entry), resolve_cache_dir(spec)
 
 
-def load_with_fallback(
+def _mapper_version(entry: CatalogEntry | None) -> str:
+    if entry is None:
+        return "1"
+    return entry.mapper_version
+
+
+def _selected_jsonl(
     spec: DatasetSpec,
-    *,
-    entry: CatalogEntry | None,
+    jsonl_path: Path | None,
     map_row: Callable[[dict[str, Any]], DatasetRecord | None],
     prefer: Prefer,
-) -> tuple[list[DatasetRecord], dict]:
-    jsonl_path = resolve_jsonl_path(spec, entry)
+) -> tuple[list[DatasetRecord], dict] | None:
     if prefer == "jsonl":
         return _load_jsonl_or_raise(
             jsonl_path,
@@ -269,14 +292,24 @@ def load_with_fallback(
             map_row,
             missing_message=f"jsonl dataset '{spec.name}' is missing a path",
         )
-    if prefer == "auto" and spec.path:
+    # Automatic selection stops at a resolved local file, including a catalog
+    # sample. Named loaders pass prefer="hf" unless an explicit path is set.
+    if prefer == "auto" and jsonl_path is not None:
         return _load_jsonl_or_raise(
             jsonl_path,
             spec,
             map_row,
             missing_message=f"dataset file not found: {spec.path}",
         )
+    return None
 
+
+def _load_hf_or_fallback(
+    spec: DatasetSpec,
+    entry: CatalogEntry | None,
+    jsonl_path: Path | None,
+    map_row: Callable[[dict[str, Any]], DatasetRecord | None],
+) -> tuple[list[DatasetRecord], dict]:
     hf_id, hf_subset, split, cache_dir = _hf_request(spec, entry)
     if not hf_id:
         return _fallback_jsonl(
@@ -285,7 +318,6 @@ def load_with_fallback(
             map_row,
             ValueError(f"hf dataset '{spec.name}' is missing hf_id"),
         )
-
     try:
         return records_from_hf(
             MappedHfSpec(
@@ -296,6 +328,7 @@ def load_with_fallback(
                 revision=spec.revision,
                 max_samples=spec.max_samples,
                 cache_dir=cache_dir,
+                mapper_version=_mapper_version(entry),
             ),
             map_row,
             allow_fetch=_may_fetch_hf(spec),
@@ -304,76 +337,18 @@ def load_with_fallback(
         return _fallback_jsonl(spec, jsonl_path, map_row, exc)
 
 
-def _assert_never(value: Never) -> Never:
-    raise ValueError(f"unhandled task kind: {value!r}")
-
-
-def _validate_multiple_choice(record: DatasetRecord, label: str) -> None:
-    if not record.choices or len(record.choices) < 2:
-        raise ValueError(f"{label} must include at least two choices")
-    if any(not str(choice).strip() for choice in record.choices):
-        raise ValueError(f"{label} has an empty choice")
-    if record.answer_index is None:
-        raise ValueError(f"{label} is missing answer_index")
-    if not 0 <= record.answer_index < len(record.choices):
-        raise ValueError(
-            f"{label} answer_index {record.answer_index} is out of range "
-            f"for {len(record.choices)} choices"
-        )
-
-
-def _validate_reference(record: DatasetRecord, label: str) -> None:
-    if record.reference is None or not str(record.reference).strip():
-        raise ValueError(f"{label} is missing a reference")
-
-
-def _validate_generic(record: DatasetRecord, label: str) -> None:
-    if record.choices is not None or record.answer_index is not None:
-        _validate_multiple_choice(record, label)
-
-
-def _validate_record(record: DatasetRecord, task: TaskKind, label: str) -> None:
-    if task is not TaskKind.LANGUAGE_MODELING and not str(record.prompt).strip():
-        raise ValueError(f"{label} has an empty prompt")
-    match task:
-        case TaskKind.CLOZE | TaskKind.MATH:
-            _validate_reference(record, label)
-        case TaskKind.MULTIPLE_CHOICE:
-            _validate_multiple_choice(record, label)
-        case TaskKind.LANGUAGE_MODELING:
-            return
-        case TaskKind.GENERIC:
-            _validate_generic(record, label)
-        case _:
-            _assert_never(task)
-
-
-def _required_min_samples(spec: DatasetSpec, entry: CatalogEntry | None) -> int:
-    if spec.max_samples == 0:
-        return 0
-    if spec.min_samples is not None:
-        return spec.min_samples
-    if entry is None:
-        return 0
-    return entry.min_samples
-
-
-def validate_loaded(loaded: LoadedDataset, entry: CatalogEntry | None) -> None:
-    spec = loaded.spec
-    if spec.max_samples is not None and spec.max_samples < 0:
-        raise ValueError("max_samples must be non-negative")
-    if spec.min_samples is not None and spec.min_samples < 0:
-        raise ValueError("min_samples must be non-negative")
-
-    task = entry.task if entry is not None else TaskKind.GENERIC
-    min_samples = _required_min_samples(spec, entry)
-    if len(loaded.records) < min_samples:
-        raise ValueError(
-            f"{spec.name}: expected at least {min_samples} samples, "
-            f"got {len(loaded.records)}"
-        )
-    for index, record in enumerate(loaded.records):
-        _validate_record(record, task, f"{spec.name} record {index}")
+def load_with_fallback(
+    spec: DatasetSpec,
+    *,
+    entry: CatalogEntry | None,
+    map_row: Callable[[dict[str, Any]], DatasetRecord | None],
+    prefer: Prefer,
+) -> tuple[list[DatasetRecord], dict]:
+    jsonl_path = resolve_jsonl_path(spec, entry)
+    selected = _selected_jsonl(spec, jsonl_path, map_row, prefer)
+    if selected is not None:
+        return selected
+    return _load_hf_or_fallback(spec, entry, jsonl_path, map_row)
 
 
 class JsonlDatasetLoader:
@@ -440,17 +415,3 @@ class MappedDatasetLoader:
         )
         validate_loaded(loaded, entry)
         return loaded
-
-
-def multiple_choice_accuracy(
-    predictions: list[int], answer_indices: list[int]
-) -> float:
-    if len(predictions) != len(answer_indices):
-        raise ValueError("predictions and answer_indices must have the same length")
-    if not predictions:
-        return 0.0
-    correct = sum(
-        int(pred == answer)
-        for pred, answer in zip(predictions, answer_indices, strict=True)
-    )
-    return correct / len(predictions)

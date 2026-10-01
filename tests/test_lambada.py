@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from dataclasses import replace
 
 import pytest
@@ -95,7 +96,7 @@ def test_calculate_cloze_accuracy() -> None:
 
 
 def test_calculate_cloze_accuracy_empty() -> None:
-    assert calculate_cloze_accuracy([], []) == 0.0
+    assert math.isclose(calculate_cloze_accuracy([], []), 0.0)
 
 
 def test_calculate_cloze_accuracy_mismatch() -> None:

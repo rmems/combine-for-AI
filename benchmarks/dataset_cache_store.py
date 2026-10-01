@@ -135,7 +135,9 @@ class DatasetCache:
         fetch: DatasetFetchFn,
     ) -> CacheLoad:
         fetched = fetch(spec)
-        payload = encode_records(fetched.records)
+        payload = encode_records(
+            fetched.records, allow_empty_prompt=fetched.allow_empty_prompt
+        )
         checksum = checksum_bytes(payload)
         if existing is not None and _fetched_matches_manifest(existing.manifest, fetched, checksum):
             return existing
@@ -315,6 +317,7 @@ def _manifest_for_store(key: CacheKey, fetched: FetchResult, checksum: str) -> C
         upstream_license=normalize_license(fetched.upstream_license),
         license_scope=LICENSE_SCOPE_DATASET_SOURCE,
         loader_schema_version=key.schema_version,
+        allow_empty_prompt=fetched.allow_empty_prompt,
     )
 
 
