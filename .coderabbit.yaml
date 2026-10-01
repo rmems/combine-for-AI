@@ -1,0 +1,34 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+# Draft CodeRabbit config for rmems/combine-for-AI (generated locally, not pushed).
+language: en-US
+reviews:
+  profile: chill
+  request_changes_workflow: false
+  fail_commit_status: false
+  auto_review:
+    enabled: true
+    drafts: false
+  path_filters:
+  - '!reports/**'
+  path_instructions:
+  - path: '**/*.py'
+    instructions: 'Python >=3.14 (`.python-version` 3.14; ruff target-version py314). CI gate: `uv sync --frozen`, `uv run ruff check .`, `uv run pytest -q`, `uv run python scripts/run_smoke_benchmark.py`. Keep code compatible with the declared Python floor. 3.14-only syntax and stdlib are allowed; do not suggest backports for older Pythons.'
+  - path: configs/**
+    instructions: Benchmark and dataset configs consumed by the smoke/eval workflows; flag key or schema changes that are not covered by tests.
+  - path: .github/workflows/**
+    instructions: GitHub Actions workflows. Keep `permissions:` least-privilege and job commands in sync with the local gates documented in the repo.
+  tools:
+    ruff:
+      enabled: true
+    actionlint:
+      enabled: true
+    yamllint:
+      enabled: true
+    markdownlint:
+      enabled: true
+    pylint:
+      enabled: false
+    flake8:
+      enabled: false
+    biome:
+      enabled: false
