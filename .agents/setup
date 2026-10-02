@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# Amp orb setup for combine-for-AI.
+#
+# Amp runs this from the repository root when it builds a project orb snapshot
+# (Debian 12, CPU only: orbs have no GPU). It must finish within 20 minutes and
+# be safe to run more than once. See https://ampcode.com/docs/orbs/customizing
+#
+# Installs only what this repo's CI and manifests need:
+#   - uv + Python 3.14 (.python-version)
+#   - uv sync --frozen
+#
+# It ends with a dependency fetch/prebuild, not a test run.
+set -euo pipefail
+
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
+
+# --- Python (uv) ---
+export PATH="$HOME/.local/bin:$PATH"
+if ! command -v uv >/dev/null 2>&1; then
+  curl -LsSf https://astral.sh/uv/install.sh | sh
+fi
+# .python-version is 3.14; requires-python >=3.14.
+uv python install 3.14
+uv sync --frozen
+
+echo "Amp orb setup for combine-for-AI finished."
