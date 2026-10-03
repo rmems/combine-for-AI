@@ -31,7 +31,7 @@ from benchmarks.dataset_cache import (
     parse_cache_mode,
     requested_revision,
 )
-from benchmarks.dataset_cache_io import open_dir_nofollow
+from benchmarks.dataset_cache_io import open_dir_nofollow, parse_manifest
 from benchmarks.dataset_types import validate_dataset_record
 from benchmarks.datasets import DatasetRecord, DatasetSpec, HuggingFaceDatasetLoader, JsonlDatasetLoader
 from benchmarks.runner import _apply_dataset_cache_defaults, run_benchmarks
@@ -238,6 +238,14 @@ def test_non_boolean_allow_empty_prompt_is_quarantined_and_refetched(
     assert len(loaded.records) == 2
     quarantine = cache.root / "quarantine"
     assert any(path.name == "manifest.json" for path in quarantine.rglob("manifest.json"))
+
+
+@pytest.mark.parametrize("payload", [b"{", b"\xff"])
+def test_malformed_manifest_payloads_are_cache_validation_errors(
+    tmp_path: Path, payload: bytes
+) -> None:
+    with pytest.raises(CacheValidationError, match="unreadable manifest"):
+        parse_manifest(payload, tmp_path / "entry")
 
 
 def test_repository_license_scope_is_rejected(tmp_path: Path) -> None:

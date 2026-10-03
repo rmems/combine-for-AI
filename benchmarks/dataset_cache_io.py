@@ -186,13 +186,7 @@ def parse_manifest(manifest_bytes: bytes, entry: Path) -> CacheManifest:
     try:
         raw_manifest = json.loads(manifest_bytes.decode("utf-8"))
         return CacheManifest.from_dict(raw_manifest)
-    except (
-        json.JSONDecodeError,
-        KeyError,
-        TypeError,
-        UnicodeDecodeError,
-        ValueError,
-    ) as exc:
+    except (KeyError, TypeError, ValueError) as exc:
         raise CacheValidationError(
             f"unreadable manifest at {entry / MANIFEST_FILENAME}: {exc}",
             path=entry,
