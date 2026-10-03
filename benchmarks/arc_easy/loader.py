@@ -22,8 +22,6 @@ def _arc_answer_index(answer_key: Any, labels: list[str]) -> int:
             return labels.index(as_text)
         if 1 <= number <= len(labels):
             return number - 1
-        if 0 <= number < len(labels):
-            return number
     raise ValueError(f"cannot resolve ARC answerKey {answer_key!r} against {labels}")
 
 

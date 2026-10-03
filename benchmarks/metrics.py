@@ -59,6 +59,7 @@ class MetricsAccumulator:
         self._token_count = 0
         self._lm_logprob_sum = 0.0
         self._lm_tokens = 0
+        self._language_modeling = False
         self._choice_counts: Counter[str] = Counter()
         self._saaq: SaaqMetricOverlay | None = None
 
@@ -76,6 +77,7 @@ class MetricsAccumulator:
     ) -> None:
         self._total += 1
         if language_modeling:
+            self._language_modeling = True
             self._add_language_model(prediction)
             return
         self._scored += 1
@@ -106,6 +108,8 @@ class MetricsAccumulator:
             perplexity = math.exp(-self._lm_logprob_sum / self._lm_tokens)
         elif self._scored:
             perplexity = math.exp(-self._logprob_sum / self._scored)
+        elif self._language_modeling:
+            perplexity = math.nan
         else:
             perplexity = 0.0
         throughput = self._token_count / total_time_s if total_time_s else 0.0

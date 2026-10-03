@@ -41,7 +41,7 @@ def _validate_generic(record: DatasetRecord, label: str) -> None:
         _validate_multiple_choice(record, label)
 
 
-def _validate_record(record: DatasetRecord, task: TaskKind, label: str) -> None:
+def validate_record(record: DatasetRecord, task: TaskKind, label: str) -> None:
     if task is not TaskKind.LANGUAGE_MODELING and not str(record.prompt).strip():
         raise ValueError(f"{label} has an empty prompt")
     match task:
@@ -58,10 +58,10 @@ def _validate_record(record: DatasetRecord, task: TaskKind, label: str) -> None:
 
 
 def _required_min_samples(spec: DatasetSpec, entry: CatalogEntry | None) -> int:
-    if spec.max_samples == 0:
-        return 0
     if spec.min_samples is not None:
         return spec.min_samples
+    if spec.max_samples == 0:
+        return 0
     if entry is None:
         return 0
     return entry.min_samples
@@ -82,7 +82,7 @@ def validate_loaded(loaded: LoadedDataset, entry: CatalogEntry | None) -> None:
             f"got {len(loaded.records)}"
         )
     for index, record in enumerate(loaded.records):
-        _validate_record(record, task, f"{spec.name} record {index}")
+        validate_record(record, task, f"{spec.name} record {index}")
 
 
 def multiple_choice_accuracy(

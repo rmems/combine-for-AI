@@ -2,17 +2,19 @@ from __future__ import annotations
 
 import math
 
+import benchmarks.wikitext.scoring as wikitext_scoring
 from benchmarks.dataset_support import CATALOG, HuggingFaceDatasetLoader, sample_path_for
+from benchmarks.dataset_types import DatasetRecord, LoadedDataset
 from benchmarks.datasets import DatasetSpec, default_dataset_registry
 from benchmarks.metrics import MetricsAccumulator
 from benchmarks.models import MockModelAdapter, ModelSpec, QuantizationProfile
-from benchmarks.runner import _language_modeling
+from benchmarks.runner import _EvalContext, _evaluate_dataset, _language_modeling
 from benchmarks.wikitext.loader import (
     WikiText2Loader,
     concatenate_documents,
     map_wikitext_row,
 )
-from benchmarks.wikitext.scoring import language_model_prediction
+from benchmarks.wikitext.scoring import document_text, language_model_prediction
 
 
 def test_wikitext_runner_scores_token_nll_not_exact_match() -> None:
@@ -57,6 +59,106 @@ def test_wikitext_runner_scores_token_nll_not_exact_match() -> None:
     summary = scored.summary(1.0, 1.0)
     assert math.isclose(summary.accuracy, 0.0)
     assert math.isclose(summary.perplexity, expected)
+
+
+def test_document_text_preserves_existing_whitespace_boundary() -> None:
+    from benchmarks.dataset_types import DatasetRecord
+
+    assert document_text(DatasetRecord(prompt="hello ", reference="world")) == "hello world"
+    assert document_text(DatasetRecord(prompt="hello", reference="world")) == "hello world"
+    assert document_text(DatasetRecord(prompt=" \n")) == " \n"
+
+
+def test_language_model_corpus_is_scored_as_one_continuous_stream() -> None:
+    scorer = getattr(wikitext_scoring, "language_model_corpus_prediction", None)
+    assert scorer is not None
+
+    class RecordingAdapter:
+        def __init__(self) -> None:
+            self.calls = []
+
+        def token_logprobs(self, text):
+            self.calls.append(text)
+            return (-1.0,) if text.strip() else ()
+
+    adapter = RecordingAdapter()
+    prediction = scorer(
+        adapter,
+        [
+            DatasetRecord(prompt="first"),
+            DatasetRecord(prompt=" \n"),
+            DatasetRecord(prompt="second"),
+        ],
+    )
+    assert adapter.calls == ["first \nsecond"]
+    assert prediction.tokens == 1
+
+
+def test_runner_scores_wikitext_as_one_corpus(monkeypatch) -> None:
+    calls = []
+
+    def score_corpus(adapter, records):
+        from benchmarks.models import Prediction
+
+        calls.append(records)
+        return Prediction(
+            output="", logprob=-1.0, tokens=2, token_logprobs=(-1.0, -1.0)
+        )
+
+    monkeypatch.setattr("benchmarks.runner.language_model_corpus_prediction", score_corpus)
+    profile = QuantizationProfile(
+        name="fp16",
+        precision="fp16",
+        format="baseline",
+        bits=16,
+        supported=True,
+        speed_tps=1000.0,
+        vram_gb=14.0,
+        notes="",
+    )
+    adapter = MockModelAdapter(ModelSpec(backend="mock", name="toy"), profile)
+    records = [DatasetRecord(prompt="first"), DatasetRecord(prompt="second")]
+    result = _evaluate_dataset(
+        adapter,
+        profile,
+        LoadedDataset(
+            spec=DatasetSpec(name="wikitext2", source="wikitext2"),
+            records=records,
+            metadata={"task": "language_modeling"},
+        ),
+        _EvalContext(seed=1, telemetry=None),  # type: ignore[arg-type]
+    )
+
+    assert calls == [records]
+    assert result.sample_count == 2
+    assert math.isclose(result.metrics.perplexity, math.e)
+
+
+def test_empty_language_model_prediction_has_undefined_perplexity() -> None:
+    from benchmarks.dataset_types import DatasetRecord
+
+    scored = MetricsAccumulator()
+    scored.add(
+        DatasetRecord(prompt=" \n"),
+        language_model_prediction(
+            MockModelAdapter(
+                ModelSpec(backend="mock", name="toy"),
+                QuantizationProfile(
+                    name="fp16",
+                    precision="fp16",
+                    format="baseline",
+                    bits=16,
+                    supported=True,
+                    speed_tps=1000.0,
+                    vram_gb=14.0,
+                    notes="",
+                ),
+            ),
+            DatasetRecord(prompt=" \n"),
+        ),
+        language_modeling=True,
+    )
+    assert math.isnan(scored.summary(0.0, 1.0).perplexity)
 
 
 def test_custom_named_wikitext_source_stays_language_modeling() -> None:

@@ -25,10 +25,11 @@ from benchmarks.dataset_support import (
 from benchmarks.dataset_types import (
     CatalogEntry,
     DatasetRecord,
+    DatasetSpec,
     LoadedDataset,
     TaskKind,
 )
-from benchmarks.datasets import DatasetSpec, default_dataset_registry
+from benchmarks.datasets import default_dataset_registry
 from benchmarks.runner import load_datasets
 
 
@@ -40,6 +41,13 @@ NAMED_DATASETS = (
     "piqa",
     "arc_easy",
 )
+
+
+@pytest.fixture(autouse=True)
+def _disable_live_hub_revision_probes(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "benchmarks.dataset_mapped_cache._remote_commit", lambda _spec: None
+    )
 
 
 def test_registry_exposes_every_named_dataset() -> None:
@@ -121,6 +129,30 @@ def test_jsonl_missing_prompt(tmp_path: Path) -> None:
         )
 
 
+def test_jsonl_mapper_type_errors_include_line_and_path(tmp_path: Path) -> None:
+    path = tmp_path / "bad-shape.jsonl"
+    path.write_text('{"prompt": "question"}\n', encoding="utf-8")
+
+    def bad_mapper(_row):
+        raise TypeError("bad field shape")
+
+    with pytest.raises(
+        ValueError, match=rf"bad field shape on line 1 in {path}"
+    ):
+        from benchmarks.dataset_jsonl import records_from_jsonl
+
+        records_from_jsonl(path, bad_mapper, None)
+
+
+def test_canonical_choices_reject_non_string_values() -> None:
+    from benchmarks.dataset_jsonl import canonical_record
+
+    with pytest.raises(ValueError, match="list of strings"):
+        canonical_record(
+            {"prompt": "question", "choices": [1, "two"], "answer_index": 0}
+        )
+
+
 def test_validation_rejects_too_few_samples() -> None:
     spec = DatasetSpec(
         name="lambada",
@@ -130,6 +162,16 @@ def test_validation_rejects_too_few_samples() -> None:
     )
     with pytest.raises(ValueError, match="at least 50"):
         default_dataset_registry().loader_for("lambada").load(spec)
+
+
+def test_explicit_min_samples_is_not_bypassed_by_zero_max_samples() -> None:
+    loaded = LoadedDataset(
+        spec=DatasetSpec(name="demo", min_samples=1, max_samples=0),
+        records=[],
+        metadata={},
+    )
+    with pytest.raises(ValueError, match="at least 1"):
+        validate_loaded(loaded, None)
 
 
 def test_validation_rejects_bad_answer_index() -> None:
@@ -184,6 +226,108 @@ def test_hf_cache_avoids_redownload(
     assert second.records == first.records
     sidecar = cache_sidecar_path(Path(first.metadata["cached_path"]))
     assert sidecar.exists()
+
+
+def test_prefer_cache_hit_does_not_probe_hub(tmp_path, monkeypatch) -> None:
+    from benchmarks import dataset_mapped_cache as cache
+
+    spec = MappedHfSpec(
+        name="piqa",
+        hf_id="ybisk/piqa",
+        hf_subset=None,
+        split="validation",
+        revision="main",
+        cache_dir=tmp_path,
+        task=TaskKind.MULTIPLE_CHOICE,
+    )
+    path = cache.normalized_cache_path(spec)
+    cache._persist_mapped_cache(
+        path,
+        [DatasetRecord(prompt="keep", choices=["a", "b"], answer_index=0)],
+        spec,
+        "a" * 40,
+    )
+
+    def unexpected_probe(_spec):
+        raise AssertionError("prefer-cache must use a validated hit before probing")
+
+    monkeypatch.setattr(cache, "_remote_commit", unexpected_probe)
+    records, metadata = cache.records_from_hf(
+        spec,
+        lambda row: DatasetRecord(prompt=str(row)),
+        refresh=False,
+    )
+    assert records[0].prompt == "keep"
+    assert metadata["source"] == "hf_cache"
+
+
+def test_invalid_mapped_rows_are_not_persisted(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(
+        "benchmarks.dataset_mapped_cache.hf_load_dataset",
+        lambda *args, **kwargs: [
+            {"goal": "bad", "sol1": "only", "sol2": "", "label": 0}
+        ],
+    )
+    loaded = default_dataset_registry().loader_for("piqa").load(
+        DatasetSpec(name="piqa", source="piqa", cache_dir=str(tmp_path))
+    )
+    assert loaded.metadata["source"] == "jsonl"
+    normalized = list((tmp_path / "normalized").rglob("*.jsonl"))
+    assert normalized == []
+
+
+def test_invalid_mapped_cache_is_refetched(tmp_path, monkeypatch) -> None:
+    from benchmarks import dataset_mapped_cache as cache
+    from benchmarks.piqa.loader import map_piqa_row
+
+    spec = MappedHfSpec(
+        name="piqa",
+        hf_id="ybisk/piqa",
+        hf_subset=None,
+        split="validation",
+        cache_dir=tmp_path,
+        task=TaskKind.MULTIPLE_CHOICE,
+    )
+    path = cache.normalized_cache_path(spec)
+    cache._persist_mapped_cache(
+        path,
+        [DatasetRecord(prompt="poison", choices=["only"], answer_index=0)],
+        spec,
+        None,
+    )
+    monkeypatch.setattr(
+        cache,
+        "hf_load_dataset",
+        lambda *args, **kwargs: [
+            {"goal": "good", "sol1": "one", "sol2": "two", "label": 1}
+        ],
+    )
+
+    records, metadata = cache.records_from_hf(spec, map_piqa_row)
+
+    assert metadata["source"] == "hf"
+    assert records[0].prompt == "good"
+    assert records[0].answer_index == 1
+
+
+def test_failed_revision_probe_is_treated_as_unknown(monkeypatch) -> None:
+    from benchmarks import dataset_mapped_cache as cache
+
+    monkeypatch.setattr(
+        cache,
+        "resolve_dataset_revision",
+        lambda _spec: (_ for _ in ()).throw(RuntimeError("hub unavailable")),
+    )
+    assert cache._remote_commit(
+        MappedHfSpec(
+            name="custom",
+            hf_id="org/data",
+            hf_subset=None,
+            split="validation",
+            revision="main",
+            cache_dir=Path("cache"),
+        )
+    ) is None
 
 
 def test_hf_cache_rejects_tampered_sidecar(
@@ -382,6 +526,25 @@ def test_fallback_metadata_reaches_provenance() -> None:
     assert provenance["dataset_hf_error"] == "offline"
 
 
+def test_named_jsonl_preserves_full_provenance(tmp_path: Path) -> None:
+    path = tmp_path / "lambada.jsonl"
+    path.write_text(
+        json.dumps({"prompt": "The answer is ", "reference": "yes"}) + "\n",
+        encoding="utf-8",
+    )
+    loaded = default_dataset_registry().loader_for("lambada").load(
+        DatasetSpec(
+            name="lambada",
+            source="lambada",
+            path=str(path),
+            upstream_license="MIT",
+        )
+    )
+    assert loaded.metadata["dataset_upstream_license"] == "MIT"
+    assert loaded.metadata["source_uri"] == path.resolve().as_uri()
+    assert loaded.metadata["row_count"] == 1
+
+
 def test_generic_jsonl_omitted_split_defaults_to_validation(tmp_path: Path) -> None:
     from benchmarks.datasets import JsonlDatasetLoader as GenericJsonl
 
@@ -416,9 +579,10 @@ def test_catalog_hub_ids_match_case_families() -> None:
 def test_runner_named_source_without_path_fetches_hf(tmp_path, monkeypatch) -> None:
     calls = {"n": 0}
 
-    def fake_hf(spec, map_row, *, allow_fetch=True):
+    def fake_hf(spec, map_row, *, allow_fetch=True, refresh=False):
         calls["n"] += 1
         assert allow_fetch is True
+        assert refresh is False
         return [DatasetRecord(prompt="hub ", reference="answer")], {"source": "hf"}
 
     monkeypatch.setattr("benchmarks.dataset_support.records_from_hf", fake_hf)
@@ -762,6 +926,7 @@ def test_movable_revision_refetches_when_hub_commit_changes(tmp_path, monkeypatc
         source="hf",
         hf_id="org/data",
         revision="main",
+        cache_mode="online",
         cache_dir=str(tmp_path),
     )
     first = loader.load(spec)
@@ -837,8 +1002,12 @@ def test_failed_refresh_keeps_valid_cache(tmp_path, monkeypatch) -> None:
 
     monkeypatch.setattr(cache, "hf_load_dataset", boom)
     monkeypatch.setattr(cache, "_remote_commit", lambda _spec: "b" * 40)
-    with pytest.raises(RuntimeError, match="hub down"):
-        cache.records_from_hf(spec, lambda row: DatasetRecord(prompt="new"))
+    records, metadata = cache.records_from_hf(
+        spec, lambda row: DatasetRecord(prompt="new"), refresh=True
+    )
+    assert records[0].prompt == "keep"
+    assert metadata["source"] == "hf_cache"
+    assert metadata["stale"] is True
     cached = cache.read_validated_cache(path, spec)
     assert cached is not None
     assert cached[0].prompt == "keep"

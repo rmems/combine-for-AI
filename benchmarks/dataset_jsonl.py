@@ -24,7 +24,9 @@ def _parse_answer_index(answer_index: Any) -> int:
 def _parse_choices(choices: Any) -> list[str]:
     if not isinstance(choices, list):
         raise ValueError("choices must be a list of strings")
-    return [str(choice) for choice in choices]
+    if not all(isinstance(choice, str) for choice in choices):
+        raise ValueError("choices must be a list of strings")
+    return choices
 
 
 def canonical_record(row: dict[str, Any]) -> DatasetRecord | None:
@@ -101,7 +103,7 @@ def _map_jsonl_row(
 ) -> DatasetRecord | None:
     try:
         return map_row(payload)
-    except ValueError as exc:
+    except (TypeError, ValueError) as exc:
         raise ValueError(f"{exc} on line {line_number} in {path}") from exc
 
 

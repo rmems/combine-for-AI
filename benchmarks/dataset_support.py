@@ -9,6 +9,7 @@ from typing import Any, Literal, cast
 from benchmarks.dataset_cache_models import (
     DEFAULT_CACHE_MODE,
     CacheMode,
+    jsonl_provenance_metadata,
     parse_cache_mode,
 )
 from benchmarks.dataset_jsonl import records_from_jsonl, require_canonical_record
@@ -219,8 +220,14 @@ def _with_catalog_task(metadata: dict, entry: CatalogEntry | None) -> dict:
     return stamped
 
 
-def _jsonl_metadata(path: Path, *, fallback: str | None = None) -> dict:
-    metadata: dict = {"source": "jsonl", "path": str(path)}
+def _jsonl_metadata(
+    spec: DatasetSpec,
+    path: Path,
+    row_count: int,
+    *,
+    fallback: str | None = None,
+) -> dict:
+    metadata = jsonl_provenance_metadata(spec, path, row_count)
     if fallback:
         metadata["fallback"] = True
         metadata["hf_error"] = fallback
@@ -237,7 +244,7 @@ def _load_jsonl_or_raise(
     if path is None:
         raise ValueError(missing_message)
     records = records_from_jsonl(path, map_row, spec.max_samples)
-    return records, _jsonl_metadata(path)
+    return records, _jsonl_metadata(spec, path, len(records))
 
 
 HfLoadError = (
@@ -255,12 +262,14 @@ def _fallback_jsonl(
     if fallback_path is None:
         raise exc
     records = records_from_jsonl(fallback_path, map_row, spec.max_samples)
-    return records, _jsonl_metadata(fallback_path, fallback=str(exc))
+    return records, _jsonl_metadata(
+        spec, fallback_path, len(records), fallback=str(exc)
+    )
 
 
-def _may_fetch_hf(spec: DatasetSpec) -> bool:
+def _cache_mode(spec: DatasetSpec) -> CacheMode:
     raw = spec.cache_mode or os.environ.get("COMBINE_DATASET_CACHE_MODE")
-    return parse_cache_mode(raw or DEFAULT_CACHE_MODE) is not CacheMode.OFFLINE
+    return parse_cache_mode(raw or DEFAULT_CACHE_MODE)
 
 
 def _hf_request(
@@ -319,6 +328,7 @@ def _load_hf_or_fallback(
             ValueError(f"hf dataset '{spec.name}' is missing hf_id"),
         )
     try:
+        cache_mode = _cache_mode(spec)
         return records_from_hf(
             MappedHfSpec(
                 name=spec.name,
@@ -329,9 +339,11 @@ def _load_hf_or_fallback(
                 max_samples=spec.max_samples,
                 cache_dir=cache_dir,
                 mapper_version=_mapper_version(entry),
+                task=entry.task if entry is not None else TaskKind.GENERIC,
             ),
             map_row,
-            allow_fetch=_may_fetch_hf(spec),
+            allow_fetch=cache_mode is not CacheMode.OFFLINE,
+            refresh=cache_mode is CacheMode.ONLINE,
         )
     except (ImportError, OSError, RuntimeError, ValueError, TypeError) as exc:
         return _fallback_jsonl(spec, jsonl_path, map_row, exc)

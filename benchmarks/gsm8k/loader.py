@@ -39,7 +39,7 @@ def map_gsm8k_row(row: dict[str, Any]) -> DatasetRecord | None:
 
     question = row.get("question")
     answer = row.get("answer")
-    if question is None:
+    if question is None or not str(question).strip():
         return None
     expected = extract_gsm8k_answer(str(answer or ""))
     if not expected:

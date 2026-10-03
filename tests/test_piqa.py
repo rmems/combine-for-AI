@@ -59,3 +59,11 @@ def test_piqa_converts_valid_labels(label) -> None:
 def test_piqa_rejects_out_of_range_labels(label) -> None:
     with pytest.raises(ValueError, match="label"):
         map_piqa_row({"goal": "Question", "sol1": "a", "sol2": "b", "label": label})
+
+
+@pytest.mark.parametrize("label", [True, False, 1.0, 1.9])
+def test_piqa_rejects_non_integer_label_types(label) -> None:
+    with pytest.raises(ValueError, match="label"):
+        map_piqa_row(
+            {"goal": "Question", "sol1": "a", "sol2": "b", "label": label}
+        )

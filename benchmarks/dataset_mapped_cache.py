@@ -22,15 +22,16 @@ from benchmarks.dataset_jsonl import (
     records_from_jsonl,
     row_as_dict,
 )
-from benchmarks.dataset_types import DatasetRecord, DatasetSpec
+from benchmarks.dataset_types import DatasetRecord, DatasetSpec, TaskKind
+from benchmarks.dataset_validation import validate_record
 
 try:
     from datasets import load_dataset as hf_load_dataset
 except ImportError:
     hf_load_dataset = None
 
-# v3 includes mapper_version so a mapping change cannot reuse older rows.
-NORMALIZED_CACHE_SCHEMA = "combine.normalized_hf_cache.v3"
+# v4 records the validation task so cached rows retain their task contract.
+NORMALIZED_CACHE_SCHEMA = "combine.normalized_hf_cache.v4"
 RowMapper = Callable[[dict[str, Any]], DatasetRecord | None]
 CacheHit = tuple[list[DatasetRecord], dict[str, Any]]
 CachedRows = tuple[list[DatasetRecord], dict[str, Any]]
@@ -46,6 +47,7 @@ class MappedHfSpec:
     max_samples: int | None = None
     cache_dir: Path | None = None
     mapper_version: str = "1"
+    task: TaskKind = TaskKind.GENERIC
 
 
 def write_normalized_jsonl(path: Path, records: list[DatasetRecord]) -> None:
@@ -65,6 +67,7 @@ def cache_key_digest(spec: MappedHfSpec) -> str:
             spec.split,
             spec.revision,
             spec.mapper_version,
+            spec.task.value,
         ]
     )
     return hashlib.sha256(key.encode("utf-8")).hexdigest()
@@ -111,9 +114,13 @@ def records_from_hf(
     map_row: RowMapper,
     *,
     allow_fetch: bool = True,
+    refresh: bool = False,
 ) -> CacheHit:
     _require_fetch_spec(spec)
     path = normalized_cache_path(spec)
+    cached = _fresh_hit(path, spec, None)
+    if cached is not None and not refresh:
+        return cached
     remote = _online_commit(spec, allow_fetch)
     hit = _fresh_hit(path, spec, remote)
     if hit is not None:
@@ -122,7 +129,13 @@ def records_from_hf(
         raise RuntimeError(
             f"offline cache miss for Hugging Face dataset {spec.hf_id}"
         )
-    return _fetch_mapped_from_hf(path, spec, map_row, remote)
+    try:
+        return _fetch_mapped_from_hf(path, spec, map_row, remote)
+    except (ImportError, OSError, RuntimeError, TypeError, ValueError):
+        if cached is not None:
+            cached[1]["stale"] = True
+            return cached
+        raise
 
 
 def _sidecar_payload(
@@ -148,6 +161,7 @@ def _identity_fields(spec: MappedHfSpec) -> dict[str, Any]:
         "split": spec.split,
         "revision": spec.revision,
         "mapper_version": spec.mapper_version,
+        "task": spec.task.value,
         "digest": cache_key_digest(spec),
     }
 
@@ -189,6 +203,8 @@ def _pair_if_valid(jsonl_path: Path, spec: MappedHfSpec) -> CachedRows | None:
     if sidecar is None:
         return None
     records = records_from_jsonl(jsonl_path, require_canonical_record, None)
+    for index, record in enumerate(records):
+        validate_record(record, spec.task, f"{spec.name} cached record {index}")
     if _rows_match(jsonl_path, spec, sidecar, records):
         return records, sidecar
     return None
@@ -268,7 +284,7 @@ def _remote_commit(spec: MappedHfSpec) -> str | None:
     )
     try:
         return resolve_dataset_revision(probe)
-    except ImportError:
+    except (ImportError, OSError, RuntimeError, ValueError):
         return None
 
 
@@ -341,6 +357,7 @@ def _map_hf_split(
         if record is None:
             skipped += 1
             continue
+        validate_record(record, spec.task, f"{spec.name} mapped record {len(mapped)}")
         mapped.append(record)
     return mapped, skipped
 

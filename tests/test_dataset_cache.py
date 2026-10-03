@@ -222,6 +222,24 @@ def test_prefer_cache_refetches_after_quarantining_invalid_entry(tmp_path: Path)
     )
 
 
+def test_non_boolean_allow_empty_prompt_is_quarantined_and_refetched(
+    tmp_path: Path,
+) -> None:
+    cache = DatasetCache(root=tmp_path / "cache", mode=CacheMode.PREFER_CACHE)
+    entry = _install_fixture(cache, FIXTURE_SPEC, "hit")
+    manifest_path = entry / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["allow_empty_prompt"] = "false"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    loaded = cache.load(FIXTURE_SPEC, fetch=_fetch_ok)
+
+    assert loaded.cache_hit is False
+    assert len(loaded.records) == 2
+    quarantine = cache.root / "quarantine"
+    assert any(path.name == "manifest.json" for path in quarantine.rglob("manifest.json"))
+
+
 def test_repository_license_scope_is_rejected(tmp_path: Path) -> None:
     cache = _offline_cache(tmp_path)
     entry = _install_fixture(cache, FIXTURE_SPEC, "hit")

@@ -23,7 +23,7 @@ from benchmarks.models import (
     default_quantization_registry,
     scoped_seed,
 )
-from benchmarks.wikitext.scoring import language_model_prediction
+from benchmarks.wikitext.scoring import language_model_corpus_prediction
 from benchmarks.reporting import metrics_to_row, telemetry_to_row, write_csv, write_json
 from benchmarks.telemetry import (
     CorinthCanalArtifact,
@@ -367,16 +367,18 @@ def _evaluate_dataset(
     if ctx.corinth is not None:
         accumulator.apply_saaq(ctx.corinth.to_saaq_overlay())
     language_modeling = _language_modeling(dataset)
+    if language_modeling and dataset.records:
+        prediction = language_model_corpus_prediction(adapter, dataset.records)
+        accumulator.add(dataset.records[0], prediction, language_modeling=True)
     for index, record in enumerate(dataset.records):
+        if language_modeling:
+            continue
         # Deterministic benchmark RNG — not crypto (Bandit B311).
         record_rng = random.Random(  # nosec B311
             scoped_seed(scoped, str(index), profile.name)
         )
-        if language_modeling:
-            prediction = language_model_prediction(adapter, record)
-        else:
-            prediction = adapter.predict(record, record_rng)
-        accumulator.add(record, prediction, language_modeling=language_modeling)
+        prediction = adapter.predict(record, record_rng)
+        accumulator.add(record, prediction)
     total_time = (
         accumulator.token_count / profile.speed_tps if profile.speed_tps else 0.0
     )

@@ -56,6 +56,17 @@ def test_map_arc_easy_missing_labels_are_one_based() -> None:
     assert record.answer_index == 0
 
 
+def test_map_arc_easy_missing_labels_rejects_zero_key() -> None:
+    with pytest.raises(ValueError, match="cannot resolve ARC answerKey"):
+        map_arc_easy_row(
+            {
+                "question": "Which object is best for measuring temperature?",
+                "choices": {"text": ["thermometer", "ruler"]},
+                "answerKey": "0",
+            }
+        )
+
+
 def test_map_arc_easy_numeric_key() -> None:
     record = map_arc_easy_row(
         {

@@ -74,3 +74,20 @@ def test_hellaswag_test_split_is_not_scored(monkeypatch) -> None:
         HellaSwagLoader().load(
             DatasetSpec(name="hellaswag", source="hellaswag", split="test")
         )
+
+
+def test_hellaswag_labeled_local_test_split_is_scored(tmp_path) -> None:
+    path = tmp_path / "hellaswag-test.jsonl"
+    path.write_text(
+        '{"prompt":"Question","choices":["a","b"],"answer_index":1}\n',
+        encoding="utf-8",
+    )
+    loaded = HellaSwagLoader().load(
+        DatasetSpec(
+            name="hellaswag",
+            source="hellaswag",
+            split="test",
+            path=str(path),
+        )
+    )
+    assert loaded.records[0].answer_index == 1

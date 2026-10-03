@@ -60,7 +60,7 @@ class HellaSwagLoader(MappedDatasetLoader):
     def load(self, spec: DatasetSpec) -> LoadedDataset:
         entry = catalog_entry(self.catalog_name)
         resolved = apply_resolved_split(spec, entry)
-        if resolved.split == "test":
+        if resolved.split == "test" and not spec.path:
             raise ValueError(
                 "HellaSwag split 'test' is unlabeled and cannot be scored; "
                 "use split 'validation'"

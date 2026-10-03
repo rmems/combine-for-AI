@@ -45,3 +45,16 @@ def test_map_gsm8k_canonical_passthrough() -> None:
     )
     assert record is not None
     assert record.reference == "7"
+
+
+def test_map_gsm8k_native_fields() -> None:
+    record = map_gsm8k_row(
+        {"question": "How many clips?", "answer": "work\n#### 7"}
+    )
+    assert record is not None
+    assert record.prompt == f"How many clips?\n{COT_SUFFIX}"
+    assert record.reference == "7"
+
+
+def test_map_gsm8k_skips_blank_question() -> None:
+    assert map_gsm8k_row({"question": "  \n", "answer": "#### 7"}) is None

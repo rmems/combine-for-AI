@@ -13,6 +13,8 @@ def _piqa_answer_index(label: Any) -> int | None:
         return None
     if isinstance(label, str) and not label.strip():
         return None
+    if isinstance(label, bool) or not isinstance(label, (int, str)):
+        raise ValueError("PIQA label must be 0 or 1")
     answer_index = int(label)
     if answer_index == -1:
         return None
