@@ -60,6 +60,14 @@ def test_map_hellaswag_ctx_a_b() -> None:
     assert record.prompt == "A cyclist reaches a red light. They"
 
 
+@pytest.mark.parametrize("endings", ["yes", ["yes", 2]])
+def test_map_hellaswag_rejects_non_string_endings(endings) -> None:
+    with pytest.raises(ValueError, match="endings must be a list of strings"):
+        map_hellaswag_row(
+            {"ctx": "Question", "endings": endings, "label": 0}
+        )
+
+
 def test_score_hellaswag() -> None:
     assert math.isclose(score_hellaswag([0, 1, 0], [0, 1, 1]), 2 / 3)
     assert math.isclose(score_hellaswag([], []), 0.0)

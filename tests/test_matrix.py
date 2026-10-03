@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from benchmarks.dataset_support import catalog_entry, resolve_hf_split
 from benchmarks.datasets import DatasetSpec
 from combine_for_ai.matrix import (
     CORINTH_CANAL_FAMILIES,
@@ -461,6 +462,19 @@ def test_unsupported_suffix_raises(tmp_path: Path) -> None:
     path.write_text("matrix_name: x\n", encoding="utf-8")
     with pytest.raises(MatrixError, match="unsupported matrix config suffix"):
         load_matrix_config(path)
+
+
+def test_matrix_omitted_split_reaches_named_dataset_catalog(tmp_path: Path) -> None:
+    path = _mini_config(tmp_path)
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["datasets"] = [{"name": "gsm8k", "source": "gsm8k"}]
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    matrix = load_experiment_matrix(path)
+
+    spec = matrix.cells[0].dataset
+    assert spec.split is None
+    assert resolve_hf_split(spec, catalog_entry(spec.source)) == "test"
 
 
 def test_comparison_without_baseline_is_null() -> None:

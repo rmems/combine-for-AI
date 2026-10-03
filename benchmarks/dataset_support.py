@@ -135,6 +135,14 @@ def catalog_entry(name: str) -> CatalogEntry | None:
     return CATALOG.get(name)
 
 
+def is_language_modeling(dataset: LoadedDataset) -> bool:
+    task = dataset.metadata.get("task")
+    if task == TaskKind.LANGUAGE_MODELING.value:
+        return True
+    entry = catalog_entry(dataset.spec.source) or catalog_entry(dataset.spec.name)
+    return entry is not None and entry.task is TaskKind.LANGUAGE_MODELING
+
+
 def canonical_catalog_name(name: str) -> str:
     entry = CATALOG.get(name)
     if entry is None:

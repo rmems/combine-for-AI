@@ -12,8 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from benchmarks.dataset_cache import provenance_from_metadata
-from benchmarks.dataset_support import catalog_entry
-from benchmarks.dataset_types import TaskKind
+from benchmarks.dataset_support import is_language_modeling as _language_modeling
 from benchmarks.datasets import DatasetSpec, LoadedDataset, default_dataset_registry
 from benchmarks.metrics import MetricsAccumulator, MetricsSummary
 from benchmarks.models import (
@@ -346,14 +345,6 @@ def _evaluate_matrix_cell(
         for dataset in datasets:
             results.append(_evaluate_dataset(adapter, profile, dataset, ctx))
     return results
-
-
-def _language_modeling(dataset: LoadedDataset) -> bool:
-    task = dataset.metadata.get("task")
-    if task == TaskKind.LANGUAGE_MODELING.value:
-        return True
-    entry = catalog_entry(dataset.spec.source) or catalog_entry(dataset.spec.name)
-    return entry is not None and entry.task is TaskKind.LANGUAGE_MODELING
 
 
 def _evaluate_dataset(

@@ -33,7 +33,11 @@ def map_hellaswag_row(row: dict[str, Any]) -> DatasetRecord | None:
     label = row.get("label")
     if not prompt or endings is None or label is None:
         return None
-    choices = [str(ending) for ending in endings]
+    if not isinstance(endings, list) or not all(
+        isinstance(ending, str) for ending in endings
+    ):
+        raise ValueError("HellaSwag endings must be a list of strings")
+    choices = endings
     if len(choices) < 2:
         return None
     return DatasetRecord(
