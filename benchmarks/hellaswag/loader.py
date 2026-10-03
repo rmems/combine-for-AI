@@ -22,6 +22,18 @@ def _hellaswag_prompt(row: dict[str, Any]) -> str:
     return f"{ctx_a} {ctx_b}".strip()
 
 
+def _hellaswag_endings(value: Any) -> list[str] | None:
+    if value is None:
+        return None
+    if not isinstance(value, list) or not all(
+        isinstance(ending, str) for ending in value
+    ):
+        raise ValueError("HellaSwag endings must be a list of strings")
+    if len(value) < 2:
+        return None
+    return value
+
+
 def map_hellaswag_row(row: dict[str, Any]) -> DatasetRecord | None:
     """Map HellaSwag using lm-eval ``hellaswag`` fields: ctx/endings/label."""
     record = canonical_record(row)
@@ -29,16 +41,9 @@ def map_hellaswag_row(row: dict[str, Any]) -> DatasetRecord | None:
         return record
 
     prompt = _hellaswag_prompt(row)
-    endings = row.get("endings")
+    choices = _hellaswag_endings(row.get("endings"))
     label = row.get("label")
-    if not prompt or endings is None or label is None:
-        return None
-    if not isinstance(endings, list) or not all(
-        isinstance(ending, str) for ending in endings
-    ):
-        raise ValueError("HellaSwag endings must be a list of strings")
-    choices = endings
-    if len(choices) < 2:
+    if not prompt or choices is None or label is None:
         return None
     return DatasetRecord(
         prompt=prompt,
