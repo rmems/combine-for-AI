@@ -96,6 +96,7 @@ class FetchResult:
     source_uri: str
     resolved_revision: str
     upstream_license: str = UNKNOWN_LICENSE
+    allow_empty_prompt: bool = False
 
 
 @dataclass(frozen=True)
@@ -110,6 +111,7 @@ class CacheManifest:
     upstream_license: str
     license_scope: str
     loader_schema_version: str
+    allow_empty_prompt: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -129,6 +131,7 @@ class CacheManifest:
                 raw.get("license_scope") or LICENSE_SCOPE_DATASET_SOURCE
             ),
             loader_schema_version=str(raw["loader_schema_version"]),
+            allow_empty_prompt=_optional_bool(raw.get("allow_empty_prompt")),
         )
 
 
@@ -193,7 +196,7 @@ def cache_key_for(
         dataset_name=spec.name,
         hf_id=spec.hf_id or "",
         configuration=spec.hf_subset or "",
-        split=spec.split,
+        split=spec.generic_split(),
         revision=resolved_revision or requested_revision(spec),
         schema_version=schema_version,
     )
@@ -208,20 +211,32 @@ def serialize_record(record: DatasetRecord) -> dict[str, Any]:
     }
 
 
-def deserialize_record(raw: dict[str, Any]) -> DatasetRecord:
+def _optional_bool(value: Any) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, bool):
+        return value
+    raise ValueError("allow_empty_prompt must be a boolean")
+
+
+def deserialize_record(
+    raw: dict[str, Any], *, allow_empty_prompt: bool = False
+) -> DatasetRecord:
     record = DatasetRecord(
         prompt=raw["prompt"],
         reference=raw.get("reference"),
         choices=raw.get("choices"),
         answer_index=raw.get("answer_index"),
     )
-    validate_dataset_record(record)
+    validate_dataset_record(record, allow_empty_prompt=allow_empty_prompt)
     return record
 
 
-def encode_records(records: list[DatasetRecord]) -> bytes:
+def encode_records(
+    records: list[DatasetRecord], *, allow_empty_prompt: bool = False
+) -> bytes:
     for record in records:
-        validate_dataset_record(record)
+        validate_dataset_record(record, allow_empty_prompt=allow_empty_prompt)
     lines = [
         json.dumps(serialize_record(record), sort_keys=True, separators=(",", ":"))
         for record in records
@@ -261,6 +276,9 @@ def provenance_from_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
         "dataset_source_uri": metadata.get("source_uri") or metadata.get("path"),
         "dataset_resolved_revision": metadata.get("resolved_revision"),
         "dataset_cache_key": metadata.get("cache_key_digest"),
+        "dataset_load_source": metadata.get("source"),
+        "dataset_fallback": bool(metadata.get("fallback")),
+        "dataset_hf_error": metadata.get("hf_error"),
     }
 
 

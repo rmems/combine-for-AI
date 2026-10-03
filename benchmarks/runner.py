@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from benchmarks.dataset_cache import provenance_from_metadata
+from benchmarks.dataset_support import is_language_modeling as _language_modeling
 from benchmarks.datasets import DatasetSpec, LoadedDataset, default_dataset_registry
 from benchmarks.metrics import MetricsAccumulator, MetricsSummary
 from benchmarks.models import (
@@ -21,6 +22,7 @@ from benchmarks.models import (
     default_quantization_registry,
     scoped_seed,
 )
+from benchmarks.wikitext.scoring import language_model_corpus_prediction
 from benchmarks.reporting import metrics_to_row, telemetry_to_row, write_csv, write_json
 from benchmarks.telemetry import (
     CorinthCanalArtifact,
@@ -61,6 +63,9 @@ class DatasetResult:
     dataset_source_uri: str | None = None
     dataset_resolved_revision: str | None = None
     dataset_cache_key: str | None = None
+    dataset_load_source: str | None = None
+    dataset_fallback: bool = False
+    dataset_hf_error: str | None = None
 
 
 def load_config(path: Path) -> dict[str, Any]:
@@ -187,6 +192,8 @@ def _apply_dataset_cache_defaults(
         updates["cache_root"] = _resolve_cache_root(spec.cache_root, base_path)
     elif cache_cfg.get("root"):
         updates["cache_root"] = _resolve_cache_root(str(cache_cfg["root"]), base_path)
+    if spec.cache_dir:
+        updates["cache_dir"] = _resolve_cache_root(spec.cache_dir, base_path)
     if updates:
         return replace(spec, **updates)
     return spec
@@ -350,12 +357,19 @@ def _evaluate_dataset(
     accumulator = MetricsAccumulator()
     if ctx.corinth is not None:
         accumulator.apply_saaq(ctx.corinth.to_saaq_overlay())
+    language_modeling = _language_modeling(dataset)
+    if language_modeling and dataset.records:
+        prediction = language_model_corpus_prediction(adapter, dataset.records)
+        accumulator.add(dataset.records[0], prediction, language_modeling=True)
     for index, record in enumerate(dataset.records):
+        if language_modeling:
+            continue
         # Deterministic benchmark RNG — not crypto (Bandit B311).
         record_rng = random.Random(  # nosec B311
             scoped_seed(scoped, str(index), profile.name)
         )
-        accumulator.add(record, adapter.predict(record, record_rng))
+        prediction = adapter.predict(record, record_rng)
+        accumulator.add(record, prediction)
     total_time = (
         accumulator.token_count / profile.speed_tps if profile.speed_tps else 0.0
     )
@@ -372,6 +386,9 @@ def _evaluate_dataset(
         dataset_source_uri=provenance["dataset_source_uri"],
         dataset_resolved_revision=provenance["dataset_resolved_revision"],
         dataset_cache_key=provenance["dataset_cache_key"],
+        dataset_load_source=provenance["dataset_load_source"],
+        dataset_fallback=provenance["dataset_fallback"],
+        dataset_hf_error=provenance["dataset_hf_error"],
     )
 
 
@@ -406,6 +423,9 @@ def write_reports(
             "dataset_source_uri": result.dataset_source_uri,
             "dataset_resolved_revision": result.dataset_resolved_revision,
             "dataset_cache_key": result.dataset_cache_key,
+            "dataset_load_source": result.dataset_load_source,
+            "dataset_fallback": result.dataset_fallback,
+            "dataset_hf_error": result.dataset_hf_error,
             "quantization": result.quantization.name,
             "precision": result.quantization.precision,
             "quantization_format": result.quantization.format,

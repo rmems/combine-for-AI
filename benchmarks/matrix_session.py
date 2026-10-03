@@ -8,6 +8,7 @@ from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any, Mapping, Never
 
+from benchmarks.dataset_support import is_language_modeling
 from benchmarks.datasets import DatasetSpec, LoadedDataset, default_dataset_registry
 from benchmarks.journal import CellState, CommitPoint, JOURNAL_SCHEMA, ResumeJournal
 from benchmarks.jsonio import ensure_dir, write_json
@@ -42,6 +43,7 @@ from benchmarks.models import (
     default_quantization_registry,
     scoped_seed,
 )
+from benchmarks.wikitext.scoring import language_model_corpus_prediction
 
 
 @dataclass(frozen=True)
@@ -125,9 +127,14 @@ def execute_cell(
     )
     rng = random.Random(scoped)  # nosec B311: deterministic eval RNG, not crypto
     accumulator = MetricsAccumulator()
-    for record in dataset.records:
-        prediction = adapter.predict(record, rng)
-        accumulator.add(record, prediction)
+    language_modeling = is_language_modeling(dataset)
+    if language_modeling and dataset.records:
+        prediction = language_model_corpus_prediction(adapter, dataset.records)
+        accumulator.add(dataset.records[0], prediction, language_modeling=True)
+    else:
+        for record in dataset.records:
+            prediction = adapter.predict(record, rng)
+            accumulator.add(record, prediction)
     total_time = accumulator.token_count / profile.speed_tps if profile.speed_tps else 0.0
     metrics = accumulator.summary(total_time, profile.vram_gb)
     return {

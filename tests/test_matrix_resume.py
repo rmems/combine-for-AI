@@ -16,6 +16,7 @@ from benchmarks.journal import (
     replay_journal,
 )
 from benchmarks.matrix import (
+    CellIdentity,
     DuplicateCellIdError,
     IncompatibleMatrixError,
     MatrixDefinition,
@@ -23,6 +24,9 @@ from benchmarks.matrix import (
     RetryPolicy,
     sha256_hex,
 )
+from benchmarks.matrix_session import execute_cell
+from benchmarks.models import ModelSpec
+from benchmarks.dataset_types import DatasetRecord, DatasetSpec, LoadedDataset
 from benchmarks.matrix_runner import (
     CrashPlan,
     MatrixHooks,
@@ -120,6 +124,47 @@ def test_duplicate_cell_ids_are_rejected_before_execution() -> None:
     }
     with pytest.raises(DuplicateCellIdError, match="duplicate cell id"):
         MatrixDefinition.from_dict(raw)
+
+
+def test_journal_cell_uses_language_model_corpus_scoring(monkeypatch) -> None:
+    class RecordingAdapter:
+        def __init__(self) -> None:
+            self.spec = ModelSpec(backend="mock", name="toy", revision="r1")
+            self.calls: list[str] = []
+
+        def predict(self, record, rng):
+            raise AssertionError("language-modeling cells must not generate predictions")
+
+        def token_logprobs(self, text):
+            self.calls.append(text)
+            return (-1.0, -1.0)
+
+    adapter = RecordingAdapter()
+    monkeypatch.setattr(
+        "benchmarks.matrix_session.build_model_adapter",
+        lambda model, profile: adapter,
+    )
+    spec = DatasetSpec(name="wiki_eval", source="wikitext2", split="validation")
+    identity = CellIdentity(
+        model=adapter.spec,
+        quantization="fp16",
+        dataset=spec,
+        seed=7,
+        config_revision="rev1",
+    )
+    records = [DatasetRecord(prompt="first"), DatasetRecord(prompt=" \nsecond")]
+
+    payload = execute_cell(
+        identity,
+        LoadedDataset(
+            spec=spec,
+            records=records,
+            metadata={"task": "language_modeling"},
+        ),
+    )
+
+    assert adapter.calls == ["first \nsecond"]
+    assert payload["metrics"]["perplexity"] == pytest.approx(2.718281828459045)
 
 
 def test_incompatible_matrix_definition_is_rejected(tmp_path: Path) -> None:

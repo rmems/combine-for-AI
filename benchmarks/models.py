@@ -138,10 +138,15 @@ class Prediction:
     output: str | int
     logprob: float
     tokens: int
+    token_logprobs: tuple[float, ...] | None = None
 
 
 class ModelAdapter(Protocol):
     def predict(self, record: DatasetRecord, rng: random.Random) -> Prediction:
+        ...
+
+    def token_logprobs(self, text: str) -> tuple[float, ...]:
+        """Natural-log token likelihoods for ``text`` under this model."""
         ...
 
     @property
@@ -183,6 +188,21 @@ class MockModelAdapter:
             token_budget += len(str(output).split())
 
         return Prediction(output=output, logprob=logprob, tokens=max(token_budget, 1))
+
+    def token_logprobs(self, text: str) -> tuple[float, ...]:
+        pieces = text.split()
+        if not pieces:
+            return ()
+        base = math.log(self._correct_rate()) - (len(self._spec.name) % 7) * 0.01
+        return tuple(
+            base - self._token_jitter(index, piece)
+            for index, piece in enumerate(pieces)
+        )
+
+    def _token_jitter(self, index: int, piece: str) -> float:
+        payload = f"{self._profile.name}\0{index}\0{piece}".encode()
+        digest = hashlib.sha256(payload).digest()
+        return int.from_bytes(digest[:2], "big") / 65535.0 * 0.05
 
     def _correct_rate(self) -> float:
         rates = {

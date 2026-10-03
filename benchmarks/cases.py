@@ -438,7 +438,7 @@ def cases_from_loaded(
         record_to_case(
             record,
             dataset=loaded.spec.name,
-            split=loaded.spec.split,
+            split=loaded.spec.generic_split(),
             index=index,
             task=task,
             source=source,
