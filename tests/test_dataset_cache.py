@@ -31,7 +31,7 @@ from benchmarks.dataset_cache import (
     parse_cache_mode,
     requested_revision,
 )
-from benchmarks.dataset_cache_io import open_dir_nofollow
+from benchmarks.dataset_cache_io import open_dir_nofollow, parse_manifest
 from benchmarks.dataset_types import validate_dataset_record
 from benchmarks.datasets import DatasetRecord, DatasetSpec, HuggingFaceDatasetLoader, JsonlDatasetLoader
 from benchmarks.runner import _apply_dataset_cache_defaults, run_benchmarks
@@ -220,6 +220,32 @@ def test_prefer_cache_refetches_after_quarantining_invalid_entry(tmp_path: Path)
     assert loaded.manifest.checksum_sha256 == checksum_bytes(
         encode_records(loaded.records)
     )
+
+
+def test_non_boolean_allow_empty_prompt_is_quarantined_and_refetched(
+    tmp_path: Path,
+) -> None:
+    cache = DatasetCache(root=tmp_path / "cache", mode=CacheMode.PREFER_CACHE)
+    entry = _install_fixture(cache, FIXTURE_SPEC, "hit")
+    manifest_path = entry / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["allow_empty_prompt"] = "false"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    loaded = cache.load(FIXTURE_SPEC, fetch=_fetch_ok)
+
+    assert loaded.cache_hit is False
+    assert len(loaded.records) == 2
+    quarantine = cache.root / "quarantine"
+    assert any(path.name == "manifest.json" for path in quarantine.rglob("manifest.json"))
+
+
+@pytest.mark.parametrize("payload", [b"{", b"\xff"])
+def test_malformed_manifest_payloads_are_cache_validation_errors(
+    tmp_path: Path, payload: bytes
+) -> None:
+    with pytest.raises(CacheValidationError, match="unreadable manifest"):
+        parse_manifest(payload, tmp_path / "entry")
 
 
 def test_repository_license_scope_is_rejected(tmp_path: Path) -> None:
@@ -646,7 +672,7 @@ def test_movable_hf_revision_is_pinned_before_key_and_fetch(
     assert observed["load"] == (
         spec.hf_id,
         None,
-        spec.split,
+        spec.generic_split(),
         resolved_revision,
     )
 

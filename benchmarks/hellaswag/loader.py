@@ -1,0 +1,84 @@
+from __future__ import annotations
+
+from typing import Any
+
+from benchmarks.dataset_jsonl import canonical_record
+from benchmarks.dataset_support import (
+    MappedDatasetLoader,
+    apply_resolved_split,
+    catalog_entry,
+    register_row_mapper,
+)
+from benchmarks.dataset_types import DatasetRecord, DatasetSpec, LoadedDataset
+from benchmarks.dataset_validation import multiple_choice_accuracy
+
+
+def _hellaswag_prompt(row: dict[str, Any]) -> str:
+    ctx = row.get("ctx")
+    if ctx:
+        return str(ctx).strip()
+    ctx_a = str(row.get("ctx_a") or "").strip()
+    ctx_b = str(row.get("ctx_b") or "").strip()
+    return f"{ctx_a} {ctx_b}".strip()
+
+
+def _hellaswag_endings(value: Any) -> list[str] | None:
+    if value is None:
+        return None
+    if not isinstance(value, list) or not all(
+        isinstance(ending, str) for ending in value
+    ):
+        raise ValueError("HellaSwag endings must be a list of strings")
+    if len(value) < 2:
+        return None
+    return value
+
+
+def map_hellaswag_row(row: dict[str, Any]) -> DatasetRecord | None:
+    """Map HellaSwag using lm-eval ``hellaswag`` fields: ctx/endings/label."""
+    record = canonical_record(row)
+    if record is not None:
+        return record
+
+    prompt = _hellaswag_prompt(row)
+    choices = _hellaswag_endings(row.get("endings"))
+    label = row.get("label")
+    if not prompt or choices is None or label is None:
+        return None
+    return DatasetRecord(
+        prompt=prompt,
+        choices=choices,
+        answer_index=int(label),
+    )
+
+
+register_row_mapper("hellaswag", map_hellaswag_row)
+
+
+class HellaSwagLoader(MappedDatasetLoader):
+    """Load HellaSwag (lm-eval ``hellaswag``) as a multiple-choice task.
+
+    The public ``test`` split has no gold labels, so scoring uses ``validation``.
+    """
+
+    catalog_name = "hellaswag"
+
+    def map_row(self, row: dict[str, Any]) -> DatasetRecord | None:
+        return map_hellaswag_row(row)
+
+    def load(self, spec: DatasetSpec) -> LoadedDataset:
+        entry = catalog_entry(self.catalog_name)
+        resolved = apply_resolved_split(spec, entry)
+        if resolved.split == "test" and not spec.path:
+            raise ValueError(
+                "HellaSwag split 'test' is unlabeled and cannot be scored; "
+                "use split 'validation'"
+            )
+        return super().load(spec)
+
+
+def score_hellaswag(
+    predictions: list[int], answer_indices: list[int]
+) -> float:
+    """Accuracy of selected ending indices against gold labels."""
+    return multiple_choice_accuracy(predictions, answer_indices)
