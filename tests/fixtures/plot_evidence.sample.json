@@ -1,0 +1,48 @@
+{
+  "schema_version": "combine.plot-evidence.v1",
+  "run": {"run_id": "offline-shape-fixture", "url": "https://example.org/runs/fixture"},
+  "records": [
+    {
+      "workload_track": "language",
+      "execution_kind": "mock",
+      "input_provenance": "fixture",
+      "metric_provenance": "unknown",
+      "series": "model-a/fp16",
+      "context": {
+        "task": "multiple-choice@v1", "scorer": "exact-match@v1",
+        "dataset": "toy@v1", "split": "test", "sample_ids": ["a", "b", "c", "d"],
+        "engine": "fixture-engine@v1", "config": {"batch_size": 1},
+        "runtime": "fixture-cpu", "harness": "combine-fixture-v1",
+        "environment": {"hardware": "fixture-cpu"}, "budgets": {"tokens": 64},
+        "preprocessing": "none", "seeds": [11, 29]
+      },
+      "sample_count": 4, "repeat_count": 2, "seed_policy": "paired seeds 11,29; samples not independent repeats",
+      "metrics": [
+        {
+          "name": "accuracy", "unit": "fraction", "definition": "Correct answers / all attempted answers", "scope": "task",
+          "value": 0.75, "status": "ok", "counts": {"ok": 3, "failed": 1},
+          "interval": {"low": 0.31, "high": 0.91, "confidence_level": 0.95, "method": "bootstrap BCa", "experimental_unit": "paired seed", "library": "scipy", "library_version": "1.17.0", "definition": "Shape-only fixture, not qualified uncertainty"}
+        },
+        {"name": "latency", "unit": "ms", "definition": "End-to-end request time after warmup", "scope": "request", "value": 12.5, "status": "ok"},
+        {"name": "memory", "unit": "MiB", "definition": "Peak process RSS", "scope": "process", "value": null, "status": "unsupported"}
+      ]
+    },
+    {
+      "workload_track": "agent", "execution_kind": "mock", "input_provenance": "fixture", "metric_provenance": "unknown",
+      "series": "agent-a", "context": {}, "sample_count": 3, "repeat_count": 1, "seed_policy": "seed 11",
+      "metrics": [
+        {"name": "success_rate", "unit": "fraction", "definition": "Successful tasks / attempted tasks including failures", "scope": "task", "value": 0.3333333333, "status": "ok", "counts": {"ok": 1, "failed": 1, "interrupted": 1}},
+        {"name": "budget_used", "unit": "USD", "definition": "Recorded API spend including failed tasks", "scope": "campaign", "value": 0.18, "status": "ok"}
+      ]
+    },
+    {
+      "workload_track": "temporal", "execution_kind": "mock", "input_provenance": "fixture", "metric_provenance": "calculated-proxy",
+      "series": "snn-a", "context": {}, "sample_count": 2, "repeat_count": 1, "seed_policy": "seed 29",
+      "metrics": [
+        {"name": "synaptic_operations", "unit": "operations", "definition": "Algorithmic synaptic event count, not measured energy", "scope": "sequence", "value": 256, "status": "ok"},
+        {"name": "spike_density", "unit": "fraction", "definition": "Active spike events / possible events", "scope": "sequence", "value": 0.125, "status": "ok"},
+        {"name": "energy", "unit": "J", "definition": "Device counter energy", "scope": "device", "value": null, "status": "missing"}
+      ]
+    }
+  ]
+}
