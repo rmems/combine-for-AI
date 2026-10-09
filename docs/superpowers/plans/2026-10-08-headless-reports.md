@@ -39,4 +39,8 @@
 - [x] Keep legacy block views for route agreement and residual drift; draw prepared track metrics only when supported, with explicit provenance/proxy labels and count/interval notes.
 - [x] Document one-command reproduction, input contract, compatibility rules and limitations of unimplemented #45/#49 producers.
 - [x] Run `uv sync --frozen --extra plots`, `uv run ruff check .`, `uv run pytest -q`, and the existing smoke CLI help. Render and inspect representative fixture, empty/partial and prepared-interval plots.
-- [ ] Review diff; commit, push new branch and open PR with `Closes #12`. Verify PR body/base/draft state and report actual delivery state; never merge.
+- [x] Review diff; commit, push new branch and open PR with `Closes #12`. Verify PR body/base/draft state and report actual delivery state; never merge.
+
+Delivered as [PR #54](https://github.com/rmems/combine-for-AI/pull/54), opened at
+19:18 America/Chicago on October 8, 2026, against `main`. Closing reference to
+issue #12 verified; the PR remains open and unmerged.
