@@ -9,7 +9,7 @@
 #
 # Installs only what this repo's CI and manifests need:
 #   - apt: curl, ca-certificates
-#   - uv + Python 3.14 (.python-version)
+#   - uv + Python from .python-version
 #   - uv sync --frozen
 #   - tool directories exposed to later shells (/etc/profile.d + /usr/local/bin links)
 #
@@ -22,6 +22,9 @@ SUDO=""
 if [ "$(id -u)" -ne 0 ]; then
   SUDO="sudo"
 fi
+
+# Match CI (.github/workflows/ci.yml setup-uv version: "0.6.x").
+UV_VERSION="${UV_VERSION:-0.6.17}"
 
 # Install apt packages that are not already present.
 apt_install() {
@@ -43,35 +46,64 @@ apt_install curl ca-certificates
 # --- Python (uv) ---
 export PATH="$HOME/.local/bin:$PATH"
 if ! command -v uv >/dev/null 2>&1; then
-  curl -LsSf https://astral.sh/uv/install.sh | sh
+  installer="$(mktemp)"
+  curl -LsSf -o "$installer" https://astral.sh/uv/install.sh
+  UV_VERSION="$UV_VERSION" sh "$installer"
+  rm -f "$installer"
+  if ! command -v uv >/dev/null 2>&1; then
+    echo "Error: uv installation failed" >&2
+    exit 1
+  fi
 fi
-# .python-version is 3.14; requires-python >=3.14.
-uv python install 3.14
-uv sync --frozen
+
+if [ ! -f .python-version ]; then
+  echo "Error: .python-version not found in repository root" >&2
+  exit 1
+fi
+py_version="$(tr -d '[:space:]' < .python-version)"
+
+if ! uv python install "$py_version"; then
+  echo "Error: Failed to install Python ${py_version} with uv" >&2
+  exit 1
+fi
+
+if [ ! -f uv.lock ]; then
+  echo "Error: uv.lock not found. Run 'uv lock' to generate it." >&2
+  exit 1
+fi
+if ! uv sync --frozen; then
+  echo "Error: uv sync --frozen failed. Check pyproject.toml and uv.lock." >&2
+  exit 1
+fi
 
 # --- Expose the tools to later shells ---
 # The PATH exports above last only for this script; Cursor starts the agent's shells
 # separately. Login shells get these directories from /etc/profile.d, and every other
 # shell finds the entry points through symlinks in /usr/local/bin (on the default PATH).
-# In login shells the venv's bin comes first, so python3 is the venv's Python.
-# The links skip python and pip so the system python3 stays the default elsewhere.
 repo_root="$(pwd)"
 tool_dirs=("$repo_root/.venv/bin" "$HOME/.local/bin")
-# shellcheck disable=SC2016 # $PATH must expand when the profile is sourced, not now.
-printf 'export PATH=%q:$PATH\n' "$(IFS=:; echo "${tool_dirs[*]}")" |
-  $SUDO tee /etc/profile.d/cursor-env-combine-for-AI.sh >/dev/null
+{
+  for dir in "${tool_dirs[@]}"; do
+    # shellcheck disable=SC2016 # $PATH must expand when the profile is sourced, not now.
+    printf 'export PATH=%q:$PATH\n' "$dir"
+  done
+} | $SUDO tee /etc/profile.d/cursor-env-combine-for-AI.sh >/dev/null
+
+shopt -s nullglob
 for dir in "${tool_dirs[@]}"; do
   [ -d "$dir" ] || continue
   for tool in "$dir"/*; do
+    [ -e "$tool" ] || continue
     name="${tool##*/}"
     case "$name" in
       # uv's installer also drops env/env.fish (sourced, not run) in ~/.local/bin.
-      python* | pip* | activate* | deactivate | Activate.ps1 | env | env.fish) continue ;;
+      pip* | activate* | deactivate | Activate.ps1 | env | env.fish) continue ;;
     esac
     if [ -f "$tool" ] && [ -x "$tool" ]; then
       $SUDO ln -sfn "$tool" "/usr/local/bin/$name"
     fi
   done
 done
+shopt -u nullglob
 
 echo "Cursor install for combine-for-AI finished."
