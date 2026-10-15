@@ -1,0 +1,4 @@
+{
+  "name": "combine-for-AI",
+  "install": "bash .cursor/install.sh"
+}
