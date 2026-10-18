@@ -17,7 +17,7 @@ Python is pinned by `.python-version` (3.14); dependencies are locked in `uv.loc
 | `uv run python scripts/benchmark.py --config configs/benchmark.sample.json` | verified |
 | `uv run python scripts/run_matrix.py --config configs/matrix/corinth_canal.sample.json` | verified (22 cells, 0 failed) |
 | `./scripts/run_smoke_benchmark.sh configs/manifests/safetensors_hf.sample.json` | verified |
-| `scripts/run_smoke_benchmark.py --output-dir reports/smoke --formats json,csv` | not run here (same smoke path as the CI jobs `benchmark-smoke` / `mini-eval-smoke`) |
+| `uv run python scripts/run_smoke_benchmark.py --output-dir reports/smoke --formats json,csv` | not run here (same smoke path as the CI jobs `benchmark-smoke` / `mini-eval-smoke`) |
 | `./scripts/run_smoke_benchmark.sh configs/manifests/goz1.sample.json` | not run here (fails closed by design until `generated_artifacts[].path` is a real `.goz1` pack) |
 
 CI (`.github/workflows/ci.yml`) runs `uv sync --frozen`, `ruff check .`, `pytest -q`, and the smoke `--help`.
