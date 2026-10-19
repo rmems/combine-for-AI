@@ -264,3 +264,18 @@ def test_csv_guard_prefixes_are_real_control_characters() -> None:
 
     assert "\t" in _FORMULA_PREFIXES and "\r" in _FORMULA_PREFIXES
     assert "\\t" not in _FORMULA_PREFIXES
+
+
+def test_legacy_language_modeling_cell_does_not_report_placeholder_zeros() -> None:
+    record = load_evidence(json.loads((FIXTURES / "legacy_lm_cell.v0.json").read_text()))
+    for name in ("accuracy", "routing_entropy"):
+        metric = record.metric(name)
+        assert metric.status is MetricStatus.UNAVAILABLE and metric.value is None
+    assert record.metric("perplexity").value == 12.3
+
+
+def test_legacy_cell_with_real_nonzero_accuracy_keeps_zero_entropy() -> None:
+    cell = {"cell_id": "c", "metrics": {"accuracy": 1.0, "routing_entropy": 0.0, "perplexity": 2.0}}
+    record = load_evidence(cell)
+    assert record.metric("accuracy").value == 1.0
+    assert record.metric("routing_entropy").value == 0.0

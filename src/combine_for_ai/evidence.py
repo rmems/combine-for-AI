@@ -322,6 +322,7 @@ _LEGACY_METRICS: dict[str, tuple[str, str, str, MetricProvenance]] = {
     "vram_gb": ("vram_gb", "GB", "fixture memory preset", MetricProvenance.PRESET),
     "routing_entropy": ("routing_entropy", "nats", "entropy of the output-choice distribution", MetricProvenance.MOCK_COMPUTED),
 }
+_SENTINEL_FIELDS = frozenset({"accuracy", "routing_entropy"})
 _SMOKE_TO_CANONICAL = {
     "perplexity": "perplexity",
     "throughput_tps": "throughput",
@@ -337,7 +338,7 @@ def _legacy_metric(name: str, value: Any, *, trusted: bool = True) -> MetricValu
         or not isinstance(value, (int, float))
         or not math.isfinite(value)
     ):
-        return unavailable_metric(name, reason="absent or non-finite in legacy payload", unit=unit)
+        return unavailable_metric(name, reason="absent, non-finite or ambiguous placeholder in legacy payload", unit=unit)
     return MetricValue(
         name=name,
         native_name=native,
@@ -374,7 +375,15 @@ def _migrate_v0(payload: Mapping[str, Any]) -> dict[str, Any]:
         payload = payload["result"]
     if isinstance(payload.get("metrics"), Mapping):  # matrix cell
         raw = payload["metrics"]
-        metrics = [_legacy_metric(name, raw.get(name)) for name in _LEGACY_METRICS]
+        # ``MetricsAccumulator.summary`` writes accuracy=0.0 (and, with no choices,
+        # routing_entropy=0.0) as a fallback when nothing was scored, e.g. language
+        # modeling cells. A legacy payload cannot tell that from a real 0% result,
+        # so the ambiguous pair is dropped rather than reported as a measurement.
+        sentinel = raw.get("accuracy") == 0 and raw.get("routing_entropy") == 0
+        metrics = [
+            _legacy_metric(name, raw.get(name), trusted=not (sentinel and name in _SENTINEL_FIELDS))
+            for name in _LEGACY_METRICS
+        ]
         record_id = str(payload.get("cell_id") or payload.get("fingerprint") or "legacy-cell")
         return _legacy_envelope(record_id, metrics, payload.get("seed"), "migrated from legacy matrix cell (v0)")
     if "run_id" in payload and "status" in payload:  # smoke row
