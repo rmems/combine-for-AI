@@ -85,3 +85,15 @@ def test_empty_failure_reason_still_yields_an_error_reason() -> None:
 
     record = load_evidence(_smoke_evidence("r", None, perplexity=None, sample_count=0, failure_reason=""))
     assert all(m.status is MetricStatus.ERROR and m.reason == "artifact smoke failed" for m in record.metrics)
+
+
+def test_smoke_report_file_reads_back_its_embedded_envelope(tmp_path: Path) -> None:
+    from benchmarks.artifact_smoke import run_artifact_smoke
+    from combine_for_ai.evidence_io import read_evidence_json
+
+    payload = run_artifact_smoke(tmp_path / "missing.json", tmp_path / "out", ["json"])
+    [record] = read_evidence_json(next((tmp_path / "out" / "json").glob("*.json")))
+    assert record == load_evidence(payload["evidence"])
+    assert record.execution_kind is ExecutionKind.METADATA_ONLY
+    assert record.capabilities == ()
+    assert all(m.status is MetricStatus.ERROR for m in record.metrics)

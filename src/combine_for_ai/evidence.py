@@ -403,6 +403,11 @@ _MIGRATIONS: dict[int, Callable[[Mapping[str, Any]], dict[str, Any]]] = {
 
 def load_evidence(payload: Mapping[str, Any]) -> EvidenceRecord:
     """Parse any supported payload version into the current envelope."""
+    # Smoke reports wrap a versioned envelope next to the legacy row; the
+    # envelope is authoritative and must never be shadowed by re-migrating the row.
+    embedded = payload.get("evidence")
+    if "schema_version" not in payload and isinstance(embedded, Mapping):
+        return load_evidence(embedded)
     version = payload.get("schema_version", LEGACY_SCHEMA_VERSION)
     if isinstance(version, bool) or not isinstance(version, int):
         raise EvidenceError(f"invalid schema_version {version!r}")
