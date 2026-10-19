@@ -37,6 +37,8 @@ from benchmarks.matrix_types import (
     MatrixHooks,
     SimulatedInterrupt,
 )
+from benchmarks.fixture_presets import mock_performance
+from combine_for_ai.evidence import ExecutionKind
 from benchmarks.metrics import MetricsAccumulator
 from benchmarks.models import (
     build_model_adapter,
@@ -135,8 +137,11 @@ def execute_cell(
         for record in dataset.records:
             prediction = adapter.predict(record, rng)
             accumulator.add(record, prediction)
-    total_time = accumulator.token_count / profile.speed_tps if profile.speed_tps else 0.0
-    metrics = accumulator.summary(total_time, profile.vram_gb)
+    # Fixture-only: speed/VRAM are mock presets and are refused for any other backend.
+    kind = ExecutionKind.MOCK if identity.model.backend == "mock" else ExecutionKind.MEASURED
+    preset = mock_performance(profile, kind)
+    total_time = accumulator.token_count / preset.speed_tps if preset.speed_tps else 0.0
+    metrics = accumulator.summary(total_time, preset.vram_gb)
     return {
         "cell_id": identity.cell_id(),
         "fingerprint": identity.fingerprint(),

@@ -14,6 +14,8 @@ from typing import Any
 from benchmarks.dataset_cache import provenance_from_metadata
 from benchmarks.dataset_support import is_language_modeling as _language_modeling
 from benchmarks.datasets import DatasetSpec, LoadedDataset, default_dataset_registry
+from benchmarks.fixture_presets import mock_performance
+from combine_for_ai.evidence import ExecutionKind
 from benchmarks.metrics import MetricsAccumulator, MetricsSummary
 from benchmarks.models import (
     ModelSpec,
@@ -370,8 +372,11 @@ def _evaluate_dataset(
         )
         prediction = adapter.predict(record, record_rng)
         accumulator.add(record, prediction)
+    # Fixture-only: speed/VRAM are mock presets and are refused for other kinds.
+    kind = ExecutionKind.MOCK if adapter.spec.backend == "mock" else ExecutionKind.MEASURED
+    preset = mock_performance(profile, kind)
     total_time = (
-        accumulator.token_count / profile.speed_tps if profile.speed_tps else 0.0
+        accumulator.token_count / preset.speed_tps if preset.speed_tps else 0.0
     )
     provenance = provenance_from_metadata(dataset.metadata)
     return DatasetResult(
@@ -379,7 +384,7 @@ def _evaluate_dataset(
         split=dataset.spec.split,
         sample_count=len(dataset.records),
         quantization=profile,
-        metrics=accumulator.summary(total_time, profile.vram_gb),
+        metrics=accumulator.summary(total_time, preset.vram_gb),
         telemetry=ctx.telemetry,
         dataset_upstream_license=provenance["dataset_upstream_license"],
         dataset_license_scope=provenance["dataset_license_scope"],

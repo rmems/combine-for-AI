@@ -1,0 +1,74 @@
+{
+  "architecture": null,
+  "budget": {
+    "max_samples": null,
+    "max_tokens": null,
+    "time_limit_s": null
+  },
+  "capabilities": [],
+  "data_provenance": "unknown",
+  "environment_identity": null,
+  "execution_kind": "metadata_only",
+  "metrics": [
+    {
+      "definition": null,
+      "name": "latency_ms",
+      "native_name": null,
+      "provenance": "unavailable",
+      "reason": "header-only inspection",
+      "source_artifact_sha256": null,
+      "status": "unsupported",
+      "unit": null,
+      "value": null
+    },
+    {
+      "definition": null,
+      "name": "accuracy",
+      "native_name": null,
+      "provenance": "unavailable",
+      "reason": "header-only inspection",
+      "source_artifact_sha256": null,
+      "status": "unsupported",
+      "unit": null,
+      "value": null
+    },
+    {
+      "definition": null,
+      "name": "throughput",
+      "native_name": null,
+      "provenance": "unavailable",
+      "reason": "header-only inspection",
+      "source_artifact_sha256": null,
+      "status": "unsupported",
+      "unit": null,
+      "value": null
+    },
+    {
+      "definition": null,
+      "name": "energy_j",
+      "native_name": null,
+      "provenance": "unavailable",
+      "reason": "header-only inspection",
+      "source_artifact_sha256": null,
+      "status": "unsupported",
+      "unit": null,
+      "value": null
+    }
+  ],
+  "notes": null,
+  "record_id": "meta-1",
+  "requested_data_provenance": null,
+  "schema": "combine_for_ai.evidence",
+  "schema_version": 1,
+  "seed": null,
+  "source_artifact_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1",
+  "versions": {
+    "data": null,
+    "engine": null,
+    "model": null,
+    "runtime": null,
+    "scorer": null,
+    "task": null
+  },
+  "workload_track": null
+}

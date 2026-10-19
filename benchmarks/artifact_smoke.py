@@ -8,9 +8,22 @@ from typing import Any
 
 from benchmarks.datasets import DatasetSpec, JsonlDatasetLoader
 from benchmarks.metrics import MetricsAccumulator
+from benchmarks.fixture_presets import mock_performance
 from benchmarks.models import ModelSpec, build_model_adapter, default_quantization_registry
 from benchmarks.reporting import write_csv, write_json
 from benchmarks.runner import build_metadata
+from combine_for_ai.evidence import (
+    Budget,
+    DataProvenance,
+    EvidenceRecord,
+    ExecutionKind,
+    MetricProvenance,
+    MetricStatus,
+    MetricValue,
+    Versions,
+    WorkloadTrack,
+    unavailable_metric,
+)
 from combine_for_ai.manifest import (
     ArtifactFormat,
     ArtifactStatus,
@@ -341,8 +354,75 @@ def _load_smoke_dataset(dataset_path: Path, max_samples: int, dataset_name: str)
     return loaded.spec.name, loaded.records
 
 
-def _peak_vram_gb_from_metadata(metadata_vram_gb: float, gpu_memory_mb: list[int | None]) -> float | None:
-    return metadata_vram_gb
+_HEADER_ONLY_REASON = "smoke inspects artifact metadata only; the artifact is never executed"
+_SMOKE_UNSUPPORTED = (
+    ("accuracy", "ratio"),
+    ("latency_ms", "ms"),
+    ("throughput", "tokens/s"),
+    ("vram_gb", "GB"),
+    ("energy_j", "J"),
+)
+
+
+def _smoke_evidence(
+    run_id: str,
+    seed: int | None,
+    *,
+    perplexity: float | None,
+    sample_count: int,
+    failure_reason: str | None = None,
+) -> dict[str, Any]:
+    """Evidence envelope for a smoke row.
+
+    The artifact is only header-inspected, so latency/accuracy/throughput/VRAM/
+    energy are unsupported. Perplexity, when present, comes from the mock
+    adapter over fixture data, never from the artifact.
+    """
+    failed = failure_reason is not None
+    metrics: list[MetricValue] = []
+    if perplexity is not None and not failed:
+        metrics.append(
+            MetricValue(
+                name="perplexity",
+                native_name="perplexity",
+                unit="ratio",
+                definition="exp of mean negative log-likelihood from the mock adapter on fixture data",
+                value=float(perplexity),
+                status=MetricStatus.OK,
+                provenance=MetricProvenance.MOCK_COMPUTED,
+            )
+        )
+    else:
+        metrics.append(
+            unavailable_metric(
+                "perplexity",
+                status=MetricStatus.ERROR if failed else MetricStatus.UNAVAILABLE,
+                reason=failure_reason or "no perplexity computed",
+                unit="ratio",
+            )
+        )
+    for name, unit in _SMOKE_UNSUPPORTED:
+        metrics.append(
+            unavailable_metric(
+                name,
+                status=MetricStatus.ERROR if failed else MetricStatus.UNSUPPORTED,
+                reason=failure_reason or _HEADER_ONLY_REASON,
+                unit=unit,
+            )
+        )
+    has_ok = any(m.status is MetricStatus.OK for m in metrics)
+    return EvidenceRecord(
+        record_id=run_id,
+        workload_track=WorkloadTrack.LIKELIHOOD if has_ok else None,
+        execution_kind=ExecutionKind.MOCK if has_ok else ExecutionKind.METADATA_ONLY,
+        data_provenance=DataProvenance.FIXTURE,
+        capabilities=("likelihood",) if has_ok else (),
+        versions=Versions(),
+        seed=seed,
+        budget=Budget(max_samples=sample_count),
+        metrics=tuple(metrics),
+        notes="header-only artifact smoke; metrics are not measurements of the artifact",
+    ).to_payload()
 
 
 def _goz1_report_fields(selection: ArtifactSelection) -> dict[str, Any]:
@@ -401,11 +481,6 @@ def _build_success_row(
     perplexity: float,
 ) -> dict[str, Any]:
     gpu_names = metadata.telemetry.system.gpu_names or []
-    gpu_metrics = metadata.telemetry.gpu_metrics or []
-    peak_vram_gb = _peak_vram_gb_from_metadata(
-        profile.vram_gb,
-        [metric.memory_used_mb for metric in gpu_metrics],
-    )
     return {
         "run_id": metadata.run_id,
         "status": "success",
@@ -420,9 +495,10 @@ def _build_success_row(
         "artifact_path": selection.artifact_path,
         "gpu": gpu_names[0] if gpu_names else None,
         "cuda": metadata.telemetry.system.cuda_version,
-        "throughput_tps": profile.speed_tps,
+        # Header-only smoke cannot claim throughput or VRAM; mock presets stay out.
+        "throughput_tps": None,
         "generation_tokens": 512,
-        "peak_vram_gb": peak_vram_gb,
+        "peak_vram_gb": None,
         "perplexity": perplexity,
         "dataset": dataset_name,
         "sample_count": sample_count,
@@ -494,6 +570,9 @@ def _fallback_run_payload(manifest_path: Path, failure_reason: str) -> dict[str,
             "timestamp": timestamp,
         },
         "result": row,
+        "evidence": _smoke_evidence(
+            run_id, None, perplexity=None, sample_count=0, failure_reason=failure_reason
+        ),
     }
 
 
@@ -536,6 +615,13 @@ def _write_failure_outputs(
             "timestamp": metadata.timestamp,
         },
         "result": row,
+        "evidence": _smoke_evidence(
+            metadata.run_id,
+            metadata.seed,
+            perplexity=None,
+            sample_count=0,
+            failure_reason=selection.failure_reason or "artifact smoke failed",
+        ),
     }
     run_id = metadata.run_id
     if "json" in formats:
@@ -584,8 +670,10 @@ def run_artifact_smoke(
             prediction = adapter.predict(record, rng)
             accumulator.add(record, prediction)
 
-        total_time = accumulator.token_count / profile.speed_tps if profile.speed_tps else 0.0
-        metrics = accumulator.summary(total_time, profile.vram_gb)
+        # Mock-only timing: used to build the fixture summary, never reported.
+        preset = mock_performance(profile, adapter.execution_kind)
+        total_time = accumulator.token_count / preset.speed_tps if preset.speed_tps else 0.0
+        metrics = accumulator.summary(total_time, preset.vram_gb)
         row = _build_success_row(
             metadata,
             manifest,
@@ -608,6 +696,12 @@ def run_artifact_smoke(
                 "cuda": metadata.telemetry.system.cuda_version,
             },
             "result": row,
+            "evidence": _smoke_evidence(
+                metadata.run_id,
+                seed,
+                perplexity=metrics.perplexity,
+                sample_count=len(records),
+            ),
         }
 
         run_id = metadata.run_id
