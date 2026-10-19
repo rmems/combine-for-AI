@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import random
 import time
 from dataclasses import dataclass
@@ -364,14 +365,29 @@ _SMOKE_UNSUPPORTED = (
 )
 
 
+def _file_sha256(path: str | None) -> str | None:
+    """Chunked SHA-256 of a local artifact file; None when there is no readable file."""
+    if not path:
+        return None
+    digest = hashlib.sha256()
+    try:
+        with Path(path).open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1 << 20), b""):
+                digest.update(chunk)
+    except OSError:
+        return None
+    return digest.hexdigest()
+
+
 def _smoke_evidence(
     run_id: str,
     seed: int | None,
     *,
     perplexity: float | None,
-    sample_count: int,
+    max_samples: int | None,
     failure_reason: str | None = None,
     bundled_dataset: bool = False,
+    artifact_sha256: str | None = None,
 ) -> dict[str, Any]:
     """Evidence envelope for a smoke row.
 
@@ -422,7 +438,8 @@ def _smoke_evidence(
         capabilities=("likelihood",) if has_ok else (),
         versions=Versions(),
         seed=seed,
-        budget=Budget(max_samples=sample_count),
+        budget=Budget(max_samples=max_samples),
+        source_artifact_sha256=artifact_sha256,
         metrics=tuple(metrics),
         notes="header-only artifact smoke; metrics are not measurements of the artifact",
     ).to_payload()
@@ -574,7 +591,7 @@ def _fallback_run_payload(manifest_path: Path, failure_reason: str) -> dict[str,
         },
         "result": row,
         "evidence": _smoke_evidence(
-            run_id, None, perplexity=None, sample_count=0, failure_reason=failure_reason
+            run_id, None, perplexity=None, max_samples=None, failure_reason=failure_reason
         ),
     }
 
@@ -622,8 +639,9 @@ def _write_failure_outputs(
             metadata.run_id,
             metadata.seed,
             perplexity=None,
-            sample_count=0,
+            max_samples=None,
             failure_reason=selection.failure_reason or "artifact smoke failed",
+            artifact_sha256=_file_sha256(selection.artifact_path),
         ),
     }
     run_id = metadata.run_id
@@ -703,8 +721,9 @@ def run_artifact_smoke(
                 metadata.run_id,
                 seed,
                 perplexity=metrics.perplexity,
-                sample_count=len(records),
+                max_samples=max_samples,
                 bundled_dataset=dataset_path is None,
+                artifact_sha256=_file_sha256(selection.artifact_path),
             ),
         }
 

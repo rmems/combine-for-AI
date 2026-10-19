@@ -83,7 +83,7 @@ def test_failed_smoke_evidence_is_error_not_zero(tmp_path: Path) -> None:
 def test_empty_failure_reason_still_yields_an_error_reason() -> None:
     from benchmarks.artifact_smoke import _smoke_evidence
 
-    record = load_evidence(_smoke_evidence("r", None, perplexity=None, sample_count=0, failure_reason=""))
+    record = load_evidence(_smoke_evidence("r", None, perplexity=None, max_samples=None, failure_reason=""))
     assert all(m.status is MetricStatus.ERROR and m.reason == "artifact smoke failed" for m in record.metrics)
 
 
@@ -123,3 +123,28 @@ def test_smoke_data_provenance_distinguishes_bundled_from_supplied(tmp_path: Pat
     sample = Path(__file__).resolve().parents[1] / "configs" / "datasets" / "lambada.sample.jsonl"
     supplied = run_artifact_smoke(manifest, tmp_path / "b", ["json"], dataset_path=sample)
     assert load_evidence(supplied["evidence"]).data_provenance is DataProvenance.UNKNOWN
+
+
+def test_smoke_evidence_records_requested_budget_and_artifact_hash(tmp_path: Path) -> None:
+    import hashlib
+
+    from benchmarks.artifact_smoke import run_artifact_smoke
+
+    artifact = tmp_path / "m.gguf"
+    artifact.write_bytes(b"model-bytes" * 1000)
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(
+        json.dumps({"model_name": "g", "source_artifact": {"format": "gguf", "path": str(artifact)}}),
+        encoding="utf-8",
+    )
+    payload = run_artifact_smoke(manifest, tmp_path / "out", ["json"], max_samples=50)
+    record = load_evidence(payload["evidence"])
+    assert record.budget.max_samples == 50  # requested, not the dataset-limited count
+    assert record.source_artifact_sha256 == hashlib.sha256(b"model-bytes" * 1000).hexdigest()
+
+
+def test_smoke_evidence_leaves_hash_unset_without_a_local_file(tmp_path: Path) -> None:
+    from benchmarks.artifact_smoke import _file_sha256
+
+    assert _file_sha256(None) is None
+    assert _file_sha256(str(tmp_path / "missing.bin")) is None

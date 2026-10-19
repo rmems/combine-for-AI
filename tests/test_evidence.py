@@ -261,10 +261,10 @@ def test_malformed_metric_value_is_an_evidence_error(tmp_path: Path) -> None:
 
 
 def test_csv_guard_prefixes_are_real_control_characters() -> None:
-    from combine_for_ai.evidence_io import _FORMULA_PREFIXES
+    from combine_for_ai.csvio import CSV_FORMULA_PREFIXES
 
-    assert "\t" in _FORMULA_PREFIXES and "\r" in _FORMULA_PREFIXES
-    assert "\\t" not in _FORMULA_PREFIXES
+    assert "\t" in CSV_FORMULA_PREFIXES and "\r" in CSV_FORMULA_PREFIXES
+    assert "\\t" not in CSV_FORMULA_PREFIXES
 
 
 def test_legacy_language_modeling_cell_does_not_report_placeholder_zeros() -> None:
@@ -287,3 +287,38 @@ def test_markdown_round_trip_with_unicode_line_separators() -> None:
         update={"notes": "a\x0bb\x0cc\x1cd\x85e\u2028f\u2029g"}
     )
     assert parse_evidence_markdown(render_evidence_markdown([record])) == [record]
+
+
+def test_csv_round_trip_with_values_that_start_with_an_apostrophe(tmp_path: Path) -> None:
+    for notes in ("'-x", "'=x", "'plain", "'", "''", "-x", "=1+1"):
+        record = mock_record().model_copy(update={"notes": notes})
+        write_evidence_csv(tmp_path / "e.csv", [record])
+        assert read_evidence_csv(tmp_path / "e.csv") == [record], notes
+
+
+def test_sha256_rejects_trailing_newline() -> None:
+    with pytest.raises(ValueError):
+        ok_metric("a", 1.0, MetricProvenance.IMPORTED, sha=SHA_A + "\n")
+
+
+@pytest.mark.parametrize("bad", [[], "text", 3, None])
+def test_load_evidence_rejects_non_object_payloads(bad) -> None:
+    with pytest.raises(EvidenceError, match="must be an object"):
+        load_evidence(bad)
+
+
+def test_read_evidence_json_wraps_non_object_records(tmp_path: Path) -> None:
+    (tmp_path / "a.json").write_text(json.dumps({"records": [1]}))
+    (tmp_path / "b.json").write_text(json.dumps([1, 2]))
+    for name in ("a.json", "b.json"):
+        with pytest.raises(EvidenceError):
+            read_evidence_json(tmp_path / name)
+
+
+def test_evidence_csv_writer_lives_in_the_installed_package() -> None:
+    import combine_for_ai.evidence_io as io_module
+    from benchmarks.reporting import write_csv as reporting_write_csv
+    from combine_for_ai.csvio import write_csv
+
+    assert io_module.write_csv is write_csv
+    assert reporting_write_csv is write_csv

@@ -42,7 +42,7 @@ EVIDENCE_SCHEMA_VERSION = 1
 #: Pre-envelope payloads (artifact-smoke rows, matrix cells) carry no version.
 LEGACY_SCHEMA_VERSION = 0
 
-_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+_SHA256_RE = re.compile(r"[0-9a-f]{64}")
 
 NonEmpty = Annotated[str, StringConstraints(min_length=1)]
 
@@ -140,7 +140,7 @@ class MetricValue(BaseModel):
     @field_validator("source_artifact_sha256")
     @classmethod
     def _sha_shape(cls, value: str | None) -> str | None:
-        if value is not None and not _SHA256_RE.match(value):
+        if value is not None and not _SHA256_RE.fullmatch(value):
             raise ValueError("source_artifact_sha256 must be 64 lowercase hex characters")
         return value
 
@@ -241,7 +241,7 @@ class EvidenceRecord(BaseModel):
     @field_validator("source_artifact_sha256")
     @classmethod
     def _sha_shape(cls, value: str | None) -> str | None:
-        if value is not None and not _SHA256_RE.match(value):
+        if value is not None and not _SHA256_RE.fullmatch(value):
             raise ValueError("source_artifact_sha256 must be 64 lowercase hex characters")
         return value
 
@@ -403,6 +403,8 @@ _MIGRATIONS: dict[int, Callable[[Mapping[str, Any]], dict[str, Any]]] = {
 
 def load_evidence(payload: Mapping[str, Any]) -> EvidenceRecord:
     """Parse any supported payload version into the current envelope."""
+    if not isinstance(payload, Mapping):
+        raise EvidenceError(f"evidence payload must be an object, got {type(payload).__name__}")
     # Smoke reports wrap a versioned envelope next to the legacy row; the
     # envelope is authoritative and must never be shadowed by re-migrating the row.
     embedded = payload.get("evidence")

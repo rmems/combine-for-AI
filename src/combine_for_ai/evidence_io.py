@@ -13,6 +13,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
+from combine_for_ai.csvio import CSV_FORMULA_PREFIXES, write_csv
 from combine_for_ai.evidence import (
     EvidenceError,
     EvidenceRecord,
@@ -52,8 +53,6 @@ _METRIC_COLUMNS = (
 EVIDENCE_COLUMNS = _RECORD_COLUMNS + _METRIC_COLUMNS
 
 _JSON_COLUMNS = ("capabilities", "versions", "budget")
-# Mirrors benchmarks.reporting.write_csv's spreadsheet-formula guard.
-_FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
 
 
 def _cell(value: Any) -> str:
@@ -196,12 +195,12 @@ def read_evidence_json(path: Path) -> list[EvidenceRecord]:
 
 
 def write_evidence_csv(path: Path, records: Sequence[EvidenceRecord]) -> None:
-    from benchmarks.reporting import write_csv
-
     rows = [row for record in records for row in record_to_rows(record)]
     if not rows:
         raise EvidenceError("no evidence rows to write")
-    write_csv(path, rows)
+    # write_csv prefixes ``'`` to formula-looking cells. Escape cells that already
+    # start with ``'`` the same way so _unguard can tell the two cases apart.
+    write_csv(path, [{k: _escape_apostrophe(v) for k, v in row.items()} for row in rows])
 
 
 def read_evidence_csv(path: Path) -> list[EvidenceRecord]:
@@ -213,11 +212,15 @@ def read_evidence_csv(path: Path) -> list[EvidenceRecord]:
     return records_from_rows(rows)
 
 
+def _escape_apostrophe(value: str) -> str:
+    return f"'{value}" if value.startswith("'") else value
+
+
 def _unguard(value: str | None) -> str:
-    """Undo write_csv's leading-apostrophe formula guard (e.g. ``'-1.5``)."""
+    """Undo the leading-apostrophe guards (formula prefixes and escaped ``'``)."""
     if value is None:
         return ""
-    if len(value) > 1 and value[0] == "'" and value[1] in _FORMULA_PREFIXES:
+    if len(value) > 1 and value[0] == "'" and (value[1] in CSV_FORMULA_PREFIXES or value[1] == "'"):
         return value[1:]
     return value
 
