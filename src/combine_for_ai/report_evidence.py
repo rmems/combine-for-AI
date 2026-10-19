@@ -11,8 +11,6 @@ import json
 from pathlib import Path
 from typing import Any
 
-from pydantic import ValidationError
-
 from combine_for_ai.legacy_evidence import legacy_records
 from combine_for_ai.report_models import (
     CONTEXT_KEYS,
@@ -87,7 +85,7 @@ def _parse_records(raw: dict[str, Any], path: Path, legacy: bool) -> list[Eviden
         if legacy:
             return legacy_records(raw, path)
         return list(EvidenceArchive.model_validate(raw).records)
-    except (ValidationError, ValueError, TypeError) as exc:
+    except (ValueError, TypeError) as exc:
         raise ValueError(f"invalid archive {path}: {exc}") from exc
 
 
