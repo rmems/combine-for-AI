@@ -39,8 +39,11 @@ def mock_performance(
             f"mock performance presets are fixture-only, not valid for {execution_kind.value}"
         )
     preset = MOCK_PERFORMANCE_PRESETS.get(profile.name)
-    speed = profile.speed_tps if profile.speed_tps is not None else (preset.speed_tps if preset else None)
-    vram = profile.vram_gb if profile.vram_gb is not None else (preset.vram_gb if preset else None)
+    speed = profile.speed_tps
+    vram = profile.vram_gb
+    if preset is not None:
+        speed = preset.speed_tps if speed is None else speed
+        vram = preset.vram_gb if vram is None else vram
     if speed is None or vram is None:
         raise ValueError(f"no mock performance preset for quantization '{profile.name}'")
     return MockPerformance(speed, vram)

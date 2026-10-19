@@ -170,7 +170,7 @@ def records_from_rows(rows: Iterable[Mapping[str, str]]) -> list[EvidenceRecord]
             }
             for column in _JSON_COLUMNS:
                 payload[column] = json.loads(first[column])
-        except (ValueError, json.JSONDecodeError) as exc:
+        except ValueError as exc:  # JSONDecodeError is a ValueError
             raise EvidenceError(f"malformed evidence row: {exc}") from exc
         records.append(parse_evidence(payload))
     return records
