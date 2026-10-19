@@ -106,6 +106,15 @@ def record_to_rows(record: EvidenceRecord) -> list[dict[str, str]]:
     return rows
 
 
+def _float_cell(text: str, metric: str) -> float | None:
+    if text == "":
+        return None
+    try:
+        return float(text)
+    except ValueError as exc:
+        raise EvidenceError(f"metric '{metric}': malformed value {text!r}") from exc
+
+
 def _opt(text: str) -> str | None:
     return text if text != "" else None
 
@@ -134,7 +143,7 @@ def records_from_rows(rows: Iterable[Mapping[str, str]]) -> list[EvidenceRecord]
                     "native_name": _opt(row["native_name"]),
                     "unit": _opt(row["unit"]),
                     "definition": _opt(row["definition"]),
-                    "value": float(row["value"]) if row["value"] != "" else None,
+                    "value": _float_cell(row["value"], row["metric_name"]),
                     "status": row["status"],
                     "provenance": row["provenance"],
                     "source_artifact_sha256": _opt(row["source_artifact_sha256"]),

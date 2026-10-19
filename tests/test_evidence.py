@@ -249,3 +249,18 @@ def test_tampered_csv_unavailable_to_ok_zero_is_rejected(tmp_path: Path) -> None
     (tmp_path / "e.csv").write_text(text)
     with pytest.raises(EvidenceError):
         read_evidence_csv(tmp_path / "e.csv")
+
+
+def test_malformed_metric_value_is_an_evidence_error(tmp_path: Path) -> None:
+    write_evidence_csv(tmp_path / "e.csv", [mock_record()])
+    text = (tmp_path / "e.csv").read_text().replace("0.5", "abc", 1)
+    (tmp_path / "e.csv").write_text(text)
+    with pytest.raises(EvidenceError, match="malformed value"):
+        read_evidence_csv(tmp_path / "e.csv")
+
+
+def test_csv_guard_prefixes_are_real_control_characters() -> None:
+    from combine_for_ai.evidence_io import _FORMULA_PREFIXES
+
+    assert "\t" in _FORMULA_PREFIXES and "\r" in _FORMULA_PREFIXES
+    assert "\\t" not in _FORMULA_PREFIXES
