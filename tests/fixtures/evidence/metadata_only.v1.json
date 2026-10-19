@@ -45,6 +45,17 @@
     },
     {
       "definition": null,
+      "name": "vram_gb",
+      "native_name": null,
+      "provenance": "unavailable",
+      "reason": "header-only inspection",
+      "source_artifact_sha256": null,
+      "status": "unsupported",
+      "unit": null,
+      "value": null
+    },
+    {
+      "definition": null,
       "name": "energy_j",
       "native_name": null,
       "provenance": "unavailable",

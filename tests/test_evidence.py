@@ -243,11 +243,12 @@ def test_independent_provenance_survives_every_format(tmp_path: Path) -> None:
         assert by_id["meta-1"].metric("energy_j").value is None
 
 
-def test_tampered_csv_unavailable_to_ok_zero_is_rejected(tmp_path: Path) -> None:
+def test_tampered_csv_zero_for_unsupported_metric_is_rejected(tmp_path: Path) -> None:
     write_evidence_csv(tmp_path / "e.csv", [ALL_FIXTURES["metadata_only"]()])
-    text = (tmp_path / "e.csv").read_text().replace("unsupported", "ok", 1)
-    (tmp_path / "e.csv").write_text(text)
-    with pytest.raises(EvidenceError):
+    text = (tmp_path / "e.csv").read_text()
+    assert ",,unsupported,unavailable," in text
+    (tmp_path / "e.csv").write_text(text.replace(",,unsupported,unavailable,", ",0.0,unsupported,unavailable,", 1))
+    with pytest.raises(EvidenceError, match="must not carry a value"):
         read_evidence_csv(tmp_path / "e.csv")
 
 

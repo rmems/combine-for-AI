@@ -58,7 +58,7 @@ def metadata_only_record() -> EvidenceRecord:
         source_artifact_sha256=SHA_A,
         metrics=tuple(
             unavailable_metric(n, status=MetricStatus.UNSUPPORTED, reason=reason)
-            for n in ("latency_ms", "accuracy", "throughput", "energy_j")
+            for n in ("latency_ms", "accuracy", "throughput", "vram_gb", "energy_j")
         ),
     )
 
