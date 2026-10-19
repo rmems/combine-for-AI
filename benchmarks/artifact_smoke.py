@@ -371,6 +371,7 @@ def _smoke_evidence(
     perplexity: float | None,
     sample_count: int,
     failure_reason: str | None = None,
+    bundled_dataset: bool = False,
 ) -> dict[str, Any]:
     """Evidence envelope for a smoke row.
 
@@ -416,7 +417,8 @@ def _smoke_evidence(
         record_id=run_id,
         workload_track=WorkloadTrack.LIKELIHOOD if has_ok else None,
         execution_kind=ExecutionKind.MOCK if has_ok else ExecutionKind.METADATA_ONLY,
-        data_provenance=DataProvenance.FIXTURE,
+        # Only the bundled sample is known fixture data; a caller-supplied JSONL is unknown.
+        data_provenance=DataProvenance.FIXTURE if bundled_dataset and not failed else DataProvenance.UNKNOWN,
         capabilities=("likelihood",) if has_ok else (),
         versions=Versions(),
         seed=seed,
@@ -702,6 +704,7 @@ def run_artifact_smoke(
                 seed,
                 perplexity=metrics.perplexity,
                 sample_count=len(records),
+                bundled_dataset=dataset_path is None,
             ),
         }
 

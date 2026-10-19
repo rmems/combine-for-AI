@@ -8,6 +8,7 @@ measured or imported results must supply real values or an unavailable status.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 from benchmarks.models import QuantizationProfile
@@ -46,4 +47,7 @@ def mock_performance(
         vram = preset.vram_gb if vram is None else vram
     if speed is None or vram is None:
         raise ValueError(f"no mock performance preset for quantization '{profile.name}'")
+    for label, value in (("speed_tps", speed), ("vram_gb", vram)):
+        if not math.isfinite(value) or value <= 0:
+            raise ValueError(f"mock {label} for '{profile.name}' must be finite and > 0, got {value}")
     return MockPerformance(speed, vram)

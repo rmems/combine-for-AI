@@ -97,3 +97,29 @@ def test_smoke_report_file_reads_back_its_embedded_envelope(tmp_path: Path) -> N
     assert record.execution_kind is ExecutionKind.METADATA_ONLY
     assert record.capabilities == ()
     assert all(m.status is MetricStatus.ERROR for m in record.metrics)
+
+
+@pytest.mark.parametrize("bad", [0.0, -1.0, float("nan"), float("inf")])
+def test_mock_overrides_must_be_positive_and_finite(bad: float) -> None:
+    for kwargs in ({"speed_tps": bad, "vram_gb": 1.0}, {"speed_tps": 1.0, "vram_gb": bad}):
+        profile = QuantizationProfile("x", "fp8", "x", 8, True, "n", **kwargs)
+        with pytest.raises(ValueError, match="finite and > 0"):
+            mock_performance(profile)
+
+
+def test_smoke_data_provenance_distinguishes_bundled_from_supplied(tmp_path: Path) -> None:
+    from benchmarks.artifact_smoke import run_artifact_smoke
+    from combine_for_ai.evidence import DataProvenance
+
+    artifact = tmp_path / "m.gguf"
+    artifact.write_text("ok", encoding="utf-8")
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(
+        json.dumps({"model_name": "g", "source_artifact": {"format": "gguf", "path": str(artifact)}}),
+        encoding="utf-8",
+    )
+    bundled = run_artifact_smoke(manifest, tmp_path / "a", ["json"])
+    assert load_evidence(bundled["evidence"]).data_provenance is DataProvenance.FIXTURE
+    sample = Path(__file__).resolve().parents[1] / "configs" / "datasets" / "lambada.sample.jsonl"
+    supplied = run_artifact_smoke(manifest, tmp_path / "b", ["json"], dataset_path=sample)
+    assert load_evidence(supplied["evidence"]).data_provenance is DataProvenance.UNKNOWN
