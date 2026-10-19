@@ -365,13 +365,26 @@ _SMOKE_UNSUPPORTED = (
 )
 
 
-def _file_sha256(path: str | None) -> str | None:
-    """Chunked SHA-256 of a local artifact file; None when there is no readable file."""
+#: Smoke is header-only, so hashing is bounded: larger artifacts leave the hash unset
+#: rather than turning the run into a full read of the weights.
+SMOKE_HASH_MAX_BYTES = 256 * 1024 * 1024
+
+
+def _file_sha256(path: str | None, max_bytes: int | None = None) -> str | None:
+    """Chunked SHA-256 of a local artifact file.
+
+    None when there is no readable file or it exceeds ``max_bytes``
+    (default ``SMOKE_HASH_MAX_BYTES``).
+    """
     if not path:
         return None
+    limit = SMOKE_HASH_MAX_BYTES if max_bytes is None else max_bytes
     digest = hashlib.sha256()
     try:
-        with Path(path).open("rb") as handle:
+        file_path = Path(path)
+        if file_path.stat().st_size > limit:
+            return None
+        with file_path.open("rb") as handle:
             for chunk in iter(lambda: handle.read(1 << 20), b""):
                 digest.update(chunk)
     except OSError:
@@ -641,7 +654,6 @@ def _write_failure_outputs(
             perplexity=None,
             max_samples=None,
             failure_reason=selection.failure_reason or "artifact smoke failed",
-            artifact_sha256=_file_sha256(selection.artifact_path),
         ),
     }
     run_id = metadata.run_id

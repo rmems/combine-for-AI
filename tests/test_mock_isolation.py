@@ -148,3 +148,26 @@ def test_smoke_evidence_leaves_hash_unset_without_a_local_file(tmp_path: Path) -
 
     assert _file_sha256(None) is None
     assert _file_sha256(str(tmp_path / "missing.bin")) is None
+
+
+def test_artifact_hash_is_bounded_and_skipped_on_failure(tmp_path: Path) -> None:
+    from benchmarks import artifact_smoke
+    from benchmarks.artifact_smoke import _file_sha256, run_artifact_smoke
+
+    big = tmp_path / "big.gguf"
+    big.write_bytes(b"x" * 2048)
+    assert _file_sha256(str(big), max_bytes=1024) is None  # over the limit: no full read
+    assert _file_sha256(str(big), max_bytes=4096) is not None
+    assert artifact_smoke.SMOKE_HASH_MAX_BYTES >= 1 << 20
+
+    # A failed run (bad GOZ1 header) never hashes the artifact.
+    bad = tmp_path / "bad.goz1"
+    bad.write_bytes(b"not a goz1 pack")
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(
+        json.dumps({"model_name": "g", "source_artifact": {"format": "goz1", "path": str(bad)}}),
+        encoding="utf-8",
+    )
+    payload = run_artifact_smoke(manifest, tmp_path / "out", ["json"])
+    assert payload["result"]["status"] == "failed"
+    assert load_evidence(payload["evidence"]).source_artifact_sha256 is None
