@@ -3,6 +3,9 @@
 import copy
 import hashlib
 import json
+import math
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -10,7 +13,8 @@ import pytest
 from combine_for_ai.plot_reports import generate_reports
 
 FIXTURES = Path(__file__).parent / "fixtures"
-CONFIG = Path(__file__).parents[1] / "configs" / "plots.sample.json"
+ROOT = Path(__file__).parents[1]
+CONFIG = ROOT / "configs" / "plots.sample.json"
 
 
 def archive(tmp_path, records):
@@ -41,9 +45,10 @@ def test_prepared_values_intervals_counts_and_source_hash_survive(tmp_path):
     assert payload["plot_config"]["schema_version"] == "combine.plot-config.v1"
     language = next(c for c in payload["cohorts"] if c["workload_track"] == "language")
     accuracy = next(m for m in language["metrics"] if m["name"] == "accuracy")
-    assert accuracy["observations"][0]["value"] == 0.75
-    assert accuracy["observations"][0]["interval"]["low"] == 0.31
-    assert accuracy["observations"][0]["interval"]["high"] == 0.91
+    observation = accuracy["observations"][0]
+    assert math.isclose(observation["value"], 0.75)
+    assert math.isclose(observation["interval"]["low"], 0.31)
+    assert math.isclose(observation["interval"]["high"], 0.91)
     assert accuracy["observations"][0]["counts"] == {"ok": 3, "failed": 1}
     text = written["markdown"].read_text()
     for expected in (
@@ -236,7 +241,7 @@ def test_legacy_route_threshold_failure_does_not_erase_observation(tmp_path):
         for m in payload["cohorts"][0]["metrics"]
         if m["name"] == "route_top1_agreement"
     )
-    assert route["observations"][0]["value"] == 0.6396484375
+    assert math.isclose(route["observations"][0]["value"], 0.6396484375)
     assert "fail" in route["observations"][0]["notes"]
     assert "fail" in written["markdown"].read_text()
     divergence = next(
@@ -396,5 +401,240 @@ def test_prepared_interval_outside_estimate_preserves_confidence_precision(tmp_p
     written, payload = report(
         archive(tmp_path, [record]), tmp_path, plots=find_spec("matplotlib") is not None
     )
-    assert payload["cohorts"][0]["metrics"][0]["observations"][0]["value"] == 0.75
+    assert math.isclose(
+        payload["cohorts"][0]["metrics"][0]["observations"][0]["value"], 0.75
+    )
     assert "95.5%" in written["markdown"].read_text()
+
+
+def _normalized(rows):
+    return {
+        "combine_import_schema": 1,
+        "run": {"schema": "grok_ozempic.multiblock_metrics.v1"},
+        "results": rows,
+    }
+
+
+def _write_raw(tmp_path, name, payload):
+    path = tmp_path / name
+    path.write_text(json.dumps(payload))
+    return path
+
+
+def test_unknown_extra_context_is_isolated(tmp_path):
+    first = fixture_records()[0]
+    second = copy.deepcopy(first)
+    second["series"] = "model-b"
+    first["context"]["quantization"] = {"recipe": None}
+    second["context"]["quantization"] = {"recipe": None}
+    _, payload = report(archive(tmp_path, [first, second]), tmp_path)
+    assert len(payload["cohorts"]) == 2
+    assert {c["comparison_policy"] for c in payload["cohorts"]} == {
+        "isolated: incomplete context"
+    }
+
+
+def test_known_extra_context_can_share_a_cohort(tmp_path):
+    first = fixture_records()[0]
+    second = copy.deepcopy(first)
+    second["series"] = "model-b"
+    second["metrics"][0]["value"] = 0.5
+    first["context"]["quantization"] = "nf4"
+    second["context"]["quantization"] = "nf4"
+    _, payload = report(archive(tmp_path, [first, second]), tmp_path)
+    assert len(payload["cohorts"]) == 1
+    assert payload["cohorts"][0]["comparison_policy"] == "compatible prepared summaries"
+
+
+def test_markdown_archive_text_cannot_embed_links_or_images(tmp_path):
+    record = fixture_records()[0]
+    record["series"] = "![probe](https://evil.example/a.png)"
+    record["metrics"][0]["notes"] = "[click](https://evil.example/b)"
+    written, _ = report(archive(tmp_path, [record]), tmp_path)
+    text = written["markdown"].read_text()
+    assert "![" not in text
+    assert "](" not in text
+    assert "<img" not in text
+    assert "https://evil.example" in text
+
+
+def test_invalid_plot_config_and_evidence_fail_as_value_errors(tmp_path):
+    config = tmp_path / "plots.json"
+    config.write_text(json.dumps({"schema_version": "combine.plot-config.v1", "dpi": 1}))
+    source = FIXTURES / "plot_evidence.sample.json"
+    with pytest.raises(ValueError, match="plot config"):
+        generate_reports([source], tmp_path / "out", config, plots=False)
+    malformed = tmp_path / "malformed.json"
+    malformed.write_text(
+        json.dumps({"schema_version": "combine.plot-evidence.v1", "records": [{}]})
+    )
+    with pytest.raises(ValueError, match="invalid archive"):
+        report(malformed, tmp_path)
+
+
+def test_cli_rejects_invalid_config_without_traceback(tmp_path):
+    config = tmp_path / "plots.json"
+    config.write_text(json.dumps({"schema_version": "combine.plot-config.v1", "dpi": 1}))
+    result = subprocess.run(
+        [
+            sys.executable,
+            "scripts/plot_reports.py",
+            "-i",
+            str(FIXTURES / "plot_evidence.sample.json"),
+            "--config",
+            str(config),
+            "--no-plots",
+            "-o",
+            str(tmp_path / "out"),
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 1
+    assert "report generation failed" in result.stderr
+    assert "Traceback" not in result.stderr
+
+
+def test_empty_legacy_result_is_rejected(tmp_path):
+    path = _write_raw(tmp_path, "empty-row.json", _normalized([{}]))
+    with pytest.raises(ValueError, match="non-empty arm"):
+        report(path, tmp_path)
+
+
+def test_malformed_legacy_metric_is_rejected_not_missing(tmp_path):
+    path = _write_raw(
+        tmp_path,
+        "bad-metric.json",
+        _normalized(
+            [
+                {
+                    "arm": "expert_only",
+                    "block_index": 0,
+                    "route_top1_agreement": "bad",
+                }
+            ]
+        ),
+    )
+    with pytest.raises(ValueError, match="route_top1_agreement"):
+        report(path, tmp_path)
+    absent = _write_raw(
+        tmp_path,
+        "absent-metric.json",
+        _normalized([{"arm": "expert_only", "block_index": 0}]),
+    )
+    _, payload = report(absent, tmp_path)
+    route = next(
+        metric
+        for metric in payload["cohorts"][0]["metrics"]
+        if metric["name"] == "route_top1_agreement"
+    )
+    assert route["observations"][0]["value"] is None
+    assert route["observations"][0]["status"] == "missing"
+
+
+def test_malformed_raw_goz_metric_and_bool_block_are_rejected(tmp_path):
+    raw = json.loads((FIXTURES / "goz_multiblock_metrics.sample.json").read_text())
+    raw["chain"]["per_block"][0]["expert_only"]["router_top1_agreement"] = "bad"
+    path = _write_raw(tmp_path, "bad-raw.json", raw)
+    with pytest.raises(ValueError, match="router_top1_agreement"):
+        report(path, tmp_path)
+    raw = json.loads((FIXTURES / "goz_multiblock_metrics.sample.json").read_text())
+    raw["chain"]["blocks"] = [True, 1]
+    path = _write_raw(tmp_path, "bool-block.json", raw)
+    with pytest.raises(ValueError, match="nonnegative"):
+        report(path, tmp_path)
+
+
+def test_malformed_route_observation_is_rejected(tmp_path):
+    raw = json.loads((FIXTURES / "goz_route_preservation.sample.json").read_text())
+    raw["summary"][0]["observed"] = "bad"
+    path = _write_raw(tmp_path, "bad-route.json", raw)
+    with pytest.raises(ValueError, match="router_top1_agreement"):
+        report(path, tmp_path)
+
+
+def test_non_finite_legacy_metric_is_rejected(tmp_path):
+    path = _write_raw(
+        tmp_path,
+        "nan-metric.json",
+        _normalized(
+            [
+                {
+                    "arm": "expert_only",
+                    "block_index": 0,
+                    "route_top1_agreement": float("nan"),
+                }
+            ]
+        ),
+    )
+    with pytest.raises(ValueError, match="non-finite"):
+        report(path, tmp_path)
+
+
+def test_source_path_label_is_not_opened(tmp_path):
+    from combine_for_ai.goz_import import import_goz_experiment
+
+    imported = import_goz_experiment(FIXTURES / "goz_multiblock_metrics.sample.json")
+    raw = imported.to_payload(run_id="label")
+    raw["results"][0]["source_path"] = "![x](https://evil.example/passwd.png)"
+    path = _write_raw(tmp_path, "labeled.json", raw)
+    written, payload = report(path, tmp_path)
+    labels = {cohort["context"]["source_path"] for cohort in payload["cohorts"]}
+    assert "![x](https://evil.example/passwd.png)" in labels
+    text = written["markdown"].read_text()
+    assert "![" not in text
+    assert "](" not in text
+
+
+def test_large_block_cohort_still_writes_summaries_and_plot(tmp_path):
+    pytest.importorskip("matplotlib")
+    base = fixture_records()[0]
+    base["metrics"] = [base["metrics"][0]]
+    records = []
+    for block in range(60):
+        row = copy.deepcopy(base)
+        row["block_index"] = block
+        records.append(row)
+    written, payload = report(archive(tmp_path, records), tmp_path, plots=True)
+    assert payload["cohorts"][0]["metrics"][0]["observations"]
+    assert len(payload["cohorts"][0]["metrics"][0]["observations"]) == 60
+    assert written["markdown"].is_file()
+    pngs = list((tmp_path / "reports" / "plots").glob("*.png"))
+    assert len(pngs) == 1
+    assert pngs[0].read_bytes().startswith(b"\x89PNG")
+
+
+def test_block_intervals_follow_series_color_and_dodge():
+    pytest.importorskip("matplotlib")
+    from combine_for_ai.plot_render import _draw_observations
+    from matplotlib import pyplot as plt
+
+    observations = [
+        {
+            "series": "expert_only",
+            "block_index": 0,
+            "value": 0.9,
+            "interval": {"low": 0.8, "high": 1.0},
+            "status": "ok",
+        },
+        {
+            "series": "fp16_control",
+            "block_index": 0,
+            "value": 0.4,
+            "interval": {"low": 0.3, "high": 0.5},
+            "status": "ok",
+        },
+    ]
+    _fig, ax = plt.subplots()
+    try:
+        _draw_observations(ax, observations)
+        caps = [line for line in ax.lines if line.get_marker() == "_"]
+        xs = [float(line.get_xdata()[0]) for line in caps]
+        colors = [line.get_color() for line in caps]
+    finally:
+        plt.close(_fig)
+    assert len(caps) == 2
+    assert xs[0] != xs[1]
+    assert colors[0] != colors[1]

@@ -32,7 +32,7 @@ Outputs:
 | `reports/json/plot-config.json` | Plotting configuration values snapshot; the original input config's byte hash is in the report |
 | `reports/csv/plot-report.csv` | One row per upstream observation, including source/config hashes, context, raw references and availability (omitted for empty input) |
 | `reports/markdown/plot-report.md` | Definitions, provenance, sample/repeat/seed policy, status counts, upstream denominators, interval definitions and linked plots |
-| `reports/plots/<cohort>-<metric-index>.png` | Available metrics only, with units, provenance, counts, uncertainty policy and source hash |
+| `reports/plots/<cohort>-<metric-index>.png` | Available metrics only, with units, provenance, status counts, uncertainty policy and source hash. Per-observation counts, intervals and notes stay in the Markdown and JSON; the figure footnote is bounded so large cohorts still render. |
 
 The command overwrites its fixed summary files; use a separate output directory
 for each campaign you want to retain. Older PNGs are not deleted, but **only
@@ -109,7 +109,8 @@ nonempty, known values for all of:
 Use versioned task/scorer/dataset/engine identities and frozen configuration,
 runtime/harness/environment settings. Record sample IDs and seeds explicitly;
 repeated samples are not independent seeds. Nested null/unknown/empty values
-make context incomplete. A string such as `none` may explicitly declare that a
+anywhere in `context`, including fields outside the required set, make that
+record incomplete. A string such as `none` may explicitly declare that a
 setting (e.g. preprocessing) does not apply. Missing context is labelled
 `isolated: incomplete context`, never inferred from matching metric names.
 
@@ -128,6 +129,10 @@ unchanged. Retained views include top-1/top-2 route agreement and residual drift
 vs block, block-output cosine and expert-load JS divergence. Missing expected
 `expert_only`/`fp16_control` arms or declared blocks are visible as missing.
 Malformed rows and unknown schema versions fail closed, not silently filtered.
+A present legacy metric that is non-numeric, boolean, or non-finite is rejected;
+null and omitted metrics stay missing. An empty normalized result object is
+rejected rather than shown as an unknown series. Imported `source_path` values
+are provenance labels in cohort context and are not opened or resolved.
 
 Legacy data is labelled `import / fixture-or-unknown / unknown` and
 `legacy observations: unqualified`. Explicit fixture markers are honored;

@@ -7,6 +7,8 @@ import argparse
 import sys
 from pathlib import Path
 
+from pydantic import ValidationError
+
 _ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_ROOT))
 sys.path.insert(0, str(_ROOT / "src"))
@@ -36,7 +38,7 @@ def main(argv: list[str] | None = None) -> int:
         written = generate_reports(
             args.input, args.output_dir, args.config, plots=not args.no_plots
         )
-    except (ValueError, OSError) as exc:
+    except (ValueError, OSError, ValidationError) as exc:
         print(f"report generation failed: {exc}", file=sys.stderr)
         return 1
     for name, path in written.items():
