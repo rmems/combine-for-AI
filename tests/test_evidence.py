@@ -216,9 +216,9 @@ def test_csv_round_trip_preserves_hashes_units_and_negative_values(tmp_path: Pat
     back = read_evidence_csv(tmp_path / "e.csv")
     assert back == _all_records()
     real = next(r for r in back if r.record_id == "imp-real")
-    metric = real.metric("perplexity")
+    metric = real.metric("mean_logprob")
     assert metric.value == -1.25e-3 and metric.source_artifact_sha256 == SHA_A
-    assert metric.unit == "ratio" and metric.native_name == "ppl_val"
+    assert metric.unit == "nats" and metric.native_name == "mean_ll"
     assert real.seed == -3
 
 

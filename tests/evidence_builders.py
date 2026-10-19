@@ -76,7 +76,7 @@ def imported_record(data: DataProvenance, record_id: str) -> EvidenceRecord:
         environment_identity="env:" + SHA_B,
         source_artifact_sha256=SHA_A,
         metrics=(
-            ok_metric("perplexity", -1.25e-3, MetricProvenance.IMPORTED, sha=SHA_A, native="ppl_val"),
+            ok_metric("mean_logprob", -1.25e-3, MetricProvenance.IMPORTED, unit="nats", sha=SHA_A, native="mean_ll"),
             unavailable_metric("energy_j", reason="not in source file"),
         ),
         notes="line one | pipe\nline two",

@@ -13,14 +13,14 @@
   "execution_kind": "imported",
   "metrics": [
     {
-      "definition": "perplexity definition",
-      "name": "perplexity",
-      "native_name": "ppl_val",
+      "definition": "mean_logprob definition",
+      "name": "mean_logprob",
+      "native_name": "mean_ll",
       "provenance": "imported",
       "reason": null,
       "source_artifact_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1",
       "status": "ok",
-      "unit": "ratio",
+      "unit": "nats",
       "value": -0.00125
     },
     {
