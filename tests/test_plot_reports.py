@@ -351,6 +351,18 @@ def test_repeated_input_is_rejected_not_counted_as_independent_evidence(tmp_path
         )
 
 
+def test_duplicate_incomplete_observations_are_rejected(tmp_path):
+    record = fixture_records()[0]
+    record["context"].pop("sample_ids")
+    repeated = copy.deepcopy(record)
+    with pytest.raises(ValueError, match="duplicate"):
+        report(archive(tmp_path, [record, repeated]), tmp_path)
+    repeated["block_index"] = 1
+    record["block_index"] = 0
+    _, payload = report(archive(tmp_path, [record, repeated]), tmp_path)
+    assert len(payload["cohorts"]) == 2
+
+
 def test_failed_legacy_arm_never_becomes_successful_observation(tmp_path):
     raw = json.loads((FIXTURES / "goz_multiblock_metrics.sample.json").read_text())
     raw["chain"]["per_block"][1]["expert_only"]["status"] = "failed"

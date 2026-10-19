@@ -117,8 +117,9 @@ setting (e.g. preprocessing) does not apply. Missing context is labelled
 Even in a compatible cohort, different metric units/definitions/scopes get
 separate plots. Each series remains an individual upstream prepared summary;
 the renderer **never pools, averages, ranks or computes deltas**. Duplicate
-series/metric/block observations are rejected: prepare repeated observations and
-their uncertainty upstream instead of treating repeats as independent results.
+series/metric/block observations are rejected even when incomplete context
+would otherwise isolate them. Prepare repeated observations and their
+uncertainty upstream instead of treating repeats as independent results.
 
 ## Legacy GOZ1 compatibility and limits
 

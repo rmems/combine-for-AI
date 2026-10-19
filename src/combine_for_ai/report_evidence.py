@@ -112,8 +112,9 @@ def _cohorts(
     records: list[EvidenceRecord], source: str, *, legacy: bool
 ) -> list[dict[str, Any]]:
     cohorts: dict[str, dict[str, Any]] = {}
+    seen: set[str] = set()
     for index, record in enumerate(records):
-        _place_record(cohorts, record, index, source, legacy)
+        _place_record(cohorts, record, index, source, (legacy, seen))
     return list(cohorts.values())
 
 
@@ -122,15 +123,16 @@ def _place_record(
     record: EvidenceRecord,
     index: int,
     source: str,
-    legacy: bool,
+    placement: tuple[bool, set[str]],
 ) -> None:
+    legacy, seen = placement
     fields = record.model_dump(
         exclude={"series", "metrics", "block_index", "source_artifacts"}
     )
     complete = _context_complete(record)
-    key = json.dumps(fields, sort_keys=True, allow_nan=False)
-    if not legacy and not complete:
-        key = f"{key}:{index}"
+    base_key = json.dumps(fields, sort_keys=True, allow_nan=False)
+    _reject_repeat(seen, record, base_key, source)
+    key = f"{base_key}:{index}" if not legacy and not complete else base_key
     policy = _comparison_policy(legacy, complete)
     cohort = _cohort_for(cohorts, fields, source, key, policy)
     for metric in record.metrics:
@@ -174,6 +176,33 @@ def _new_cohort(
 ) -> dict[str, Any]:
     digest = hashlib.sha256(f"{source}:{key}".encode()).hexdigest()
     return {**fields, "id": digest[:16], "source": source, "comparison_policy": policy, "metrics": []}
+
+
+def _reject_repeat(
+    seen: set[str], record: EvidenceRecord, base_key: str, source: str
+) -> None:
+    for metric in record.metrics:
+        identity = _observation_identity(record, metric, base_key)
+        if identity in seen:
+            raise ValueError(
+                f"{source}: duplicate observation for {record.series}/{metric.name}"
+                f"/block={record.block_index}; prepare repeats upstream"
+            )
+        seen.add(identity)
+
+
+def _observation_identity(record: EvidenceRecord, metric: Any, base_key: str) -> str:
+    definition = metric.model_dump(include={"name", "unit", "definition", "scope"})
+    return json.dumps(
+        {
+            "cohort": base_key,
+            "definition": definition,
+            "series": record.series,
+            "block": record.block_index,
+        },
+        sort_keys=True,
+        allow_nan=False,
+    )
 
 
 def _add_metric(cohort: dict[str, Any], record: EvidenceRecord, metric: Any, source: str) -> None:
