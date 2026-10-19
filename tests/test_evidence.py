@@ -279,3 +279,10 @@ def test_legacy_cell_with_real_nonzero_accuracy_keeps_zero_entropy() -> None:
     record = load_evidence(cell)
     assert record.metric("accuracy").value == 1.0
     assert record.metric("routing_entropy").value == 0.0
+
+
+def test_markdown_round_trip_with_unicode_line_separators() -> None:
+    record = imported_record(DataProvenance.REAL, "sep").model_copy(
+        update={"notes": "a\x0bb\x0cc\x1cd\x85e\u2028f\u2029g"}
+    )
+    assert parse_evidence_markdown(render_evidence_markdown([record])) == [record]

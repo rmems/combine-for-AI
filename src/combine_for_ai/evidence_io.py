@@ -261,7 +261,8 @@ def render_evidence_markdown(records: Sequence[EvidenceRecord]) -> str:
 
 
 def parse_evidence_markdown(text: str) -> list[EvidenceRecord]:
-    table = [line for line in text.splitlines() if line.startswith("|")]
+    # split("\n") only: _md_escape guarantees no raw \n, but other separators splitlines() honours may appear in cells.
+    table = [line.rstrip("\r") for line in text.split("\n") if line.startswith("|")]
     if len(table) < 2:
         raise EvidenceError("no evidence table found in markdown")
     header = [c.strip() for c in _md_split(table[0])]

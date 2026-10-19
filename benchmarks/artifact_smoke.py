@@ -379,6 +379,7 @@ def _smoke_evidence(
     adapter over fixture data, never from the artifact.
     """
     failed = failure_reason is not None
+    failure_reason = (failure_reason or "artifact smoke failed") if failed else None
     metrics: list[MetricValue] = []
     if perplexity is not None and not failed:
         metrics.append(
