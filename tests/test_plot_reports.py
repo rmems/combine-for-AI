@@ -206,6 +206,14 @@ def test_missing_unknown_or_malformed_input_is_actionable(tmp_path):
         report(path, tmp_path)
 
 
+def test_legacy_results_without_run_fail_without_traceback(tmp_path):
+    for payload in ({"results": [{"arm": "a"}]}, {"results": []}):
+        path = tmp_path / "no-run.json"
+        path.write_text(json.dumps(payload))
+        with pytest.raises(ValueError, match="schema"):
+            report(path, tmp_path)
+
+
 def test_legacy_goz1_raw_and_import_reports_keep_route_and_residual_views(tmp_path):
     from combine_for_ai.goz_import import import_goz_experiment, write_import_reports
 

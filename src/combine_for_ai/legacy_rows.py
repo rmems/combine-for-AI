@@ -30,7 +30,8 @@ def _require_normalized_schema(raw: dict[str, Any], path: Path) -> None:
     version = raw.get("combine_import_schema", raw.get("schema_version", 1))
     if version not in SUPPORTED_VERSIONS:
         raise ValueError("unsupported legacy schema_version")
-    if raw["run"].get("schema") not in GOZ_SCHEMAS:
+    run = raw.get("run") or {}
+    if not isinstance(run, dict) or run.get("schema") not in GOZ_SCHEMAS:
         raise ValueError(
             f"{path}: legacy report lacks a supported GOZ1 schema; "
             "prepare combine.plot-evidence.v1 summaries (do not promote mock presets)"
