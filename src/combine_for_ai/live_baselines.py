@@ -63,7 +63,7 @@ class BaselineRegistry(BaseModel):
 
 
 class TaskResultRow(BaseModel):
-    """One evaluated SWE-bench-Live instance from a per-task result.json."""
+    """One evaluated SWE-bench-Live instance derived from a submission or harness row."""
 
     model_config = ConfigDict(extra="allow")
 
@@ -104,9 +104,16 @@ def flagged_baseline_ids(registry: BaselineRegistry) -> frozenset[str]:
     )
 
 
+def is_submission_results_payload(payload: Mapping[str, Any]) -> bool:
+    """Detect SWE-bench-Live submission ``results.json`` (per-instance ID lists)."""
+    return "success_ids" in payload or "submitted_ids" in payload
+
+
 def is_leaderboard_aggregate_payload(payload: Mapping[str, Any]) -> bool:
     """Detect leaderboard-style per-language totals (not per-task rows)."""
     if "instance_id" in payload:
+        return False
+    if is_submission_results_payload(payload):
         return False
     if "rows" in payload and isinstance(payload["rows"], list):
         return False
@@ -145,15 +152,115 @@ def load_per_task_result_json(path: Path) -> TaskResultRow:
     return row
 
 
+def _load_json_object(path: Path) -> dict[str, Any]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise LiveBaselineError(f"failed to read JSON at {path}") from exc
+    if not isinstance(payload, dict):
+        raise LiveBaselineError(f"expected JSON object at {path}")
+    return payload
+
+
+def _instance_ids_from_submission_results(results: Mapping[str, Any]) -> list[str]:
+    if is_leaderboard_aggregate_payload(results):
+        raise LiveBaselineError(
+            "refusing leaderboard per-language totals; ingest submission results.json"
+        )
+    if not is_submission_results_payload(results):
+        raise LiveBaselineError("not a SWE-bench-Live submission results.json")
+    if isinstance(results.get("submitted_ids"), list) and results["submitted_ids"]:
+        ordered = [str(item) for item in results["submitted_ids"]]
+    else:
+        buckets = (
+            "success_ids",
+            "failure_ids",
+            "error_ids",
+            "incomplete_ids",
+            "empty_patch_ids",
+        )
+        seen: set[str] = set()
+        ordered: list[str] = []
+        for bucket in buckets:
+            ids = results.get(bucket)
+            if not isinstance(ids, list):
+                continue
+            for item in ids:
+                instance_id = str(item)
+                if instance_id not in seen:
+                    seen.add(instance_id)
+                    ordered.append(instance_id)
+    if not ordered:
+        raise LiveBaselineError("submission results.json lists no instance ids")
+    return ordered
+
+
+def _model_patch_from_preds_entry(entry: Any) -> str | None:
+    if isinstance(entry, str):
+        return entry
+    if isinstance(entry, Mapping):
+        patch = entry.get("model_patch")
+        if isinstance(patch, str):
+            return patch
+    return None
+
+
+def rows_from_submission_bundle(
+    results: Mapping[str, Any],
+    preds: Mapping[str, Any],
+    *,
+    source: str,
+) -> list[TaskResultRow]:
+    """Expand submission ``results.json`` + ``preds.json`` into per-task rows."""
+    raw_success = results.get("success_ids")
+    if isinstance(raw_success, list):
+        success_ids = {str(item) for item in raw_success}
+    else:
+        success_ids = set()
+    rows: list[TaskResultRow] = []
+    for instance_id in _instance_ids_from_submission_results(results):
+        pred_entry = preds.get(instance_id)
+        rows.append(
+            TaskResultRow(
+                instance_id=instance_id,
+                resolved=instance_id in success_ids,
+                model_patch=_model_patch_from_preds_entry(pred_entry),
+            )
+        )
+    _assert_unique_instance_ids(rows, context=source)
+    return rows
+
+
+def ingest_submission_directory(run_dir: Path, *, run_id: str | None = None) -> RunSnapshot:
+    if not run_dir.is_dir():
+        raise LiveBaselineError(f"run directory not found: {run_dir}")
+    resolved_run_id = run_id or run_dir.name
+    results_path = run_dir / "results.json"
+    preds_path = run_dir / "preds.json"
+    if not results_path.is_file() or not preds_path.is_file():
+        raise LiveBaselineError(
+            f"submission folder {run_dir} must contain results.json and preds.json"
+        )
+    results = _load_json_object(results_path)
+    preds = _load_json_object(preds_path)
+    rows = rows_from_submission_bundle(results, preds, source=str(run_dir))
+    instance_ids = tuple(row.instance_id for row in rows)
+    return RunSnapshot(run_id=resolved_run_id, instance_ids=instance_ids, rows=tuple(rows))
+
+
 def ingest_run_directory(run_dir: Path, *, run_id: str | None = None) -> RunSnapshot:
     if not run_dir.is_dir():
         raise LiveBaselineError(f"run directory not found: {run_dir}")
     resolved_run_id = run_id or run_dir.name
+    if (run_dir / "results.json").is_file() and (run_dir / "preds.json").is_file():
+        return ingest_submission_directory(run_dir, run_id=resolved_run_id)
     rows: list[TaskResultRow] = []
     for path in sorted(run_dir.rglob("result.json")):
         rows.append(load_per_task_result_json(path))
     if not rows:
-        raise LiveBaselineError(f"no per-task result.json files under {run_dir}")
+        raise LiveBaselineError(
+            f"no submission results.json+preds.json or per-task result.json under {run_dir}"
+        )
     _assert_unique_instance_ids(rows, context=run_dir)
     instance_ids = tuple(row.instance_id for row in rows)
     return RunSnapshot(run_id=resolved_run_id, instance_ids=instance_ids, rows=tuple(rows))
@@ -163,6 +270,11 @@ def ingest_result_rows(payload: Mapping[str, Any], *, source: str = "<payload>")
     """Ingest an explicit list of per-task rows (never leaderboard totals)."""
     if not payload:
         raise LiveBaselineError(f"empty per-task ingest payload at {source}")
+    if is_submission_results_payload(payload):
+        raise LiveBaselineError(
+            f"refusing bare submission results.json at {source}; "
+            "use ingest_submission_directory with preds.json"
+        )
     if is_leaderboard_aggregate_payload(payload):
         raise LiveBaselineError(
             f"refusing leaderboard aggregate at {source}; ingest per-task result.json rows only"
@@ -313,13 +425,36 @@ def _apply_unified_hunks(base: str, file_patch: str) -> str:
 
 
 def is_test_path(path: str, *, test_patch: str | None = None) -> bool:
-    normalized = path.replace("\\", "/").lower()
-    filename = normalized.rsplit("/", 1)[-1]
+    normalized = path.replace("\\", "/")
+    lower = normalized.lower()
+    filename = lower.rsplit("/", 1)[-1]
+    segments = lower.split("/")
     if (
-        "/test/" in normalized
-        or normalized.startswith("test/")
-        or filename.endswith("_test.py")
-        or filename.startswith("test_")
+        "tests" in segments
+        or "__tests__" in segments
+        or "/tests/" in lower
+        or "/test/" in lower
+        or lower.startswith("test/")
+        or "/spec/" in lower
+        or "src/test" in lower
+    ):
+        return True
+    if (
+        filename.startswith(("test_", "spec_"))
+        or filename.endswith(
+            (
+                "_test.py",
+                "_test.rs",
+                "_test.go",
+                "_test.java",
+                "_spec.rb",
+                ".spec.ts",
+                ".spec.js",
+                ".test.ts",
+                ".test.js",
+            )
+        )
+        or ".test." in filename
     ):
         return True
     if test_patch and path in _split_patch_files(test_patch):
@@ -425,7 +560,10 @@ __all__ = [
     "git_blob_sha1",
     "ingest_result_rows",
     "ingest_run_directory",
+    "ingest_submission_directory",
     "is_leaderboard_aggregate_payload",
+    "is_submission_results_payload",
+    "rows_from_submission_bundle",
     "load_baseline_registry",
     "load_per_task_result_json",
     "rank_runs_on_shared_rows",

@@ -1,7 +1,8 @@
 {
   "schema_version": 1,
   "ingest_policy": {
-    "source": "per_task_result_json_only",
+    "source": "submission_results_json_plus_preds_json",
+    "also_supports_harness_per_task_result_json": true,
     "reject_leaderboard_per_language_totals": true,
     "ranking_instance_set": "intersection_of_compared_runs"
   },
@@ -36,7 +37,7 @@
       "pr": 59,
       "subset": "rust",
       "usable_as_baseline": false,
-      "reason": "Open network, prefer-upstream-fix prompting, and maintainer notes that 83/171 Rust rows fetched an upstream fix PR rather than a local patch; leaderboard 83/171 is not an admissible anchor."
+      "reason": "Open network and prefer-upstream-fix prompting; published Rust leaderboard score is 87/171 (results.json), not an admissible anchor. rmems trajectory measurement separately counted 83/171 rows as fetching an upstream fix PR rather than a local patch."
     },
     {
       "id": "slingshot-swe-bench-live",

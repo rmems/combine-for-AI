@@ -15,7 +15,10 @@ from combine_for_ai.live_baselines import (
     git_blob_sha1,
     ingest_result_rows,
     ingest_run_directory,
+    ingest_submission_directory,
     is_leaderboard_aggregate_payload,
+    is_submission_results_payload,
+    is_test_path,
     load_baseline_registry,
     rank_runs_on_shared_rows,
     shared_instance_ids,
@@ -23,7 +26,16 @@ from combine_for_ai.live_baselines import (
 )
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "swe_bench_live"
+SUBMISSIONS = FIXTURES / "submissions"
 REGISTRY = Path(__file__).resolve().parents[1] / "data" / "swe_bench_live" / "baselines.json"
+
+
+def test_registry_pr59_documents_87_of_171_and_rmems_trajectory_note() -> None:
+    registry = load_baseline_registry(REGISTRY)
+    entry = next(e for e in registry.entries if e.id == "tianxicode-swe-bench-live-pr-59")
+    assert "87/171" in entry.reason
+    assert "83/171" in entry.reason
+    assert "rmems trajectory" in entry.reason.lower()
 
 
 def test_registry_marks_known_bad_submissions_unusable() -> None:
@@ -52,6 +64,49 @@ def test_leaderboard_per_language_totals_are_rejected() -> None:
     assert is_leaderboard_aggregate_payload(aggregate) is True
     with pytest.raises(LiveBaselineError, match="leaderboard aggregate"):
         ingest_result_rows(aggregate, source="leaderboard.json")
+
+
+def test_submission_results_json_is_not_leaderboard_aggregate() -> None:
+    path = SUBMISSIONS / "tianxicode_rust_pr59" / "deepseek-flash" / "results.json"
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    assert is_submission_results_payload(payload) is True
+    assert is_leaderboard_aggregate_payload(payload) is False
+
+
+def test_ingest_tianxicode_rust_submission_fixture() -> None:
+    run = ingest_submission_directory(
+        SUBMISSIONS / "tianxicode_rust_pr59" / "deepseek-flash",
+        run_id="tianxicode-rust-pr59",
+    )
+    assert run.instance_ids == (
+        "linebender__vello-1100",
+        "apache__datafusion-17233",
+    )
+    by_id = {row.instance_id: row for row in run.rows}
+    assert by_id["linebender__vello-1100"].resolved is True
+    assert by_id["apache__datafusion-17233"].resolved is False
+    assert by_id["linebender__vello-1100"].model_patch
+    assert "diff --git" in (by_id["linebender__vello-1100"].model_patch or "")
+
+
+def test_ingest_agav_lite_submission_fixture() -> None:
+    run = ingest_run_directory(SUBMISSIONS / "agav_lite" / "gpt-5.5", run_id="agav-lite")
+    assert len(run.rows) == 2
+    assert all(row.model_patch for row in run.rows)
+
+
+def test_bare_submission_results_json_requires_preds_companion() -> None:
+    path = SUBMISSIONS / "agav_lite" / "gpt-5.5" / "results.json"
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    with pytest.raises(LiveBaselineError, match="preds.json"):
+        ingest_result_rows(payload, source=str(path))
+
+
+def test_is_test_path_detects_rust_tests_dir_without_test_patch() -> None:
+    assert is_test_path("crates/foo/tests/integration_test.rs") is True
+    assert is_test_path("src/lib.rs") is False
+    assert is_test_path("pkg/widget_test.go") is True
+    assert is_test_path("frontend/component.test.tsx") is True
 
 
 def test_ingest_run_directory_collects_instance_ids() -> None:
