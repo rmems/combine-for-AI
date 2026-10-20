@@ -1,0 +1,63 @@
+{
+  "schema_version": 1,
+  "ingest_policy": {
+    "source": "per_task_result_json_only",
+    "reject_leaderboard_per_language_totals": true,
+    "ranking_instance_set": "intersection_of_compared_runs"
+  },
+  "entries": [
+    {
+      "id": "tianxicode-swe-bench-live-pr-53",
+      "submission": "TianxiCode",
+      "pr": 53,
+      "subset": "lite",
+      "usable_as_baseline": false,
+      "reason": "Open-network rollout and a system prompt that steers agents to prefer upstream fixes over local patches; not protocol-comparable to offline SWE-bench-Live baselines."
+    },
+    {
+      "id": "tianxicode-swe-bench-live-pr-57",
+      "submission": "TianxiCode",
+      "pr": 57,
+      "subset": "java",
+      "usable_as_baseline": false,
+      "reason": "Same TianxiCode scaffold as PR #53: open network plus prefer-upstream-fix prompting; per-task result.json is the only admissible ingest, not leaderboard Java totals."
+    },
+    {
+      "id": "tianxicode-swe-bench-live-pr-58",
+      "submission": "TianxiCode",
+      "pr": 58,
+      "subset": "go",
+      "usable_as_baseline": false,
+      "reason": "Same TianxiCode scaffold as PR #53: open network plus prefer-upstream-fix prompting; per-task result.json is the only admissible ingest, not leaderboard Go totals."
+    },
+    {
+      "id": "tianxicode-swe-bench-live-pr-59",
+      "submission": "TianxiCode",
+      "pr": 59,
+      "subset": "rust",
+      "usable_as_baseline": false,
+      "reason": "Open network, prefer-upstream-fix prompting, and maintainer notes that 83/171 Rust rows fetched an upstream fix PR rather than a local patch; leaderboard 83/171 is not an admissible anchor."
+    },
+    {
+      "id": "slingshot-swe-bench-live",
+      "submission": "Slingshot",
+      "pr": null,
+      "usable_as_baseline": false,
+      "reason": "Evaluation reused upstream repository clones with reruns rather than the standard isolated per-instance containers; rankings must use shared per-task rows only."
+    },
+    {
+      "id": "agav-swe-bench-live",
+      "submission": "agav",
+      "pr": null,
+      "usable_as_baseline": false,
+      "reason": "Eighty-seven submitted patches are byte-identical to the public gold patch on non-test files; not an independent agent baseline."
+    },
+    {
+      "id": "ami-swe-bench-live",
+      "submission": "AMI",
+      "pr": null,
+      "usable_as_baseline": false,
+      "reason": "README documents that the gold test_patch was applied before the agent rollout, violating SWE-bench-Live protocol."
+    }
+  ]
+}
