@@ -161,13 +161,15 @@ def ingest_run_directory(run_dir: Path, *, run_id: str | None = None) -> RunSnap
 
 def ingest_result_rows(payload: Mapping[str, Any], *, source: str = "<payload>") -> list[TaskResultRow]:
     """Ingest an explicit list of per-task rows (never leaderboard totals)."""
+    if not payload:
+        raise LiveBaselineError(f"empty per-task ingest payload at {source}")
     if is_leaderboard_aggregate_payload(payload):
         raise LiveBaselineError(
             f"refusing leaderboard aggregate at {source}; ingest per-task result.json rows only"
         )
     if "rows" in payload and isinstance(payload["rows"], list):
         raw_rows = payload["rows"]
-    elif all(isinstance(value, Mapping) for value in payload.values()):
+    elif payload and all(isinstance(value, Mapping) for value in payload.values()):
         raw_rows = list(payload.values())
     else:
         raw_rows = [payload]
@@ -237,11 +239,11 @@ def filter_usable_runs(
 
 def git_blob_sha1(content: bytes) -> str:
     header = f"blob {len(content)}\0".encode()
-    return hashlib.sha1(header + content).hexdigest()
+    return hashlib.sha1(header + content, usedforsecurity=False).hexdigest()
 
 
 _DIFF_FILE_RE = re.compile(r"^diff --git a/(?P<path>.+?) b/(?P<path2>.+?)$")
-_HUNK_RE = re.compile(r"^@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@")
+_HUNK_HEADER_RE = re.compile(r"^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@")
 
 
 def _split_patch_files(patch: str) -> dict[str, str]:
@@ -273,17 +275,29 @@ def _apply_unified_hunks(base: str, file_patch: str) -> str:
     for line in file_patch.splitlines():
         if line.startswith(("diff --git", "index ", "---", "+++")):
             continue
-        if _HUNK_RE.match(line):
+        hunk_match = _HUNK_HEADER_RE.match(line)
+        if hunk_match:
             in_hunk = True
+            target_idx = int(hunk_match.group(1)) - 1
+            if target_idx < idx:
+                raise LiveBaselineError("patch hunks overlap or are out of order")
+            out.extend(base_lines[idx:target_idx])
+            idx = target_idx
             continue
         if not in_hunk:
             continue
         if line.startswith(" "):
             if idx >= len(base_lines):
                 raise LiveBaselineError("patch context exceeds base file length")
+            if base_lines[idx].rstrip("\r\n") != line[1:]:
+                raise LiveBaselineError("patch context does not match base file")
             out.append(base_lines[idx])
             idx += 1
         elif line.startswith("-"):
+            if idx >= len(base_lines):
+                raise LiveBaselineError("patch deletion exceeds base file length")
+            if base_lines[idx].rstrip("\r\n") != line[1:]:
+                raise LiveBaselineError("patch deletion does not match base file")
             idx += 1
         elif line.startswith("+"):
             addition = line[1:]
@@ -300,7 +314,13 @@ def _apply_unified_hunks(base: str, file_patch: str) -> str:
 
 def is_test_path(path: str, *, test_patch: str | None = None) -> bool:
     normalized = path.replace("\\", "/").lower()
-    if "/test/" in normalized or normalized.startswith("test/") or normalized.endswith("_test.py"):
+    filename = normalized.rsplit("/", 1)[-1]
+    if (
+        "/test/" in normalized
+        or normalized.startswith("test/")
+        or filename.endswith("_test.py")
+        or filename.startswith("test_")
+    ):
         return True
     if test_patch and path in _split_patch_files(test_patch):
         return True
@@ -317,9 +337,11 @@ def byte_identical_gold_src(
     """True when non-test files touched by gold match gold blob hashes after each patch."""
     gold_files = _split_patch_files(gold_patch)
     model_files = _split_patch_files(model_patch)
+    compared = 0
     for path in gold_files:
         if is_test_path(path, test_patch=test_patch):
             continue
+        compared += 1
         base = base_files.get(path, "")
         try:
             gold_bytes = _apply_unified_hunks(base, gold_files[path]).encode("utf-8")
@@ -330,7 +352,7 @@ def byte_identical_gold_src(
             return False
         if git_blob_sha1(gold_bytes) != git_blob_sha1(model_bytes):
             return False
-    return bool(gold_files)
+    return compared > 0
 
 
 def contains_gold_test_patch(*, model_patch: str, test_patch: str) -> bool:

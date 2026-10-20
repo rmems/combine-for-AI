@@ -30,6 +30,8 @@ def test_registry_marks_known_bad_submissions_unusable() -> None:
     registry = load_baseline_registry(REGISTRY)
     blocked = flagged_baseline_ids(registry)
     assert "tianxicode-swe-bench-live-pr-53" in blocked
+    assert "tianxicode-swe-bench-live-pr-57" in blocked
+    assert "tianxicode-swe-bench-live-pr-58" in blocked
     assert "tianxicode-swe-bench-live-pr-59" in blocked
     assert "slingshot-swe-bench-live" in blocked
     assert "agav-swe-bench-live" in blocked
@@ -38,6 +40,11 @@ def test_registry_marks_known_bad_submissions_unusable() -> None:
         if entry.id in blocked:
             assert entry.usable_as_baseline is False
             assert entry.reason.strip()
+
+
+def test_empty_ingest_payload_is_rejected() -> None:
+    with pytest.raises(LiveBaselineError, match="empty per-task"):
+        ingest_result_rows({}, source="empty.json")
 
 
 def test_leaderboard_per_language_totals_are_rejected() -> None:
@@ -112,6 +119,36 @@ def test_byte_identical_gold_src_ignores_test_files() -> None:
         gold_patch=gold_patch,
         model_patch=model_patch,
         test_patch=test_patch,
+    )
+
+
+def test_byte_identical_gold_src_respects_hunk_line_offset() -> None:
+    base_lines = [f"l{i}\n" for i in range(1, 21)]
+    base = "".join(base_lines)
+    gold_patch = (
+        "diff --git a/src/lib.py b/src/lib.py\n"
+        "--- a/src/lib.py\n"
+        "+++ b/src/lib.py\n"
+        "@@ -16,3 +16,3 @@\n"
+        " l15\n"
+        "-l16\n"
+        "+FIX\n"
+        " l17\n"
+    )
+    model_patch = (
+        "diff --git a/src/lib.py b/src/lib.py\n"
+        "--- a/src/lib.py\n"
+        "+++ b/src/lib.py\n"
+        "@@ -3,3 +3,3 @@\n"
+        " l2\n"
+        "-l3\n"
+        "+FIX\n"
+        " l4\n"
+    )
+    assert not byte_identical_gold_src(
+        base_files={"src/lib.py": base},
+        gold_patch=gold_patch,
+        model_patch=model_patch,
     )
 
 
