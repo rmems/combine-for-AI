@@ -411,7 +411,7 @@ def _perplexity_metric(perplexity: float | None, failure_reason: str | None) -> 
             name="perplexity",
             native_name="perplexity",
             unit="ratio",
-            definition="exp of mean negative log-likelihood from the mock adapter on fixture data",
+            definition="exp of mean negative log-likelihood from the mock adapter over the smoke dataset",
             value=float(perplexity),
             status=MetricStatus.OK,
             provenance=MetricProvenance.MOCK_COMPUTED,
@@ -441,7 +441,7 @@ def _smoke_evidence(facts: _SmokeFacts) -> dict[str, Any]:
 
     The artifact is only header-inspected, so latency/accuracy/throughput/VRAM/
     energy are unsupported. Perplexity, when present, comes from the mock
-    adapter over fixture data, never from the artifact.
+    adapter over the smoke dataset, never from the artifact.
     """
     failed = facts.failure_reason is not None
     reason = (facts.failure_reason or "artifact smoke failed") if failed else None
