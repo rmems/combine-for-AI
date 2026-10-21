@@ -347,14 +347,19 @@ _SMOKE_TO_CANONICAL = {
 }
 
 
+def _finite_number(value: Any) -> bool:
+    """True for a real finite int/float; huge ints that overflow a float are not."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    try:
+        return math.isfinite(float(value))
+    except OverflowError:
+        return False
+
+
 def _legacy_metric(name: str, value: Any, *, trusted: bool = True) -> MetricValue:
     native, unit, definition, provenance = _LEGACY_METRICS[name]
-    if (
-        not trusted
-        or isinstance(value, bool)
-        or not isinstance(value, (int, float))
-        or not math.isfinite(value)
-    ):
+    if not trusted or not _finite_number(value):
         return unavailable_metric(name, reason="absent, non-finite or ambiguous placeholder in legacy payload", unit=unit)
     return MetricValue(
         name=name,

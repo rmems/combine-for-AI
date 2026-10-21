@@ -322,3 +322,20 @@ def test_evidence_csv_writer_lives_in_the_installed_package() -> None:
 
     assert io_module.write_csv is write_csv
     assert reporting_write_csv is write_csv
+
+
+def test_records_sharing_a_record_id_stay_separate_in_csv_and_markdown(tmp_path: Path) -> None:
+    empty = ALL_FIXTURES["metadata_only"]().model_copy(update={"record_id": "dup", "metrics": ()})
+    with_metrics = mock_record().model_copy(update={"record_id": "dup"})
+    records = [empty, with_metrics, empty]
+    write_evidence_csv(tmp_path / "e.csv", records)
+    assert read_evidence_csv(tmp_path / "e.csv") == records
+    assert parse_evidence_markdown(render_evidence_markdown(records)) == records
+
+
+def test_legacy_oversized_integer_becomes_unavailable_not_a_crash() -> None:
+    cell = {"cell_id": "c", "metrics": {"accuracy": 0.5, "perplexity": 10**309, "throughput": -(10**400)}}
+    record = load_evidence(cell)
+    assert record.metric("accuracy").value == 0.5
+    for name in ("perplexity", "throughput"):
+        assert record.metric(name).status is MetricStatus.UNAVAILABLE

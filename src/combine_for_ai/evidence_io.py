@@ -23,6 +23,7 @@ from combine_for_ai.evidence import (
 from combine_for_ai.jsonio import write_json
 
 _RECORD_COLUMNS = (
+    "record_ordinal",
     "schema",
     "schema_version",
     "record_id",
@@ -63,9 +64,10 @@ def _cell(value: Any) -> str:
     return str(value)
 
 
-def record_to_rows(record: EvidenceRecord) -> list[dict[str, str]]:
+def record_to_rows(record: EvidenceRecord, *, record_ordinal: int = 0) -> list[dict[str, str]]:
     payload = record.to_payload()
     base = {
+        "record_ordinal": record_ordinal,
         "schema": payload["schema"],
         "schema_version": payload["schema_version"],
         "record_id": payload["record_id"],
@@ -119,12 +121,13 @@ def _opt(text: str) -> str | None:
 
 
 def _group_rows(rows: Iterable[Mapping[str, str]]) -> list[list[Mapping[str, str]]]:
-    grouped: dict[str, list[Mapping[str, str]]] = {}
+    # ``record_id`` need not be unique, so the writer's per-record ordinal is the boundary.
+    grouped: dict[tuple[str, str], list[Mapping[str, str]]] = {}
     for row in rows:
         missing = [col for col in EVIDENCE_COLUMNS if col not in row]
         if missing:
             raise EvidenceError(f"evidence row missing columns: {', '.join(missing)}")
-        grouped.setdefault(row["record_id"], []).append(row)
+        grouped.setdefault((row["record_ordinal"], row["record_id"]), []).append(row)
     return list(grouped.values())
 
 
@@ -202,7 +205,11 @@ def read_evidence_json(path: Path) -> list[EvidenceRecord]:
 
 
 def write_evidence_csv(path: Path, records: Sequence[EvidenceRecord]) -> None:
-    rows = [row for record in records for row in record_to_rows(record)]
+    rows = [
+        row
+        for ordinal, record in enumerate(records)
+        for row in record_to_rows(record, record_ordinal=ordinal)
+    ]
     if not rows:
         raise EvidenceError("no evidence rows to write")
     # write_csv prefixes ``'`` to formula-looking cells. Escape cells that already
@@ -264,8 +271,8 @@ def render_evidence_markdown(records: Sequence[EvidenceRecord]) -> str:
     lines = ["# Evidence records", ""]
     lines.append("| " + " | ".join(EVIDENCE_COLUMNS) + " |")
     lines.append("|" + "|".join(" --- " for _ in EVIDENCE_COLUMNS) + "|")
-    for record in records:
-        for row in record_to_rows(record):
+    for ordinal, record in enumerate(records):
+        for row in record_to_rows(record, record_ordinal=ordinal):
             lines.append("|" + "|".join(f" {_md_escape(row[c])} " for c in EVIDENCE_COLUMNS) + "|")
     return "\n".join(lines) + "\n"
 
