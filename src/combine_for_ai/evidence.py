@@ -386,15 +386,30 @@ def _legacy_envelope(record_id: str, metrics: list[MetricValue], seed: Any, note
     }
 
 
+_EMPTY_FALLBACK_FIELDS = frozenset({"perplexity", "throughput", "latency_ms"})
+
+
+def _untrusted_legacy_fields(payload: Mapping[str, Any], raw: Mapping[str, Any]) -> frozenset[str]:
+    """Matrix-cell metrics that are summary() fallbacks rather than measurements.
+
+    ``MetricsAccumulator.summary`` writes accuracy=0.0 (and, with no choices,
+    routing_entropy=0.0) when nothing was scored, e.g. language modeling cells,
+    and 0.0 perplexity/throughput/latency for an empty dataset. A legacy payload
+    cannot tell those from real zeros, so they are dropped, not reported.
+    """
+    untrusted: set[str] = set()
+    if raw.get("accuracy") == 0 and raw.get("routing_entropy") == 0:
+        untrusted |= _SENTINEL_FIELDS
+    if payload.get("sample_count") == 0:
+        untrusted |= _EMPTY_FALLBACK_FIELDS
+    return frozenset(untrusted)
+
+
 def _migrate_matrix_cell(payload: Mapping[str, Any]) -> dict[str, Any]:
     raw = payload["metrics"]
-    # ``MetricsAccumulator.summary`` writes accuracy=0.0 (and, with no choices,
-    # routing_entropy=0.0) as a fallback when nothing was scored, e.g. language
-    # modeling cells. A legacy payload cannot tell that from a real 0% result,
-    # so the ambiguous pair is dropped rather than reported as a measurement.
-    sentinel = raw.get("accuracy") == 0 and raw.get("routing_entropy") == 0
+    untrusted = _untrusted_legacy_fields(payload, raw)
     metrics = [
-        _legacy_metric(name, raw.get(name), trusted=not (sentinel and name in _SENTINEL_FIELDS))
+        _legacy_metric(name, raw.get(name), trusted=name not in untrusted)
         for name in _LEGACY_METRICS
     ]
     record_id = str(payload.get("cell_id") or payload.get("fingerprint") or "legacy-cell")

@@ -339,3 +339,14 @@ def test_legacy_oversized_integer_becomes_unavailable_not_a_crash() -> None:
     assert record.metric("accuracy").value == 0.5
     for name in ("perplexity", "throughput"):
         assert record.metric(name).status is MetricStatus.UNAVAILABLE
+
+
+def test_legacy_empty_dataset_cell_drops_fallback_zeros_but_keeps_real_ones() -> None:
+    metrics = {"accuracy": 0.0, "perplexity": 0.0, "throughput": 0.0, "latency_ms": 0.0, "vram_gb": 5.0, "routing_entropy": 0.0}
+    empty = load_evidence({"cell_id": "e", "sample_count": 0, "metrics": metrics})
+    for name in ("perplexity", "throughput", "latency_ms", "accuracy", "routing_entropy"):
+        assert empty.metric(name).status is MetricStatus.UNAVAILABLE
+    assert empty.metric("vram_gb").value == 5.0
+    # With scored samples a zero throughput is a valid value, not a fallback.
+    real = load_evidence({"cell_id": "r", "sample_count": 3, "metrics": {**metrics, "accuracy": 0.5}})
+    assert real.metric("throughput").status is MetricStatus.OK and real.metric("throughput").value == 0.0
