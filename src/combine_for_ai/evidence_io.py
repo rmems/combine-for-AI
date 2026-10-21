@@ -64,7 +64,7 @@ def _cell(value: Any) -> str:
     return str(value)
 
 
-def record_to_rows(record: EvidenceRecord, *, record_ordinal: int = 0) -> list[dict[str, str]]:
+def record_to_rows(record: EvidenceRecord, *, record_ordinal: int) -> list[dict[str, str]]:
     payload = record.to_payload()
     base = {
         "record_ordinal": record_ordinal,
