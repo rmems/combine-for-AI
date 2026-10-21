@@ -147,25 +147,32 @@ class MetricValue(BaseModel):
     @model_validator(mode="after")
     def _status_rules(self) -> "MetricValue":
         if self.status is MetricStatus.OK:
-            if self.value is None or not math.isfinite(self.value):
-                raise ValueError(f"metric '{self.name}': ok requires a finite value")
-            if self.provenance is MetricProvenance.UNAVAILABLE:
-                raise ValueError(f"metric '{self.name}': ok cannot have unavailable provenance")
-            for field in ("native_name", "unit", "definition"):
-                if getattr(self, field) is None:
-                    raise ValueError(f"metric '{self.name}': ok requires {field}")
-            if self.provenance is MetricProvenance.IMPORTED and self.source_artifact_sha256 is None:
-                raise ValueError(f"metric '{self.name}': imported values require source_artifact_sha256")
+            self._check_ok()
         else:
-            if self.value is not None:
-                raise ValueError(
-                    f"metric '{self.name}': status {self.status.value} must not carry a value"
-                )
-            if self.provenance is not MetricProvenance.UNAVAILABLE:
-                raise ValueError(
-                    f"metric '{self.name}': status {self.status.value} requires unavailable provenance"
-                )
+            self._check_not_ok()
         return self
+
+    def _check_ok(self) -> None:
+        label = f"metric '{self.name}'"
+        if self.value is None or not math.isfinite(self.value):
+            raise ValueError(f"{label}: ok requires a finite value")
+        if self.provenance is MetricProvenance.UNAVAILABLE:
+            raise ValueError(f"{label}: ok cannot have unavailable provenance")
+        self._require_description()
+        if self.provenance is MetricProvenance.IMPORTED and self.source_artifact_sha256 is None:
+            raise ValueError(f"{label}: imported values require source_artifact_sha256")
+
+    def _require_description(self) -> None:
+        for field in ("native_name", "unit", "definition"):
+            if getattr(self, field) is None:
+                raise ValueError(f"metric '{self.name}': ok requires {field}")
+
+    def _check_not_ok(self) -> None:
+        label = f"metric '{self.name}': status {self.status.value}"
+        if self.value is not None:
+            raise ValueError(f"{label} must not carry a value")
+        if self.provenance is not MetricProvenance.UNAVAILABLE:
+            raise ValueError(f"{label} requires unavailable provenance")
 
 
 def unavailable_metric(
@@ -254,6 +261,14 @@ class EvidenceRecord(BaseModel):
 
     @model_validator(mode="after")
     def _cross_rules(self) -> "EvidenceRecord":
+        self._check_header()
+        ok_metrics = [m for m in self.metrics if m.status is MetricStatus.OK]
+        self._check_provenance(ok_metrics)
+        self._check_identity(ok_metrics)
+        self._check_claims(ok_metrics)
+        return self
+
+    def _check_header(self) -> None:
         if self.schema_version != EVIDENCE_SCHEMA_VERSION:
             raise ValueError(f"unsupported evidence schema_version {self.schema_version}")
         names = [metric.name for metric in self.metrics]
@@ -262,39 +277,41 @@ class EvidenceRecord(BaseModel):
         if len(set(self.capabilities)) != len(self.capabilities):
             raise ValueError("duplicate capabilities")
 
-        allowed = _PROVENANCE_FOR_EXECUTION[self.execution_kind]
-        ok_metrics = [m for m in self.metrics if m.status is MetricStatus.OK]
+    def _check_provenance(self, ok_metrics: list[MetricValue]) -> None:
         if self.execution_kind is ExecutionKind.METADATA_ONLY and ok_metrics:
             raise ValueError(
                 "metadata_only records cannot claim metric values (header inspection is not inference)"
             )
+        allowed = _PROVENANCE_FOR_EXECUTION[self.execution_kind]
         for metric in ok_metrics:
             if metric.provenance not in allowed:
                 raise ValueError(
                     f"metric '{metric.name}': provenance {metric.provenance.value} "
                     f"is invalid for execution_kind {self.execution_kind.value}"
                 )
-        if ok_metrics and self.workload_track is not None:
-            if self.workload_track.required_capability not in self.capabilities:
-                raise ValueError(
-                    f"workload_track {self.workload_track.value} requires the "
-                    f"{self.workload_track.required_capability.value} capability, which was not declared"
-                )
-        if (
-            self.requested_data_provenance is not None
-            and self.requested_data_provenance is not self.data_provenance
-            and ok_metrics
-        ):
-            raise ValueError(
-                f"requested {self.requested_data_provenance.value} data but record holds "
-                f"{self.data_provenance.value} data; refusing to substitute"
-            )
-        if self.execution_kind is ExecutionKind.MEASURED and ok_metrics:
-            if self.environment_identity is None:
-                raise ValueError("measured records require environment_identity")
+
+    def _check_identity(self, ok_metrics: list[MetricValue]) -> None:
+        measured = self.execution_kind is ExecutionKind.MEASURED
+        if measured and ok_metrics and self.environment_identity is None:
+            raise ValueError("measured records require environment_identity")
         if self.execution_kind is ExecutionKind.MOCK and self.data_provenance is DataProvenance.REAL:
             raise ValueError("mock execution cannot claim real data")
-        return self
+
+    def _check_claims(self, ok_metrics: list[MetricValue]) -> None:
+        if not ok_metrics:
+            return
+        track = self.workload_track
+        if track is not None and track.required_capability not in self.capabilities:
+            raise ValueError(
+                f"workload_track {track.value} requires the "
+                f"{track.required_capability.value} capability, which was not declared"
+            )
+        requested = self.requested_data_provenance
+        if requested is not None and requested is not self.data_provenance:
+            raise ValueError(
+                f"requested {requested.value} data but record holds "
+                f"{self.data_provenance.value} data; refusing to substitute"
+            )
 
     def metric(self, name: str) -> MetricValue | None:
         return next((m for m in self.metrics if m.name == name), None)
@@ -364,6 +381,30 @@ def _legacy_envelope(record_id: str, metrics: list[MetricValue], seed: Any, note
     }
 
 
+def _migrate_matrix_cell(payload: Mapping[str, Any]) -> dict[str, Any]:
+    raw = payload["metrics"]
+    # ``MetricsAccumulator.summary`` writes accuracy=0.0 (and, with no choices,
+    # routing_entropy=0.0) as a fallback when nothing was scored, e.g. language
+    # modeling cells. A legacy payload cannot tell that from a real 0% result,
+    # so the ambiguous pair is dropped rather than reported as a measurement.
+    sentinel = raw.get("accuracy") == 0 and raw.get("routing_entropy") == 0
+    metrics = [
+        _legacy_metric(name, raw.get(name), trusted=not (sentinel and name in _SENTINEL_FIELDS))
+        for name in _LEGACY_METRICS
+    ]
+    record_id = str(payload.get("cell_id") or payload.get("fingerprint") or "legacy-cell")
+    return _legacy_envelope(record_id, metrics, payload.get("seed"), "migrated from legacy matrix cell (v0)")
+
+
+def _migrate_smoke_row(payload: Mapping[str, Any]) -> dict[str, Any]:
+    failed = payload.get("status") != "success"
+    metrics = [
+        _legacy_metric(canonical, payload.get(key), trusted=not failed)
+        for key, canonical in _SMOKE_TO_CANONICAL.items()
+    ]
+    return _legacy_envelope(str(payload["run_id"]), metrics, None, "migrated from legacy artifact-smoke row (v0)")
+
+
 def _migrate_v0(payload: Mapping[str, Any]) -> dict[str, Any]:
     """Legacy artifact-smoke result rows and matrix cells -> envelope v1.
 
@@ -373,32 +414,25 @@ def _migrate_v0(payload: Mapping[str, Any]) -> dict[str, Any]:
     """
     if isinstance(payload.get("result"), Mapping):
         payload = payload["result"]
-    if isinstance(payload.get("metrics"), Mapping):  # matrix cell
-        raw = payload["metrics"]
-        # ``MetricsAccumulator.summary`` writes accuracy=0.0 (and, with no choices,
-        # routing_entropy=0.0) as a fallback when nothing was scored, e.g. language
-        # modeling cells. A legacy payload cannot tell that from a real 0% result,
-        # so the ambiguous pair is dropped rather than reported as a measurement.
-        sentinel = raw.get("accuracy") == 0 and raw.get("routing_entropy") == 0
-        metrics = [
-            _legacy_metric(name, raw.get(name), trusted=not (sentinel and name in _SENTINEL_FIELDS))
-            for name in _LEGACY_METRICS
-        ]
-        record_id = str(payload.get("cell_id") or payload.get("fingerprint") or "legacy-cell")
-        return _legacy_envelope(record_id, metrics, payload.get("seed"), "migrated from legacy matrix cell (v0)")
-    if "run_id" in payload and "status" in payload:  # smoke row
-        failed = payload.get("status") != "success"
-        metrics = [
-            _legacy_metric(canonical, payload.get(key), trusted=not failed)
-            for key, canonical in _SMOKE_TO_CANONICAL.items()
-        ]
-        return _legacy_envelope(str(payload["run_id"]), metrics, None, "migrated from legacy artifact-smoke row (v0)")
+    if isinstance(payload.get("metrics"), Mapping):
+        return _migrate_matrix_cell(payload)
+    if "run_id" in payload and "status" in payload:
+        return _migrate_smoke_row(payload)
     raise EvidenceError("unrecognised legacy payload; cannot migrate")
 
 
 _MIGRATIONS: dict[int, Callable[[Mapping[str, Any]], dict[str, Any]]] = {
     LEGACY_SCHEMA_VERSION: _migrate_v0,
 }
+
+
+def _payload_version(payload: Mapping[str, Any]) -> int:
+    version = payload.get("schema_version", LEGACY_SCHEMA_VERSION)
+    if isinstance(version, bool) or not isinstance(version, int):
+        raise EvidenceError(f"invalid schema_version {version!r}")
+    if version > EVIDENCE_SCHEMA_VERSION or version < LEGACY_SCHEMA_VERSION:
+        raise EvidenceError(f"unsupported evidence schema_version {version}")
+    return version
 
 
 def load_evidence(payload: Mapping[str, Any]) -> EvidenceRecord:
@@ -410,11 +444,7 @@ def load_evidence(payload: Mapping[str, Any]) -> EvidenceRecord:
     embedded = payload.get("evidence")
     if "schema_version" not in payload and isinstance(embedded, Mapping):
         return load_evidence(embedded)
-    version = payload.get("schema_version", LEGACY_SCHEMA_VERSION)
-    if isinstance(version, bool) or not isinstance(version, int):
-        raise EvidenceError(f"invalid schema_version {version!r}")
-    if version > EVIDENCE_SCHEMA_VERSION or version < LEGACY_SCHEMA_VERSION:
-        raise EvidenceError(f"unsupported evidence schema_version {version}")
+    version = _payload_version(payload)
     current: Mapping[str, Any] = payload
     while version < EVIDENCE_SCHEMA_VERSION:
         current = _MIGRATIONS[version](current)

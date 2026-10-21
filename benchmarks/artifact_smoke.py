@@ -392,68 +392,74 @@ def _file_sha256(path: str | None, max_bytes: int | None = None) -> str | None:
     return digest.hexdigest()
 
 
-def _smoke_evidence(
-    run_id: str,
-    seed: int | None,
-    *,
-    perplexity: float | None,
-    max_samples: int | None,
-    failure_reason: str | None = None,
-    bundled_dataset: bool = False,
-    artifact_sha256: str | None = None,
-) -> dict[str, Any]:
+@dataclass(frozen=True)
+class _SmokeFacts:
+    """What one smoke run observed; the input to its evidence envelope."""
+
+    run_id: str
+    seed: int | None
+    perplexity: float | None = None
+    max_samples: int | None = None
+    failure_reason: str | None = None
+    bundled_dataset: bool = False
+    artifact_sha256: str | None = None
+
+
+def _perplexity_metric(perplexity: float | None, failure_reason: str | None) -> MetricValue:
+    if perplexity is not None and failure_reason is None:
+        return MetricValue(
+            name="perplexity",
+            native_name="perplexity",
+            unit="ratio",
+            definition="exp of mean negative log-likelihood from the mock adapter on fixture data",
+            value=float(perplexity),
+            status=MetricStatus.OK,
+            provenance=MetricProvenance.MOCK_COMPUTED,
+        )
+    return unavailable_metric(
+        "perplexity",
+        status=MetricStatus.ERROR if failure_reason else MetricStatus.UNAVAILABLE,
+        reason=failure_reason or "no perplexity computed",
+        unit="ratio",
+    )
+
+
+def _unsupported_metrics(failure_reason: str | None) -> list[MetricValue]:
+    return [
+        unavailable_metric(
+            name,
+            status=MetricStatus.ERROR if failure_reason else MetricStatus.UNSUPPORTED,
+            reason=failure_reason or _HEADER_ONLY_REASON,
+            unit=unit,
+        )
+        for name, unit in _SMOKE_UNSUPPORTED
+    ]
+
+
+def _smoke_evidence(facts: _SmokeFacts) -> dict[str, Any]:
     """Evidence envelope for a smoke row.
 
     The artifact is only header-inspected, so latency/accuracy/throughput/VRAM/
     energy are unsupported. Perplexity, when present, comes from the mock
     adapter over fixture data, never from the artifact.
     """
-    failed = failure_reason is not None
-    failure_reason = (failure_reason or "artifact smoke failed") if failed else None
-    metrics: list[MetricValue] = []
-    if perplexity is not None and not failed:
-        metrics.append(
-            MetricValue(
-                name="perplexity",
-                native_name="perplexity",
-                unit="ratio",
-                definition="exp of mean negative log-likelihood from the mock adapter on fixture data",
-                value=float(perplexity),
-                status=MetricStatus.OK,
-                provenance=MetricProvenance.MOCK_COMPUTED,
-            )
-        )
-    else:
-        metrics.append(
-            unavailable_metric(
-                "perplexity",
-                status=MetricStatus.ERROR if failed else MetricStatus.UNAVAILABLE,
-                reason=failure_reason or "no perplexity computed",
-                unit="ratio",
-            )
-        )
-    for name, unit in _SMOKE_UNSUPPORTED:
-        metrics.append(
-            unavailable_metric(
-                name,
-                status=MetricStatus.ERROR if failed else MetricStatus.UNSUPPORTED,
-                reason=failure_reason or _HEADER_ONLY_REASON,
-                unit=unit,
-            )
-        )
-    has_ok = any(m.status is MetricStatus.OK for m in metrics)
+    failed = facts.failure_reason is not None
+    reason = (facts.failure_reason or "artifact smoke failed") if failed else None
+    perplexity = _perplexity_metric(facts.perplexity, reason)
+    has_ok = perplexity.status is MetricStatus.OK
+    # Only the bundled sample is known fixture data; a caller-supplied JSONL is unknown.
+    fixture = facts.bundled_dataset and not failed
     return EvidenceRecord(
-        record_id=run_id,
+        record_id=facts.run_id,
         workload_track=WorkloadTrack.LIKELIHOOD if has_ok else None,
         execution_kind=ExecutionKind.MOCK if has_ok else ExecutionKind.METADATA_ONLY,
-        # Only the bundled sample is known fixture data; a caller-supplied JSONL is unknown.
-        data_provenance=DataProvenance.FIXTURE if bundled_dataset and not failed else DataProvenance.UNKNOWN,
+        data_provenance=DataProvenance.FIXTURE if fixture else DataProvenance.UNKNOWN,
         capabilities=("likelihood",) if has_ok else (),
         versions=Versions(),
-        seed=seed,
-        budget=Budget(max_samples=max_samples),
-        source_artifact_sha256=artifact_sha256,
-        metrics=tuple(metrics),
+        seed=facts.seed,
+        budget=Budget(max_samples=facts.max_samples),
+        source_artifact_sha256=facts.artifact_sha256,
+        metrics=(perplexity, *_unsupported_metrics(reason)),
         notes="header-only artifact smoke; metrics are not measurements of the artifact",
     ).to_payload()
 
@@ -603,10 +609,16 @@ def _fallback_run_payload(manifest_path: Path, failure_reason: str) -> dict[str,
             "timestamp": timestamp,
         },
         "result": row,
-        "evidence": _smoke_evidence(
-            run_id, None, perplexity=None, max_samples=None, failure_reason=failure_reason
-        ),
+        "evidence": _smoke_evidence(_SmokeFacts(run_id, None, failure_reason=failure_reason)),
     }
+
+
+def _write_reports(output_dir: Path, formats: list[str], payload: dict[str, Any]) -> None:
+    run_id = payload["run"]["run_id"]
+    if "json" in formats:
+        write_json(output_dir / "json" / f"{run_id}.artifact-smoke.json", payload)
+    if "csv" in formats:
+        write_csv(output_dir / "csv" / f"{run_id}.artifact-smoke.csv", [payload["result"]])
 
 
 def _write_fallback_failure_outputs(
@@ -616,12 +628,7 @@ def _write_fallback_failure_outputs(
     failure_reason: str,
 ) -> dict[str, Any]:
     payload = _fallback_run_payload(manifest_path, failure_reason)
-    row = payload["result"]
-    run_id = payload["run"]["run_id"]
-    if "json" in formats:
-        write_json(output_dir / "json" / f"{run_id}.artifact-smoke.json", payload)
-    if "csv" in formats:
-        write_csv(output_dir / "csv" / f"{run_id}.artifact-smoke.csv", [row])
+    _write_reports(output_dir, formats, payload)
     return payload
 
 
@@ -649,19 +656,36 @@ def _write_failure_outputs(
         },
         "result": row,
         "evidence": _smoke_evidence(
-            metadata.run_id,
-            metadata.seed,
-            perplexity=None,
-            max_samples=None,
-            failure_reason=selection.failure_reason or "artifact smoke failed",
+            _SmokeFacts(
+                metadata.run_id,
+                metadata.seed,
+                failure_reason=selection.failure_reason or "artifact smoke failed",
+            )
         ),
     }
-    run_id = metadata.run_id
-    if "json" in formats:
-        write_json(output_dir / "json" / f"{run_id}.artifact-smoke.json", payload)
-    if "csv" in formats:
-        write_csv(output_dir / "csv" / f"{run_id}.artifact-smoke.csv", [row])
+    _write_reports(output_dir, formats, payload)
     return payload
+
+
+def _evaluate_smoke(
+    manifest: ModelManifest, selection: ArtifactSelection, records: list[Any], seed: int
+) -> tuple[Any, Any]:
+    """Run the mock adapter over ``records``; returns (profile, metrics summary)."""
+    profile = default_quantization_registry().get(selection.quantization_name or "fp16")
+    if not profile.supported:
+        raise ValueError(f"Unsupported quantization profile: {selection.quantization_name}")
+    adapter = build_model_adapter(
+        ModelSpec(backend="mock", name=manifest.model_name, revision=manifest.source_artifact.hf_revision),
+        profile,
+    )
+    accumulator = MetricsAccumulator()
+    rng = random.Random(seed)
+    for record in records:
+        accumulator.add(record, adapter.predict(record, rng))
+    # Mock-only timing: used to build the fixture summary, never reported.
+    preset = mock_performance(profile, adapter.execution_kind)
+    total_time = accumulator.token_count / preset.speed_tps if preset.speed_tps else 0.0
+    return profile, accumulator.summary(total_time, preset.vram_gb)
 
 
 def run_artifact_smoke(
@@ -688,25 +712,7 @@ def run_artifact_smoke(
         _, records = _load_smoke_dataset(dataset, max_samples, dataset_name)
         if not records:
             raise ValueError(f"No records loaded from dataset: {dataset}")
-        profile = default_quantization_registry().get(selection.quantization_name or "fp16")
-        if not profile.supported:
-            raise ValueError(f"Unsupported quantization profile: {selection.quantization_name}")
-        adapter = build_model_adapter(
-            ModelSpec(backend="mock", name=manifest.model_name, revision=manifest.source_artifact.hf_revision),
-            profile,
-        )
-
-        accumulator = MetricsAccumulator()
-
-        rng = random.Random(seed)
-        for record in records:
-            prediction = adapter.predict(record, rng)
-            accumulator.add(record, prediction)
-
-        # Mock-only timing: used to build the fixture summary, never reported.
-        preset = mock_performance(profile, adapter.execution_kind)
-        total_time = accumulator.token_count / preset.speed_tps if preset.speed_tps else 0.0
-        metrics = accumulator.summary(total_time, preset.vram_gb)
+        profile, metrics = _evaluate_smoke(manifest, selection, records, seed)
         row = _build_success_row(
             metadata,
             manifest,
@@ -717,9 +723,7 @@ def run_artifact_smoke(
             len(records),
             metrics.perplexity,
         )
-        goz1_fields = _goz1_report_fields(selection)
-        if goz1_fields:
-            row.update(goz1_fields)
+        row.update(_goz1_report_fields(selection))
         payload = {
             "run": {
                 "run_id": metadata.run_id,
@@ -730,20 +734,17 @@ def run_artifact_smoke(
             },
             "result": row,
             "evidence": _smoke_evidence(
-                metadata.run_id,
-                seed,
-                perplexity=metrics.perplexity,
-                max_samples=max_samples,
-                bundled_dataset=dataset_path is None,
-                artifact_sha256=_file_sha256(selection.artifact_path),
+                _SmokeFacts(
+                    metadata.run_id,
+                    seed,
+                    perplexity=metrics.perplexity,
+                    max_samples=max_samples,
+                    bundled_dataset=dataset_path is None,
+                    artifact_sha256=_file_sha256(selection.artifact_path),
+                )
             ),
         }
-
-        run_id = metadata.run_id
-        if "json" in formats:
-            write_json(output_dir / "json" / f"{run_id}.artifact-smoke.json", payload)
-        if "csv" in formats:
-            write_csv(output_dir / "csv" / f"{run_id}.artifact-smoke.csv", [row])
+        _write_reports(output_dir, formats, payload)
         return payload
     except Exception as exc:
         failed = ArtifactSelection(

@@ -31,6 +31,22 @@ MOCK_PERFORMANCE_PRESETS: dict[str, MockPerformance] = {
 }
 
 
+def _resolve(profile: QuantizationProfile) -> tuple[float | None, float | None]:
+    """Explicit profile overrides win over the preset table."""
+    preset = MOCK_PERFORMANCE_PRESETS.get(profile.name)
+    speed = profile.speed_tps if profile.speed_tps is not None else getattr(preset, "speed_tps", None)
+    vram = profile.vram_gb if profile.vram_gb is not None else getattr(preset, "vram_gb", None)
+    return speed, vram
+
+
+def _require_positive(label: str, name: str, value: float | None) -> float:
+    if value is None:
+        raise ValueError(f"no mock performance preset for quantization '{name}'")
+    if not math.isfinite(value) or value <= 0:
+        raise ValueError(f"mock {label} for '{name}' must be finite and > 0, got {value}")
+    return value
+
+
 def mock_performance(
     profile: QuantizationProfile, execution_kind: ExecutionKind = ExecutionKind.MOCK
 ) -> MockPerformance:
@@ -39,15 +55,8 @@ def mock_performance(
         raise ValueError(
             f"mock performance presets are fixture-only, not valid for {execution_kind.value}"
         )
-    preset = MOCK_PERFORMANCE_PRESETS.get(profile.name)
-    speed = profile.speed_tps
-    vram = profile.vram_gb
-    if preset is not None:
-        speed = preset.speed_tps if speed is None else speed
-        vram = preset.vram_gb if vram is None else vram
-    if speed is None or vram is None:
-        raise ValueError(f"no mock performance preset for quantization '{profile.name}'")
-    for label, value in (("speed_tps", speed), ("vram_gb", vram)):
-        if not math.isfinite(value) or value <= 0:
-            raise ValueError(f"mock {label} for '{profile.name}' must be finite and > 0, got {value}")
-    return MockPerformance(speed, vram)
+    speed, vram = _resolve(profile)
+    return MockPerformance(
+        _require_positive("speed_tps", profile.name, speed),
+        _require_positive("vram_gb", profile.name, vram),
+    )

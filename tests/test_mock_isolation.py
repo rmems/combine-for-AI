@@ -81,9 +81,9 @@ def test_failed_smoke_evidence_is_error_not_zero(tmp_path: Path) -> None:
 
 
 def test_empty_failure_reason_still_yields_an_error_reason() -> None:
-    from benchmarks.artifact_smoke import _smoke_evidence
+    from benchmarks.artifact_smoke import _SmokeFacts, _smoke_evidence
 
-    record = load_evidence(_smoke_evidence("r", None, perplexity=None, max_samples=None, failure_reason=""))
+    record = load_evidence(_smoke_evidence(_SmokeFacts("r", None, failure_reason="")))
     assert all(m.status is MetricStatus.ERROR and m.reason == "artifact smoke failed" for m in record.metrics)
 
 

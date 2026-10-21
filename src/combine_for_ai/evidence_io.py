@@ -118,60 +118,67 @@ def _opt(text: str) -> str | None:
     return text if text != "" else None
 
 
-def records_from_rows(rows: Iterable[Mapping[str, str]]) -> list[EvidenceRecord]:
+def _group_rows(rows: Iterable[Mapping[str, str]]) -> list[list[Mapping[str, str]]]:
     grouped: dict[str, list[Mapping[str, str]]] = {}
     for row in rows:
         missing = [col for col in EVIDENCE_COLUMNS if col not in row]
         if missing:
             raise EvidenceError(f"evidence row missing columns: {', '.join(missing)}")
         grouped.setdefault(row["record_id"], []).append(row)
+    return list(grouped.values())
 
+
+def _check_consistent(group: list[Mapping[str, str]]) -> None:
+    first = group[0]
+    for other in group[1:]:
+        if any(other[col] != first[col] for col in _RECORD_COLUMNS):
+            raise EvidenceError(f"inconsistent record fields for '{first['record_id']}'")
+
+
+def _metric_from_row(row: Mapping[str, str]) -> dict[str, Any]:
+    return {
+        "name": row["metric_name"],
+        "native_name": _opt(row["native_name"]),
+        "unit": _opt(row["unit"]),
+        "definition": _opt(row["definition"]),
+        "value": _float_cell(row["value"], row["metric_name"]),
+        "status": row["status"],
+        "provenance": row["provenance"],
+        "source_artifact_sha256": _opt(row["source_artifact_sha256"]),
+        "reason": _opt(row["reason"]),
+    }
+
+
+def _record_payload(first: Mapping[str, str], metrics: list[dict[str, Any]]) -> dict[str, Any]:
+    try:
+        payload: dict[str, Any] = {
+            "schema": first["schema"],
+            "schema_version": int(first["schema_version"]),
+            "record_id": first["record_id"],
+            "workload_track": _opt(first["workload_track"]),
+            "architecture": _opt(first["architecture"]),
+            "execution_kind": first["execution_kind"],
+            "data_provenance": first["data_provenance"],
+            "requested_data_provenance": _opt(first["requested_data_provenance"]),
+            "seed": int(first["seed"]) if first["seed"] != "" else None,
+            "environment_identity": _opt(first["environment_identity"]),
+            "source_artifact_sha256": _opt(first["record_source_artifact_sha256"]),
+            "notes": _opt(first["notes"]),
+            "metrics": metrics,
+        }
+        for column in _JSON_COLUMNS:
+            payload[column] = json.loads(first[column])
+    except ValueError as exc:  # JSONDecodeError is a ValueError
+        raise EvidenceError(f"malformed evidence row: {exc}") from exc
+    return payload
+
+
+def records_from_rows(rows: Iterable[Mapping[str, str]]) -> list[EvidenceRecord]:
     records: list[EvidenceRecord] = []
-    for group in grouped.values():
-        first = group[0]
-        for other in group[1:]:
-            if any(other[col] != first[col] for col in _RECORD_COLUMNS):
-                raise EvidenceError(f"inconsistent record fields for '{first['record_id']}'")
-        metrics = []
-        for row in group:
-            if row["metric_name"] == "":
-                continue
-            metrics.append(
-                {
-                    "name": row["metric_name"],
-                    "native_name": _opt(row["native_name"]),
-                    "unit": _opt(row["unit"]),
-                    "definition": _opt(row["definition"]),
-                    "value": _float_cell(row["value"], row["metric_name"]),
-                    "status": row["status"],
-                    "provenance": row["provenance"],
-                    "source_artifact_sha256": _opt(row["source_artifact_sha256"]),
-                    "reason": _opt(row["reason"]),
-                }
-            )
-        try:
-            seed = int(first["seed"]) if first["seed"] != "" else None
-            version = int(first["schema_version"])
-            payload: dict[str, Any] = {
-                "schema": first["schema"],
-                "schema_version": version,
-                "record_id": first["record_id"],
-                "workload_track": _opt(first["workload_track"]),
-                "architecture": _opt(first["architecture"]),
-                "execution_kind": first["execution_kind"],
-                "data_provenance": first["data_provenance"],
-                "requested_data_provenance": _opt(first["requested_data_provenance"]),
-                "seed": seed,
-                "environment_identity": _opt(first["environment_identity"]),
-                "source_artifact_sha256": _opt(first["record_source_artifact_sha256"]),
-                "notes": _opt(first["notes"]),
-                "metrics": metrics,
-            }
-            for column in _JSON_COLUMNS:
-                payload[column] = json.loads(first[column])
-        except ValueError as exc:  # JSONDecodeError is a ValueError
-            raise EvidenceError(f"malformed evidence row: {exc}") from exc
-        records.append(parse_evidence(payload))
+    for group in _group_rows(rows):
+        _check_consistent(group)
+        metrics = [_metric_from_row(row) for row in group if row["metric_name"] != ""]
+        records.append(parse_evidence(_record_payload(group[0], metrics)))
     return records
 
 
