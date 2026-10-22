@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Iterable, Protocol
 
 from benchmarks.datasets import DatasetRecord
+from combine_for_ai.evidence import Capability, ExecutionKind
 
 
 @dataclass(frozen=True)
@@ -31,9 +32,11 @@ class QuantizationProfile:
     format: str
     bits: int | None
     supported: bool
-    speed_tps: float
-    vram_gb: float
     notes: str
+    # Fixture-only overrides for the mock path. Registration of a profile never
+    # implies measured performance; defaults live in ``benchmarks.fixture_presets``.
+    speed_tps: float | None = None
+    vram_gb: float | None = None
 
 
 class QuantizationRegistry:
@@ -61,8 +64,6 @@ def default_quantization_registry() -> QuantizationRegistry:
             format="baseline",
             bits=16,
             supported=True,
-            speed_tps=1200.0,
-            vram_gb=14.0,
             notes="Baseline FP16 evaluation path.",
         )
     )
@@ -73,8 +74,6 @@ def default_quantization_registry() -> QuantizationRegistry:
             format="awq",
             bits=4,
             supported=True,
-            speed_tps=1700.0,
-            vram_gb=10.5,
             notes="Activation-aware weight quantization.",
         )
     )
@@ -85,8 +84,6 @@ def default_quantization_registry() -> QuantizationRegistry:
             format="gptq",
             bits=4,
             supported=True,
-            speed_tps=1500.0,
-            vram_gb=11.0,
             notes="GPTQ static quantization.",
         )
     )
@@ -97,8 +94,6 @@ def default_quantization_registry() -> QuantizationRegistry:
             format="gguf",
             bits=4,
             supported=True,
-            speed_tps=1400.0,
-            vram_gb=11.5,
             notes="GGUF quantized weights.",
         )
     )
@@ -109,8 +104,6 @@ def default_quantization_registry() -> QuantizationRegistry:
             format="ternary",
             bits=2,
             supported=True,
-            speed_tps=900.0,
-            vram_gb=6.0,
             notes="Ternary {-1,0,+1} weights (GOZ1 ternary payload without full SAAQ metadata).",
         )
     )
@@ -121,8 +114,6 @@ def default_quantization_registry() -> QuantizationRegistry:
             format="goz1",
             bits=2,
             supported=True,
-            speed_tps=950.0,
-            vram_gb=5.5,
             notes=(
                 "SAAQ (Spiking Adaptive Activity Quantization) path for GOZ1 packs: "
                 "ternary_snn experts + preserve routers/norms; metrics often imported "
@@ -142,6 +133,20 @@ class Prediction:
 
 
 class ModelAdapter(Protocol):
+    """Minimal adapter interface; a new backend implements exactly this.
+
+    ``capabilities`` is the only source of truth for what an adapter can do:
+    a registered quantization profile establishes none of them.
+    """
+
+    @property
+    def execution_kind(self) -> ExecutionKind:
+        ...
+
+    @property
+    def capabilities(self) -> frozenset[Capability]:
+        ...
+
     def predict(self, record: DatasetRecord, rng: random.Random) -> Prediction:
         ...
 
@@ -170,6 +175,14 @@ class MockModelAdapter:
     @property
     def spec(self) -> ModelSpec:
         return self._spec
+
+    @property
+    def execution_kind(self) -> ExecutionKind:
+        return ExecutionKind.MOCK
+
+    @property
+    def capabilities(self) -> frozenset[Capability]:
+        return frozenset({Capability.GENERATION, Capability.LIKELIHOOD})
 
     def predict(self, record: DatasetRecord, rng: random.Random) -> Prediction:
         token_budget = len(record.prompt.split())
