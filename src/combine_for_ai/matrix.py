@@ -89,7 +89,7 @@ class MatrixDatasetConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str
-    split: str = "validation"
+    split: str | None = None
     source: str = "jsonl"
     path: str | None = None
     hf_id: str | None = None
