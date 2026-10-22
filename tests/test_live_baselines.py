@@ -19,8 +19,10 @@ from combine_for_ai.live_baselines import (
     is_leaderboard_aggregate_payload,
     is_submission_results_payload,
     is_test_path,
+    load_base_files,
     load_baseline_registry,
     rank_runs_on_shared_rows,
+    rows_from_submission_bundle,
     shared_instance_ids,
     TaskResultRow,
 )
@@ -93,6 +95,35 @@ def test_ingest_agav_lite_submission_fixture() -> None:
     run = ingest_run_directory(SUBMISSIONS / "agav_lite" / "gpt-5.5", run_id="agav-lite")
     assert len(run.rows) == 2
     assert all(row.model_patch for row in run.rows)
+
+
+def test_resolved_ids_count_as_resolved() -> None:
+    results = {
+        "submitted_ids": ["repo__a-1", "repo__b-2"],
+        "resolved_ids": ["repo__a-1"],
+        "unresolved_ids": ["repo__b-2"],
+    }
+    preds = {
+        "repo__a-1": {"model_patch": "diff --git a/a.py b/a.py\n"},
+        "repo__b-2": {"model_patch": "diff --git a/b.py b/b.py\n"},
+    }
+    rows = rows_from_submission_bundle(results, preds, source="ami-resolved.json")
+    by_id = {row.instance_id: row for row in rows}
+    assert by_id["repo__a-1"].resolved is True
+    assert by_id["repo__b-2"].resolved is False
+    assert is_submission_results_payload(results) is True
+
+
+def test_missing_resolved_and_success_ids_fails_loudly() -> None:
+    results = {"submitted_ids": ["repo__a-1"]}
+    preds = {"repo__a-1": {"model_patch": ""}}
+    with pytest.raises(LiveBaselineError, match="silent zero-resolved"):
+        rows_from_submission_bundle(results, preds, source="unknown.json")
+
+
+def test_unknown_results_format_fails_loudly() -> None:
+    with pytest.raises(LiveBaselineError, match="unknown submission results format"):
+        rows_from_submission_bundle({"note": "counts only"}, {}, source="counts.json")
 
 
 def test_bare_submission_results_json_requires_preds_companion() -> None:
@@ -174,6 +205,42 @@ def test_byte_identical_gold_src_ignores_test_files() -> None:
         gold_patch=gold_patch,
         model_patch=model_patch,
         test_patch=test_patch,
+    )
+
+
+def test_byte_identical_gold_src_fails_closed_when_base_path_missing() -> None:
+    gold_patch = (
+        "diff --git a/src/lib.py b/src/lib.py\n"
+        "--- a/src/lib.py\n"
+        "+++ b/src/lib.py\n"
+        "@@ -1 +1 @@\n"
+        "-old\n"
+        "+new\n"
+    )
+    assert not byte_identical_gold_src(
+        base_files={},
+        gold_patch=gold_patch,
+        model_patch=gold_patch,
+    )
+
+
+def test_byte_identical_gold_src_uses_loaded_base_files(tmp_path: Path) -> None:
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "lib.py").write_text("old\n", encoding="utf-8")
+    gold_patch = (
+        "diff --git a/src/lib.py b/src/lib.py\n"
+        "--- a/src/lib.py\n"
+        "+++ b/src/lib.py\n"
+        "@@ -1 +1 @@\n"
+        "-old\n"
+        "+new\n"
+    )
+    loaded = load_base_files(tmp_path, ["src/lib.py"])
+    assert loaded == {"src/lib.py": "old\n"}
+    assert byte_identical_gold_src(
+        base_files=loaded,
+        gold_patch=gold_patch,
+        model_patch=gold_patch,
     )
 
 

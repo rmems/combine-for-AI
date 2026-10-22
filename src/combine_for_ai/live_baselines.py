@@ -104,9 +104,17 @@ def flagged_baseline_ids(registry: BaselineRegistry) -> frozenset[str]:
     )
 
 
+_SUBMISSION_ID_KEYS = (
+    "success_ids",
+    "submitted_ids",
+    "resolved_ids",
+    "unresolved_ids",
+)
+
+
 def is_submission_results_payload(payload: Mapping[str, Any]) -> bool:
     """Detect SWE-bench-Live submission ``results.json`` (per-instance ID lists)."""
-    return "success_ids" in payload or "submitted_ids" in payload
+    return any(key in payload for key in _SUBMISSION_ID_KEYS)
 
 
 def _looks_like_language_totals(payload: Mapping[str, Any]) -> bool:
@@ -127,7 +135,9 @@ def is_leaderboard_aggregate_payload(payload: Mapping[str, Any]) -> bool:
         return True
     if "per_language" in payload and isinstance(payload["per_language"], Mapping):
         return True
-    return _AGGREGATE_ONLY_KEYS.issuperset(payload.keys()) and "success_ids" not in payload
+    return _AGGREGATE_ONLY_KEYS.issuperset(payload.keys()) and not any(
+        key in payload for key in ("success_ids", "resolved_ids")
+    )
 
 
 def _coerce_task_row(raw: Mapping[str, Any], *, source: Path | str) -> TaskResultRow:
@@ -164,8 +174,11 @@ def _load_json_object(path: Path) -> dict[str, Any]:
 
 
 _RESULT_ID_BUCKETS = (
+    "submitted_ids",
     "success_ids",
+    "resolved_ids",
     "failure_ids",
+    "unresolved_ids",
     "error_ids",
     "incomplete_ids",
     "empty_patch_ids",
@@ -205,6 +218,32 @@ def _instance_ids_from_submission_results(results: Mapping[str, Any]) -> list[st
     return ordered
 
 
+def _id_list(results: Mapping[str, Any], key: str) -> list[str] | None:
+    value = results.get(key)
+    if key not in results:
+        return None
+    if not isinstance(value, list):
+        raise LiveBaselineError(f"submission results.json field {key!r} must be a list")
+    return [str(item) for item in value]
+
+
+def _resolved_id_set(results: Mapping[str, Any], *, source: str) -> set[str]:
+    """Require an explicit resolved-id list. Missing keys must not look like zero resolved."""
+    resolved = _id_list(results, "resolved_ids")
+    success = _id_list(results, "success_ids")
+    if resolved is None and success is None:
+        raise LiveBaselineError(
+            f"unknown submission results format at {source}: "
+            "need resolved_ids or success_ids (refusing silent zero-resolved ingest)"
+        )
+    ids: set[str] = set()
+    if resolved is not None:
+        ids.update(resolved)
+    if success is not None:
+        ids.update(success)
+    return ids
+
+
 def _model_patch_from_preds_entry(entry: Any) -> str | None:
     if isinstance(entry, str):
         return entry
@@ -222,18 +261,14 @@ def rows_from_submission_bundle(
     source: str,
 ) -> list[TaskResultRow]:
     """Expand submission ``results.json`` + ``preds.json`` into per-task rows."""
-    raw_success = results.get("success_ids")
-    if isinstance(raw_success, list):
-        success_ids = {str(item) for item in raw_success}
-    else:
-        success_ids = set()
+    resolved_ids = _resolved_id_set(results, source=source)
     rows: list[TaskResultRow] = []
     for instance_id in _instance_ids_from_submission_results(results):
         pred_entry = preds.get(instance_id)
         rows.append(
             TaskResultRow(
                 instance_id=instance_id,
-                resolved=instance_id in success_ids,
+                resolved=instance_id in resolved_ids,
                 model_patch=_model_patch_from_preds_entry(pred_entry),
             )
         )
@@ -491,6 +526,31 @@ def is_test_path(path: str, *, test_patch: str | None = None) -> bool:
     return bool(test_patch and path in _split_patch_files(test_patch))
 
 
+def load_base_files(root: Path, paths: Iterable[str]) -> dict[str, str]:
+    """Load workspace snapshots for gold-blob comparison. Missing paths stay absent."""
+    loaded: dict[str, str] = {}
+    for path in paths:
+        candidate = root / path
+        if candidate.is_file():
+            loaded[path] = candidate.read_text(encoding="utf-8")
+    return loaded
+
+
+def _is_new_file_patch(file_patch: str) -> bool:
+    if "--- /dev/null" in file_patch:
+        return True
+    match = _HUNK_HEADER_RE.search(file_patch)
+    return bool(match and int(match.group(1)) == 0)
+
+
+def _base_text_for_gold_path(path: str, file_patch: str, base_files: Mapping[str, str]) -> str | None:
+    if path in base_files:
+        return base_files[path]
+    if _is_new_file_patch(file_patch):
+        return ""
+    return None
+
+
 def byte_identical_gold_src(
     *,
     base_files: Mapping[str, str],
@@ -506,7 +566,9 @@ def byte_identical_gold_src(
         if is_test_path(path, test_patch=test_patch):
             continue
         compared += 1
-        base = base_files.get(path, "")
+        base = _base_text_for_gold_path(path, gold_files[path], base_files)
+        if base is None:
+            return False
         try:
             gold_bytes = _apply_unified_hunks(base, gold_files[path]).encode("utf-8")
             if path not in model_files:
@@ -593,6 +655,7 @@ __all__ = [
     "is_leaderboard_aggregate_payload",
     "is_submission_results_payload",
     "rows_from_submission_bundle",
+    "load_base_files",
     "load_baseline_registry",
     "load_per_task_result_json",
     "rank_runs_on_shared_rows",
