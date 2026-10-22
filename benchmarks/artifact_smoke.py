@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import random
 import time
 from dataclasses import dataclass
@@ -8,9 +9,22 @@ from typing import Any
 
 from benchmarks.datasets import DatasetSpec, JsonlDatasetLoader
 from benchmarks.metrics import MetricsAccumulator
+from benchmarks.fixture_presets import mock_performance
 from benchmarks.models import ModelSpec, build_model_adapter, default_quantization_registry
 from benchmarks.reporting import write_csv, write_json
 from benchmarks.runner import build_metadata
+from combine_for_ai.evidence import (
+    Budget,
+    DataProvenance,
+    EvidenceRecord,
+    ExecutionKind,
+    MetricProvenance,
+    MetricStatus,
+    MetricValue,
+    Versions,
+    WorkloadTrack,
+    unavailable_metric,
+)
 from combine_for_ai.manifest import (
     ArtifactFormat,
     ArtifactStatus,
@@ -341,8 +355,113 @@ def _load_smoke_dataset(dataset_path: Path, max_samples: int, dataset_name: str)
     return loaded.spec.name, loaded.records
 
 
-def _peak_vram_gb_from_metadata(metadata_vram_gb: float, gpu_memory_mb: list[int | None]) -> float | None:
-    return metadata_vram_gb
+_HEADER_ONLY_REASON = "smoke inspects artifact metadata only; the artifact is never executed"
+_SMOKE_UNSUPPORTED = (
+    ("accuracy", "ratio"),
+    ("latency_ms", "ms"),
+    ("throughput", "tokens/s"),
+    ("vram_gb", "GB"),
+    ("energy_j", "J"),
+)
+
+
+#: Smoke is header-only, so hashing is bounded: larger artifacts leave the hash unset
+#: rather than turning the run into a full read of the weights.
+SMOKE_HASH_MAX_BYTES = 256 * 1024 * 1024
+
+
+def _file_sha256(path: str | None, max_bytes: int | None = None) -> str | None:
+    """Chunked SHA-256 of a local artifact file.
+
+    None when there is no readable file or it exceeds ``max_bytes``
+    (default ``SMOKE_HASH_MAX_BYTES``).
+    """
+    if not path:
+        return None
+    limit = SMOKE_HASH_MAX_BYTES if max_bytes is None else max_bytes
+    digest = hashlib.sha256()
+    try:
+        file_path = Path(path)
+        if file_path.stat().st_size > limit:
+            return None
+        with file_path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1 << 20), b""):
+                digest.update(chunk)
+    except OSError:
+        return None
+    return digest.hexdigest()
+
+
+@dataclass(frozen=True)
+class _SmokeFacts:
+    """What one smoke run observed; the input to its evidence envelope."""
+
+    run_id: str
+    seed: int | None
+    perplexity: float | None = None
+    max_samples: int | None = None
+    failure_reason: str | None = None
+    bundled_dataset: bool = False
+    artifact_sha256: str | None = None
+
+
+def _perplexity_metric(perplexity: float | None, failure_reason: str | None) -> MetricValue:
+    if perplexity is not None and failure_reason is None:
+        return MetricValue(
+            name="perplexity",
+            native_name="perplexity",
+            unit="ratio",
+            definition="exp of mean negative log-likelihood from the mock adapter over the smoke dataset",
+            value=float(perplexity),
+            status=MetricStatus.OK,
+            provenance=MetricProvenance.MOCK_COMPUTED,
+        )
+    return unavailable_metric(
+        "perplexity",
+        status=MetricStatus.ERROR if failure_reason else MetricStatus.UNAVAILABLE,
+        reason=failure_reason or "no perplexity computed",
+        unit="ratio",
+    )
+
+
+def _unsupported_metrics(failure_reason: str | None) -> list[MetricValue]:
+    return [
+        unavailable_metric(
+            name,
+            status=MetricStatus.ERROR if failure_reason else MetricStatus.UNSUPPORTED,
+            reason=failure_reason or _HEADER_ONLY_REASON,
+            unit=unit,
+        )
+        for name, unit in _SMOKE_UNSUPPORTED
+    ]
+
+
+def _smoke_evidence(facts: _SmokeFacts) -> dict[str, Any]:
+    """Evidence envelope for a smoke row.
+
+    The artifact is only header-inspected, so latency/accuracy/throughput/VRAM/
+    energy are unsupported. Perplexity, when present, comes from the mock
+    adapter over the smoke dataset, never from the artifact.
+    """
+    failed = facts.failure_reason is not None
+    reason = (facts.failure_reason or "artifact smoke failed") if failed else None
+    perplexity = _perplexity_metric(facts.perplexity, reason)
+    has_ok = perplexity.status is MetricStatus.OK
+    # Only the bundled sample is known fixture data; a caller-supplied JSONL is unknown.
+    fixture = facts.bundled_dataset and not failed
+    return EvidenceRecord(
+        record_id=facts.run_id,
+        workload_track=WorkloadTrack.LIKELIHOOD if has_ok else None,
+        execution_kind=ExecutionKind.MOCK if has_ok else ExecutionKind.METADATA_ONLY,
+        data_provenance=DataProvenance.FIXTURE if fixture else DataProvenance.UNKNOWN,
+        capabilities=("likelihood",) if has_ok else (),
+        versions=Versions(),
+        seed=facts.seed,
+        budget=Budget(max_samples=facts.max_samples),
+        source_artifact_sha256=facts.artifact_sha256,
+        metrics=(perplexity, *_unsupported_metrics(reason)),
+        notes="header-only artifact smoke; metrics are not measurements of the artifact",
+    ).to_payload()
 
 
 def _goz1_report_fields(selection: ArtifactSelection) -> dict[str, Any]:
@@ -401,11 +520,6 @@ def _build_success_row(
     perplexity: float,
 ) -> dict[str, Any]:
     gpu_names = metadata.telemetry.system.gpu_names or []
-    gpu_metrics = metadata.telemetry.gpu_metrics or []
-    peak_vram_gb = _peak_vram_gb_from_metadata(
-        profile.vram_gb,
-        [metric.memory_used_mb for metric in gpu_metrics],
-    )
     return {
         "run_id": metadata.run_id,
         "status": "success",
@@ -420,9 +534,10 @@ def _build_success_row(
         "artifact_path": selection.artifact_path,
         "gpu": gpu_names[0] if gpu_names else None,
         "cuda": metadata.telemetry.system.cuda_version,
-        "throughput_tps": profile.speed_tps,
+        # Header-only smoke cannot claim throughput or VRAM; mock presets stay out.
+        "throughput_tps": None,
         "generation_tokens": 512,
-        "peak_vram_gb": peak_vram_gb,
+        "peak_vram_gb": None,
         "perplexity": perplexity,
         "dataset": dataset_name,
         "sample_count": sample_count,
@@ -494,7 +609,16 @@ def _fallback_run_payload(manifest_path: Path, failure_reason: str) -> dict[str,
             "timestamp": timestamp,
         },
         "result": row,
+        "evidence": _smoke_evidence(_SmokeFacts(run_id, None, failure_reason=failure_reason)),
     }
+
+
+def _write_reports(output_dir: Path, formats: list[str], payload: dict[str, Any]) -> None:
+    run_id = payload["run"]["run_id"]
+    if "json" in formats:
+        write_json(output_dir / "json" / f"{run_id}.artifact-smoke.json", payload)
+    if "csv" in formats:
+        write_csv(output_dir / "csv" / f"{run_id}.artifact-smoke.csv", [payload["result"]])
 
 
 def _write_fallback_failure_outputs(
@@ -504,12 +628,7 @@ def _write_fallback_failure_outputs(
     failure_reason: str,
 ) -> dict[str, Any]:
     payload = _fallback_run_payload(manifest_path, failure_reason)
-    row = payload["result"]
-    run_id = payload["run"]["run_id"]
-    if "json" in formats:
-        write_json(output_dir / "json" / f"{run_id}.artifact-smoke.json", payload)
-    if "csv" in formats:
-        write_csv(output_dir / "csv" / f"{run_id}.artifact-smoke.csv", [row])
+    _write_reports(output_dir, formats, payload)
     return payload
 
 
@@ -536,13 +655,37 @@ def _write_failure_outputs(
             "timestamp": metadata.timestamp,
         },
         "result": row,
+        "evidence": _smoke_evidence(
+            _SmokeFacts(
+                metadata.run_id,
+                metadata.seed,
+                failure_reason=selection.failure_reason or "artifact smoke failed",
+            )
+        ),
     }
-    run_id = metadata.run_id
-    if "json" in formats:
-        write_json(output_dir / "json" / f"{run_id}.artifact-smoke.json", payload)
-    if "csv" in formats:
-        write_csv(output_dir / "csv" / f"{run_id}.artifact-smoke.csv", [row])
+    _write_reports(output_dir, formats, payload)
     return payload
+
+
+def _evaluate_smoke(
+    manifest: ModelManifest, selection: ArtifactSelection, records: list[Any], seed: int
+) -> tuple[Any, Any]:
+    """Run the mock adapter over ``records``; returns (profile, metrics summary)."""
+    profile = default_quantization_registry().get(selection.quantization_name or "fp16")
+    if not profile.supported:
+        raise ValueError(f"Unsupported quantization profile: {selection.quantization_name}")
+    adapter = build_model_adapter(
+        ModelSpec(backend="mock", name=manifest.model_name, revision=manifest.source_artifact.hf_revision),
+        profile,
+    )
+    accumulator = MetricsAccumulator()
+    rng = random.Random(seed)
+    for record in records:
+        accumulator.add(record, adapter.predict(record, rng))
+    # Mock-only timing: used to build the fixture summary, never reported.
+    preset = mock_performance(profile, adapter.execution_kind)
+    total_time = accumulator.token_count / preset.speed_tps if preset.speed_tps else 0.0
+    return profile, accumulator.summary(total_time, preset.vram_gb)
 
 
 def run_artifact_smoke(
@@ -569,23 +712,7 @@ def run_artifact_smoke(
         _, records = _load_smoke_dataset(dataset, max_samples, dataset_name)
         if not records:
             raise ValueError(f"No records loaded from dataset: {dataset}")
-        profile = default_quantization_registry().get(selection.quantization_name or "fp16")
-        if not profile.supported:
-            raise ValueError(f"Unsupported quantization profile: {selection.quantization_name}")
-        adapter = build_model_adapter(
-            ModelSpec(backend="mock", name=manifest.model_name, revision=manifest.source_artifact.hf_revision),
-            profile,
-        )
-
-        accumulator = MetricsAccumulator()
-
-        rng = random.Random(seed)
-        for record in records:
-            prediction = adapter.predict(record, rng)
-            accumulator.add(record, prediction)
-
-        total_time = accumulator.token_count / profile.speed_tps if profile.speed_tps else 0.0
-        metrics = accumulator.summary(total_time, profile.vram_gb)
+        profile, metrics = _evaluate_smoke(manifest, selection, records, seed)
         row = _build_success_row(
             metadata,
             manifest,
@@ -596,9 +723,7 @@ def run_artifact_smoke(
             len(records),
             metrics.perplexity,
         )
-        goz1_fields = _goz1_report_fields(selection)
-        if goz1_fields:
-            row.update(goz1_fields)
+        row.update(_goz1_report_fields(selection))
         payload = {
             "run": {
                 "run_id": metadata.run_id,
@@ -608,13 +733,18 @@ def run_artifact_smoke(
                 "cuda": metadata.telemetry.system.cuda_version,
             },
             "result": row,
+            "evidence": _smoke_evidence(
+                _SmokeFacts(
+                    metadata.run_id,
+                    seed,
+                    perplexity=metrics.perplexity,
+                    max_samples=max_samples,
+                    bundled_dataset=dataset_path is None,
+                    artifact_sha256=_file_sha256(selection.artifact_path),
+                )
+            ),
         }
-
-        run_id = metadata.run_id
-        if "json" in formats:
-            write_json(output_dir / "json" / f"{run_id}.artifact-smoke.json", payload)
-        if "csv" in formats:
-            write_csv(output_dir / "csv" / f"{run_id}.artifact-smoke.csv", [row])
+        _write_reports(output_dir, formats, payload)
         return payload
     except Exception as exc:
         failed = ArtifactSelection(

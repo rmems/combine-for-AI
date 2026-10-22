@@ -1,0 +1,55 @@
+{
+  "architecture": "moe",
+  "budget": {
+    "max_samples": 4,
+    "max_tokens": null,
+    "time_limit_s": null
+  },
+  "capabilities": [
+    "generation",
+    "likelihood"
+  ],
+  "data_provenance": "fixture",
+  "environment_identity": null,
+  "execution_kind": "mock",
+  "metrics": [
+    {
+      "definition": "accuracy definition",
+      "name": "accuracy",
+      "native_name": "accuracy",
+      "provenance": "mock_computed",
+      "reason": null,
+      "source_artifact_sha256": null,
+      "status": "ok",
+      "unit": "ratio",
+      "value": 0.5
+    },
+    {
+      "definition": "throughput definition",
+      "name": "throughput",
+      "native_name": "throughput",
+      "provenance": "preset",
+      "reason": null,
+      "source_artifact_sha256": null,
+      "status": "ok",
+      "unit": "tokens/s",
+      "value": 1200.0
+    }
+  ],
+  "notes": null,
+  "record_id": "mock-1",
+  "requested_data_provenance": null,
+  "schema": "combine_for_ai.evidence",
+  "schema_version": 1,
+  "seed": 7,
+  "source_artifact_sha256": null,
+  "versions": {
+    "data": null,
+    "engine": null,
+    "model": null,
+    "runtime": null,
+    "scorer": null,
+    "task": null
+  },
+  "workload_track": "likelihood"
+}

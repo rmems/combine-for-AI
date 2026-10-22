@@ -1,0 +1,7 @@
+{
+  "run": {"run_id": "20260101T000000.000Z-abc1234-deadbeef", "run_name": "artifact-smoke-x", "timestamp": "2026-01-01T00:00:00Z"},
+  "result": {
+    "run_id": "20260101T000000.000Z-abc1234-deadbeef", "status": "success", "model_id": "x",
+    "throughput_tps": 950.0, "peak_vram_gb": 5.5, "perplexity": 3.25, "failure_reason": null
+  }
+}

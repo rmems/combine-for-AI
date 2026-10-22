@@ -209,3 +209,51 @@ Supported profiles today: `fp16`, `awq`, `gptq`, `gguf`, **`ternary`**, **`saaq`
 ## Tracking
 
 Epic: GitHub **#20** — GOZ1 / MoE-SNN evaluation readiness for grok-ozempic.
+
+## Evidence envelope (RM-1894)
+
+`combine_for_ai.evidence` defines the versioned record (`schema_version` 1) every
+new result should use; `evidence_io` round-trips it through JSON, CSV and Markdown.
+
+Independent axes (none is inferred from another):
+
+| Field | Values |
+|-------|--------|
+| `workload_track` | likelihood, generation, temporal, tool_execution |
+| `architecture` | free string (dense, moe, snn, ...) — never a track |
+| `execution_kind` | mock, metadata_only, imported, measured |
+| `data_provenance` | fixture, synthetic, real, unknown (an imported file may hold fixture data) |
+| per-metric `provenance` | preset, mock_computed, imported, measured, unavailable |
+| `capabilities` | what the adapter declared; a quantization profile grants none |
+
+Rules enforced by validation: `ok` metrics need a finite value plus native
+name/unit/definition; unavailable/unsupported/error metrics carry `value=None`
+and cannot become `0.0`; `metadata_only` records (e.g. header-only GOZ1 smoke)
+cannot claim any metric; `preset` provenance is mock-only; imported values need
+`source_artifact_sha256`; a `requested_data_provenance` that differs from the
+data actually used is rejected (no silent toy substitution); a workload track
+needs its capability declared. Records also carry engine/task/scorer/data/
+model/runtime versions, seed, budget and `environment_identity` (use the
+existing `EnvironmentFingerprint` digest).
+
+Legacy payloads (artifact-smoke rows, matrix cells; no `schema_version`) load
+through `load_evidence`, which runs the `_MIGRATIONS` chain; their former
+throughput/latency/VRAM become `preset`, other values `mock_computed`, failed
+rows stay unavailable. Matrix cell JSON, journal and resume are unchanged.
+
+Mock speed/VRAM presets live only in `benchmarks/fixture_presets.py`
+(`mock_performance` refuses any non-mock execution kind). `QuantizationProfile`
+`speed_tps`/`vram_gb` are optional fixture overrides.
+
+### Adding an adapter
+
+Implement `benchmarks.models.ModelAdapter`: `predict`, `token_logprobs`,
+`profile`, `spec`, plus `execution_kind` and `capabilities` (a `frozenset` of
+`Capability`). Report real values as `measured`/`imported` metrics or an
+unavailable status. No registry, scheduler or execution framework is added.
+
+### Reused APIs / residual custom code
+
+Reused: Pydantic (as in `manifest.py`), `write_json`/`write_csv`/`json_safe`,
+`EnvironmentFingerprint`, existing matrix/journal code. Custom: the envelope
+models, one v0→v1 migration, and the flat row mapping shared by CSV/Markdown.
