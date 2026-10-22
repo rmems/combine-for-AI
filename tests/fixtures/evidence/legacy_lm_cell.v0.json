@@ -1,0 +1,13 @@
+{
+  "cell_id": "lm-cell",
+  "dataset": "wikitext",
+  "metrics": {
+    "accuracy": 0.0,
+    "latency_ms": 1.0,
+    "perplexity": 12.3,
+    "routing_entropy": 0.0,
+    "throughput": 1200.0,
+    "vram_gb": 14.0
+  },
+  "seed": 1
+}

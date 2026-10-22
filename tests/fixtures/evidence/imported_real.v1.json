@@ -1,0 +1,54 @@
+{
+  "architecture": "snn",
+  "budget": {
+    "max_samples": null,
+    "max_tokens": null,
+    "time_limit_s": null
+  },
+  "capabilities": [
+    "likelihood"
+  ],
+  "data_provenance": "real",
+  "environment_identity": "env:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb2",
+  "execution_kind": "imported",
+  "metrics": [
+    {
+      "definition": "mean_logprob definition",
+      "name": "mean_logprob",
+      "native_name": "mean_ll",
+      "provenance": "imported",
+      "reason": null,
+      "source_artifact_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1",
+      "status": "ok",
+      "unit": "nats",
+      "value": -0.00125
+    },
+    {
+      "definition": null,
+      "name": "energy_j",
+      "native_name": null,
+      "provenance": "unavailable",
+      "reason": "not in source file",
+      "source_artifact_sha256": null,
+      "status": "unavailable",
+      "unit": null,
+      "value": null
+    }
+  ],
+  "notes": "line one | pipe\nline two",
+  "record_id": "imp-real",
+  "requested_data_provenance": null,
+  "schema": "combine_for_ai.evidence",
+  "schema_version": 1,
+  "seed": -3,
+  "source_artifact_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1",
+  "versions": {
+    "data": "r1",
+    "engine": "grok-ozempic 0.9",
+    "model": "m@abc",
+    "runtime": "py3.14",
+    "scorer": "ppl-1",
+    "task": "lambada@1"
+  },
+  "workload_track": "likelihood"
+}
