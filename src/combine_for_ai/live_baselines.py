@@ -109,24 +109,25 @@ def is_submission_results_payload(payload: Mapping[str, Any]) -> bool:
     return "success_ids" in payload or "submitted_ids" in payload
 
 
+def _looks_like_language_totals(payload: Mapping[str, Any]) -> bool:
+    language_hits = _LEADERBOARD_LANGUAGE_KEYS.intersection(payload.keys())
+    if not language_hits:
+        return False
+    sample = payload[next(iter(language_hits))]
+    return isinstance(sample, Mapping) and bool(_AGGREGATE_ONLY_KEYS.intersection(sample.keys()))
+
+
 def is_leaderboard_aggregate_payload(payload: Mapping[str, Any]) -> bool:
     """Detect leaderboard-style per-language totals (not per-task rows)."""
-    if "instance_id" in payload:
-        return False
-    if is_submission_results_payload(payload):
+    if "instance_id" in payload or is_submission_results_payload(payload):
         return False
     if "rows" in payload and isinstance(payload["rows"], list):
         return False
-    language_hits = _LEADERBOARD_LANGUAGE_KEYS.intersection(payload.keys())
-    if language_hits:
-        sample = payload[next(iter(language_hits))]
-        if isinstance(sample, Mapping) and _AGGREGATE_ONLY_KEYS.intersection(sample.keys()):
-            return True
+    if _looks_like_language_totals(payload):
+        return True
     if "per_language" in payload and isinstance(payload["per_language"], Mapping):
         return True
-    if _AGGREGATE_ONLY_KEYS.issuperset(payload.keys()) and "success_ids" not in payload:
-        return True
-    return False
+    return _AGGREGATE_ONLY_KEYS.issuperset(payload.keys()) and "success_ids" not in payload
 
 
 def _coerce_task_row(raw: Mapping[str, Any], *, source: Path | str) -> TaskResultRow:
@@ -162,6 +163,31 @@ def _load_json_object(path: Path) -> dict[str, Any]:
     return payload
 
 
+_RESULT_ID_BUCKETS = (
+    "success_ids",
+    "failure_ids",
+    "error_ids",
+    "incomplete_ids",
+    "empty_patch_ids",
+)
+
+
+def _ids_from_buckets(results: Mapping[str, Any]) -> list[str]:
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for bucket in _RESULT_ID_BUCKETS:
+        ids = results.get(bucket)
+        if not isinstance(ids, list):
+            continue
+        for item in ids:
+            instance_id = str(item)
+            if instance_id in seen:
+                continue
+            seen.add(instance_id)
+            ordered.append(instance_id)
+    return ordered
+
+
 def _instance_ids_from_submission_results(results: Mapping[str, Any]) -> list[str]:
     if is_leaderboard_aggregate_payload(results):
         raise LiveBaselineError(
@@ -169,27 +195,11 @@ def _instance_ids_from_submission_results(results: Mapping[str, Any]) -> list[st
         )
     if not is_submission_results_payload(results):
         raise LiveBaselineError("not a SWE-bench-Live submission results.json")
-    if isinstance(results.get("submitted_ids"), list) and results["submitted_ids"]:
-        ordered = [str(item) for item in results["submitted_ids"]]
+    submitted = results.get("submitted_ids")
+    if isinstance(submitted, list) and submitted:
+        ordered = [str(item) for item in submitted]
     else:
-        buckets = (
-            "success_ids",
-            "failure_ids",
-            "error_ids",
-            "incomplete_ids",
-            "empty_patch_ids",
-        )
-        seen: set[str] = set()
-        ordered: list[str] = []
-        for bucket in buckets:
-            ids = results.get(bucket)
-            if not isinstance(ids, list):
-                continue
-            for item in ids:
-                instance_id = str(item)
-                if instance_id not in seen:
-                    seen.add(instance_id)
-                    ordered.append(instance_id)
+        ordered = _ids_from_buckets(results)
     if not ordered:
         raise LiveBaselineError("submission results.json lists no instance ids")
     return ordered
@@ -266,8 +276,7 @@ def ingest_run_directory(run_dir: Path, *, run_id: str | None = None) -> RunSnap
     return RunSnapshot(run_id=resolved_run_id, instance_ids=instance_ids, rows=tuple(rows))
 
 
-def ingest_result_rows(payload: Mapping[str, Any], *, source: str = "<payload>") -> list[TaskResultRow]:
-    """Ingest an explicit list of per-task rows (never leaderboard totals)."""
+def _reject_non_task_ingest(payload: Mapping[str, Any], source: str) -> None:
     if not payload:
         raise LiveBaselineError(f"empty per-task ingest payload at {source}")
     if is_submission_results_payload(payload):
@@ -279,13 +288,20 @@ def ingest_result_rows(payload: Mapping[str, Any], *, source: str = "<payload>")
         raise LiveBaselineError(
             f"refusing leaderboard aggregate at {source}; ingest per-task result.json rows only"
         )
+
+
+def _raw_rows_from_payload(payload: Mapping[str, Any]) -> list[Any]:
     if "rows" in payload and isinstance(payload["rows"], list):
-        raw_rows = payload["rows"]
-    elif payload and all(isinstance(value, Mapping) for value in payload.values()):
-        raw_rows = list(payload.values())
-    else:
-        raw_rows = [payload]
-    rows = [_coerce_task_row(item, source=source) for item in raw_rows]
+        return payload["rows"]
+    if all(isinstance(value, Mapping) for value in payload.values()):
+        return list(payload.values())
+    return [payload]
+
+
+def ingest_result_rows(payload: Mapping[str, Any], *, source: str = "<payload>") -> list[TaskResultRow]:
+    """Ingest an explicit list of per-task rows (never leaderboard totals)."""
+    _reject_non_task_ingest(payload, source)
+    rows = [_coerce_task_row(item, source=source) for item in _raw_rows_from_payload(payload)]
     _assert_unique_instance_ids(rows, context=source)
     return rows
 
@@ -300,6 +316,17 @@ def shared_instance_ids(*runs: RunSnapshot) -> frozenset[str]:
     return shared
 
 
+def _score_run_on_ids(run: RunSnapshot, common: frozenset[str]) -> RankedRun:
+    resolved = sum(1 for row in run.rows if row.instance_id in common and row.resolved is True)
+    evaluated = len(common)
+    return RankedRun(
+        run_id=run.run_id,
+        resolved_count=resolved,
+        evaluated_count=evaluated,
+        resolve_rate=resolved / evaluated,
+    )
+
+
 def rank_runs_on_shared_rows(
     runs: Sequence[RunSnapshot],
     *,
@@ -312,22 +339,7 @@ def rank_runs_on_shared_rows(
     common = shared_instance_ids(*eligible)
     if not common:
         raise LiveBaselineError("compared runs share no instance_id intersection")
-    ranked: list[RankedRun] = []
-    for run in eligible:
-        resolved = sum(
-            1
-            for row in run.rows
-            if row.instance_id in common and row.resolved is True
-        )
-        evaluated = len(common)
-        ranked.append(
-            RankedRun(
-                run_id=run.run_id,
-                resolved_count=resolved,
-                evaluated_count=evaluated,
-                resolve_rate=resolved / evaluated,
-            )
-        )
+    ranked = [_score_run_on_ids(run, common) for run in eligible]
     ranked.sort(key=lambda item: (-item.resolve_rate, -item.resolved_count, item.run_id))
     return ranked
 
@@ -351,7 +363,9 @@ def filter_usable_runs(
 
 def git_blob_sha1(content: bytes) -> str:
     header = f"blob {len(content)}\0".encode()
-    return hashlib.sha1(header + content, usedforsecurity=False).hexdigest()
+    # Git blob IDs are SHA-1 by definition (not a security MAC).
+    digest = hashlib.sha1(header + content, usedforsecurity=False)  # nosec B324
+    return digest.hexdigest()
 
 
 _DIFF_FILE_RE = re.compile(r"^diff --git a/(?P<path>.+?) b/(?P<path2>.+?)$")
@@ -375,12 +389,53 @@ def _split_patch_files(patch: str) -> dict[str, str]:
     return {path: "\n".join(chunk) + "\n" for path, chunk in files.items()}
 
 
+def _old_hunk_index(old_start: int) -> int:
+    """Map unified-diff old-start to a 0-based index. ``@@ -0,0`` means a new file."""
+    if old_start == 0:
+        return 0
+    return old_start - 1
+
+
+def _seek_hunk(out: list[str], base_lines: list[str], idx: int, old_start: int) -> int:
+    target_idx = _old_hunk_index(old_start)
+    if target_idx < idx:
+        raise LiveBaselineError("patch hunks overlap or are out of order")
+    out.extend(base_lines[idx:target_idx])
+    return target_idx
+
+
+def _require_base_line(base_lines: list[str], idx: int, expected: str, kind: str) -> None:
+    if idx >= len(base_lines):
+        raise LiveBaselineError(f"patch {kind} exceeds base file length")
+    if base_lines[idx].rstrip("\r\n") != expected:
+        raise LiveBaselineError(f"patch {kind} does not match base file")
+
+
+def _apply_hunk_body_line(
+    line: str, *, base_lines: list[str], out: list[str], idx: int
+) -> int:
+    if line.startswith(" "):
+        _require_base_line(base_lines, idx, line[1:], "context")
+        out.append(base_lines[idx])
+        return idx + 1
+    if line.startswith("-"):
+        _require_base_line(base_lines, idx, line[1:], "deletion")
+        return idx + 1
+    if line.startswith("+"):
+        addition = line[1:]
+        if not addition.endswith("\n"):
+            addition += "\n"
+        out.append(addition)
+        return idx
+    if line == "\\ No newline at end of file":
+        return idx
+    raise LiveBaselineError(f"unsupported hunk line: {line!r}")
+
+
 def _apply_unified_hunks(base: str, file_patch: str) -> str:
     if not file_patch.strip():
         return base
-    base_lines = base.splitlines(keepends=True)
-    if base == "":
-        base_lines = []
+    base_lines = [] if base == "" else base.splitlines(keepends=True)
     out: list[str] = []
     idx = 0
     in_hunk = False
@@ -390,76 +445,50 @@ def _apply_unified_hunks(base: str, file_patch: str) -> str:
         hunk_match = _HUNK_HEADER_RE.match(line)
         if hunk_match:
             in_hunk = True
-            target_idx = int(hunk_match.group(1)) - 1
-            if target_idx < idx:
-                raise LiveBaselineError("patch hunks overlap or are out of order")
-            out.extend(base_lines[idx:target_idx])
-            idx = target_idx
+            idx = _seek_hunk(out, base_lines, idx, int(hunk_match.group(1)))
             continue
-        if not in_hunk:
-            continue
-        if line.startswith(" "):
-            if idx >= len(base_lines):
-                raise LiveBaselineError("patch context exceeds base file length")
-            if base_lines[idx].rstrip("\r\n") != line[1:]:
-                raise LiveBaselineError("patch context does not match base file")
-            out.append(base_lines[idx])
-            idx += 1
-        elif line.startswith("-"):
-            if idx >= len(base_lines):
-                raise LiveBaselineError("patch deletion exceeds base file length")
-            if base_lines[idx].rstrip("\r\n") != line[1:]:
-                raise LiveBaselineError("patch deletion does not match base file")
-            idx += 1
-        elif line.startswith("+"):
-            addition = line[1:]
-            if not addition.endswith("\n"):
-                addition += "\n"
-            out.append(addition)
-        elif line == "\\ No newline at end of file":
-            continue
-        else:
-            raise LiveBaselineError(f"unsupported hunk line: {line!r}")
+        if in_hunk:
+            idx = _apply_hunk_body_line(line, base_lines=base_lines, out=out, idx=idx)
     out.extend(base_lines[idx:])
     return "".join(out)
 
 
-def is_test_path(path: str, *, test_patch: str | None = None) -> bool:
-    normalized = path.replace("\\", "/")
-    lower = normalized.lower()
-    filename = lower.rsplit("/", 1)[-1]
-    segments = lower.split("/")
-    if (
-        "tests" in segments
-        or "__tests__" in segments
-        or "/tests/" in lower
-        or "/test/" in lower
-        or lower.startswith("test/")
-        or "/spec/" in lower
-        or "src/test" in lower
-    ):
-        return True
-    if (
-        filename.startswith(("test_", "spec_"))
-        or filename.endswith(
-            (
-                "_test.py",
-                "_test.rs",
-                "_test.go",
-                "_test.java",
-                "_spec.rb",
-                ".spec.ts",
-                ".spec.js",
-                ".test.ts",
-                ".test.js",
-            )
-        )
+_TEST_DIR_NAMES = frozenset({"tests", "test", "__tests__", "spec"})
+_TEST_FILE_PREFIXES = ("test_", "spec_")
+_TEST_FILE_SUFFIXES = (
+    "_test.py",
+    "_test.rs",
+    "_test.go",
+    "_test.java",
+    "_spec.rb",
+    ".spec.ts",
+    ".spec.js",
+    ".test.ts",
+    ".test.js",
+)
+
+
+def _is_test_directory(path_lower: str) -> bool:
+    segments = path_lower.split("/")
+    return any(segment in _TEST_DIR_NAMES for segment in segments[:-1]) or path_lower.startswith(
+        "test/"
+    )
+
+
+def _is_test_filename(filename: str) -> bool:
+    return (
+        filename.startswith(_TEST_FILE_PREFIXES)
+        or filename.endswith(_TEST_FILE_SUFFIXES)
         or ".test." in filename
-    ):
+    )
+
+
+def is_test_path(path: str, *, test_patch: str | None = None) -> bool:
+    lower = path.replace("\\", "/").lower()
+    filename = lower.rsplit("/", 1)[-1]
+    if _is_test_directory(lower) or _is_test_filename(filename):
         return True
-    if test_patch and path in _split_patch_files(test_patch):
-        return True
-    return False
+    return bool(test_patch and path in _split_patch_files(test_patch))
 
 
 def byte_identical_gold_src(

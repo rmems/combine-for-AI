@@ -177,6 +177,23 @@ def test_byte_identical_gold_src_ignores_test_files() -> None:
     )
 
 
+def test_byte_identical_gold_src_handles_new_file_hunks() -> None:
+    gold_patch = (
+        "diff --git a/src/created.py b/src/created.py\n"
+        "new file mode 100644\n"
+        "--- /dev/null\n"
+        "+++ b/src/created.py\n"
+        "@@ -0,0 +1,2 @@\n"
+        "+hello\n"
+        "+world\n"
+    )
+    assert byte_identical_gold_src(
+        base_files={},
+        gold_patch=gold_patch,
+        model_patch=gold_patch,
+    )
+
+
 def test_byte_identical_gold_src_respects_hunk_line_offset() -> None:
     base_lines = [f"l{i}\n" for i in range(1, 21)]
     base = "".join(base_lines)
