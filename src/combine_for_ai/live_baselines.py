@@ -13,6 +13,10 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 
 PACKAGE_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_BASELINES_PATH = PACKAGE_ROOT / "data" / "swe_bench_live" / "baselines.json"
+PINNED_RUST_INSTANCE_IDS_PATH = (
+    PACKAGE_ROOT / "data" / "swe_bench_live" / "multi_swe_bench_rust_239.json"
+)
+MULTI_SWE_BENCH_RUST_TASK_COUNT = 239
 
 _LEADERBOARD_LANGUAGE_KEYS = frozenset({"lite", "java", "go", "rust", "python", "javascript", "typescript"})
 _AGGREGATE_ONLY_KEYS = frozenset(
@@ -87,6 +91,7 @@ class RankedRun:
     resolved_count: int
     evaluated_count: int
     resolve_rate: float
+    missing_count: int
 
 
 def load_baseline_registry(path: Path | None = None) -> BaselineRegistry:
@@ -341,6 +346,24 @@ def ingest_result_rows(payload: Mapping[str, Any], *, source: str = "<payload>")
     return rows
 
 
+def load_pinned_instance_ids(path: Path | None = None) -> tuple[str, ...]:
+    """Load the pinned Multi-SWE-bench Rust task list (HF revision 56ff018c)."""
+    pin_path = path or PINNED_RUST_INSTANCE_IDS_PATH
+    try:
+        payload = json.loads(pin_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise LiveBaselineError(f"failed to load pinned instance ids at {pin_path}") from exc
+    raw = payload.get("instance_ids") if isinstance(payload, Mapping) else None
+    if not isinstance(raw, list) or not raw:
+        raise LiveBaselineError(f"pinned instance id file {pin_path} has no instance_ids")
+    ids = tuple(str(item) for item in raw)
+    if len(ids) != MULTI_SWE_BENCH_RUST_TASK_COUNT or len(set(ids)) != len(ids):
+        raise LiveBaselineError(
+            f"expected {MULTI_SWE_BENCH_RUST_TASK_COUNT} unique pinned ids, got {len(ids)}"
+        )
+    return ids
+
+
 def shared_instance_ids(*runs: RunSnapshot) -> frozenset[str]:
     if not runs:
         return frozenset()
@@ -351,30 +374,61 @@ def shared_instance_ids(*runs: RunSnapshot) -> frozenset[str]:
     return shared
 
 
-def _score_run_on_ids(run: RunSnapshot, common: frozenset[str]) -> RankedRun:
-    resolved = sum(1 for row in run.rows if row.instance_id in common and row.resolved is True)
-    evaluated = len(common)
+def _score_run_on_ids(run: RunSnapshot, universe: Sequence[str]) -> RankedRun:
+    by_id = {row.instance_id: row for row in run.rows}
+    resolved = 0
+    missing = 0
+    for instance_id in universe:
+        row = by_id.get(instance_id)
+        if row is None:
+            missing += 1
+            continue
+        if row.resolved is True:
+            resolved += 1
+    evaluated = len(universe)
     return RankedRun(
         run_id=run.run_id,
         resolved_count=resolved,
         evaluated_count=evaluated,
         resolve_rate=resolved / evaluated,
+        missing_count=missing,
     )
+
+
+def _ranking_universe(
+    eligible: Sequence[RunSnapshot],
+    pinned_instance_ids: Sequence[str] | None,
+) -> tuple[str, ...]:
+    if pinned_instance_ids is not None:
+        universe = tuple(pinned_instance_ids)
+        if not universe:
+            raise LiveBaselineError("pinned instance id list is empty")
+        return universe
+    common = shared_instance_ids(*eligible)
+    if not common:
+        raise LiveBaselineError("compared runs share no instance_id intersection")
+    return tuple(sorted(common))
 
 
 def rank_runs_on_shared_rows(
     runs: Sequence[RunSnapshot],
     *,
     exclude_run_ids: Iterable[str] = (),
+    pinned_instance_ids: Sequence[str] | None = None,
 ) -> list[RankedRun]:
+    """Rank runs on a pinned task list, or on shared ids when none is given.
+
+    A pinned list is the denominator. Missing ids count as unresolved and are
+    reported in ``missing_count``. Do not derive the denominator from a run's
+    own ``submitted_ids`` / ``total_instances``. Without a pin, third-party
+    leaderboard rows still use the intersection of reported instance ids.
+    """
     excluded = frozenset(exclude_run_ids)
     eligible = [run for run in runs if run.run_id not in excluded]
     if not eligible:
         return []
-    common = shared_instance_ids(*eligible)
-    if not common:
-        raise LiveBaselineError("compared runs share no instance_id intersection")
-    ranked = [_score_run_on_ids(run, common) for run in eligible]
+    universe = _ranking_universe(eligible, pinned_instance_ids)
+    ranked = [_score_run_on_ids(run, universe) for run in eligible]
     ranked.sort(key=lambda item: (-item.resolve_rate, -item.resolved_count, item.run_id))
     return ranked
 
@@ -658,6 +712,7 @@ __all__ = [
     "load_base_files",
     "load_baseline_registry",
     "load_per_task_result_json",
+    "load_pinned_instance_ids",
     "rank_runs_on_shared_rows",
     "shared_instance_ids",
 ]

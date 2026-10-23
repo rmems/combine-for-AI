@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Sequence
 
 import pytest
 
@@ -21,9 +22,11 @@ from combine_for_ai.live_baselines import (
     is_test_path,
     load_base_files,
     load_baseline_registry,
+    load_pinned_instance_ids,
     rank_runs_on_shared_rows,
     rows_from_submission_bundle,
     shared_instance_ids,
+    RunSnapshot,
     TaskResultRow,
 )
 
@@ -154,6 +157,54 @@ def test_ranking_uses_shared_instance_intersection_only() -> None:
     assert ranked[0].evaluated_count == 1
     assert ranked[0].resolved_count == 1
     assert ranked[0].resolve_rate == pytest.approx(1.0)
+
+
+def _snapshot_from_resolved(
+    run_id: str,
+    resolved_ids: Sequence[str],
+    reported_unresolved_ids: Sequence[str] = (),
+) -> RunSnapshot:
+    rows = [TaskResultRow(instance_id=iid, resolved=True) for iid in resolved_ids]
+    rows.extend(
+        TaskResultRow(instance_id=iid, resolved=False) for iid in reported_unresolved_ids
+    )
+    return RunSnapshot(
+        run_id=run_id,
+        instance_ids=tuple(row.instance_id for row in rows),
+        rows=tuple(rows),
+    )
+
+
+def test_pinned_ranking_equal_resolves_despite_missing_rows() -> None:
+    pinned = load_pinned_instance_ids()
+    assert len(pinned) == 239
+    resolved = pinned[:30]
+    omitted = pinned[30:]
+    base = _snapshot_from_resolved("BASE", resolved)
+    synthetic = _snapshot_from_resolved(
+        "SYNTHETIC_ONLY", resolved, reported_unresolved_ids=omitted
+    )
+    ranked = rank_runs_on_shared_rows(
+        [base, synthetic], pinned_instance_ids=pinned
+    )
+    by_id = {item.run_id: item for item in ranked}
+    assert by_id["BASE"].resolved_count == by_id["SYNTHETIC_ONLY"].resolved_count == 30
+    assert by_id["BASE"].evaluated_count == 239
+    assert by_id["SYNTHETIC_ONLY"].evaluated_count == 239
+    assert by_id["BASE"].missing_count == 209
+    assert by_id["SYNTHETIC_ONLY"].missing_count == 0
+
+
+def test_pinned_denominator_ignores_omitted_skips_in_run_report() -> None:
+    pinned = load_pinned_instance_ids()
+    skipped = pinned[:9]
+    resolved = pinned[9:39]
+    reported = _snapshot_from_resolved("sparse-report", resolved)
+    assert set(skipped).isdisjoint(reported.instance_ids)
+    ranked = rank_runs_on_shared_rows([reported], pinned_instance_ids=pinned)
+    assert ranked[0].evaluated_count == 239
+    assert ranked[0].resolved_count == 30
+    assert ranked[0].missing_count == 209
 
 
 def test_flagged_baselines_excluded_from_ranking_pool() -> None:
