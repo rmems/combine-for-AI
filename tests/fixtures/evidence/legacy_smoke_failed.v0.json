@@ -1,0 +1,1 @@
+{"result": {"run_id": "r-failed", "status": "failed", "throughput_tps": null, "peak_vram_gb": null, "perplexity": null, "failure_reason": "bad header"}}

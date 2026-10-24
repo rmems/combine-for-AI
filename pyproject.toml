@@ -15,6 +15,9 @@ dependencies = [
     "typer>=0.25.1",
 ]
 
+[project.optional-dependencies]
+plots = ["matplotlib>=3.10,<4"]
+
 [project.scripts]
 combine-for-ai = "combine_for_ai:main"
 
