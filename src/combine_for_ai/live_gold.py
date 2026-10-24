@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-import hashlib
 import re
 from pathlib import Path
 from typing import Iterable, Mapping
 
+from combine_for_ai.git_blob import git_blob_sha1
 from combine_for_ai.live_errors import LiveBaselineError
 
 _DIFF_FILE_RE = re.compile(r"^diff --git a/(?P<path>.+?) b/(?P<path2>.+?)$")
@@ -24,12 +24,6 @@ _TEST_FILE_SUFFIXES = (
     ".test.ts",
     ".test.js",
 )
-
-
-def git_blob_sha1(content: bytes) -> str:
-    """Git blob object id: ``sha1(\"blob \" + len + NUL + content)``. Not a MAC."""
-    header = b"blob " + str(len(content)).encode("ascii") + b"\0"
-    return hashlib.sha1(header + content, usedforsecurity=False).hexdigest()  # nosec B324
 
 
 def _split_patch_files(patch: str) -> dict[str, str]:

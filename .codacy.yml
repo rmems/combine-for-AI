@@ -9,6 +9,8 @@ exclude_paths:
   - "**/__pycache__/**"
   - ".venv/**"
   - "reports/**"
+  # Git blob ids are SHA-1 by spec; Bandit B324 has no usedforsecurity exception.
+  - "src/combine_for_ai/git_blob.py"
 engines:
   complexity:
     exclude_paths:
@@ -18,8 +20,3 @@ engines:
     exclude_paths:
       - "tests/**"
       - "tests/**/*"
-  bandit:
-    # Git blob object ids are SHA-1 by specification (live_gold.git_blob_sha1).
-    # Bandit B324 has no FIPS/usedforsecurity exception; inline # nosec is ignored here.
-    exclude_paths:
-      - "src/combine_for_ai/live_gold.py"
