@@ -8,6 +8,7 @@ import pytest
 
 from combine_for_ai.live_baselines import (
     LiveBaselineError,
+    _apply_unified_hunks,
     annotate_row_hygiene,
     byte_identical_gold_src,
     contains_gold_test_patch,
@@ -29,6 +30,7 @@ from combine_for_ai.live_baselines import (
     RunSnapshot,
     TaskResultRow,
 )
+from combine_for_ai.rmems_eval_v0_1 import rank_runs as rank_rmems_eval_v0_1
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "swe_bench_live"
 SUBMISSIONS = FIXTURES / "submissions"
@@ -184,9 +186,7 @@ def test_pinned_ranking_equal_resolves_despite_missing_rows() -> None:
     synthetic = _snapshot_from_resolved(
         "SYNTHETIC_ONLY", resolved, reported_unresolved_ids=omitted
     )
-    ranked = rank_runs_on_shared_rows(
-        [base, synthetic], pinned_instance_ids=pinned
-    )
+    ranked = rank_rmems_eval_v0_1([base, synthetic])
     by_id = {item.run_id: item for item in ranked}
     assert by_id["BASE"].resolved_count == by_id["SYNTHETIC_ONLY"].resolved_count == 30
     assert by_id["BASE"].evaluated_count == 239
@@ -201,10 +201,41 @@ def test_pinned_denominator_ignores_omitted_skips_in_run_report() -> None:
     resolved = pinned[9:39]
     reported = _snapshot_from_resolved("sparse-report", resolved)
     assert set(skipped).isdisjoint(reported.instance_ids)
-    ranked = rank_runs_on_shared_rows([reported], pinned_instance_ids=pinned)
+    ranked = rank_rmems_eval_v0_1([reported])
     assert ranked[0].evaluated_count == 239
     assert ranked[0].resolved_count == 30
     assert ranked[0].missing_count == 209
+
+
+def test_v0_1_default_path_always_uses_239_pin() -> None:
+    pinned = load_pinned_instance_ids()
+    resolved = pinned[:30]
+    run = _snapshot_from_resolved("v0.1", resolved)
+    ranked = rank_rmems_eval_v0_1([run])
+    assert ranked[0].evaluated_count == 239
+    assert ranked[0].resolved_count == 30
+    assert ranked[0].missing_count == 209
+
+
+def test_v0_1_out_of_pin_row_raises_named_ids() -> None:
+    pinned = load_pinned_instance_ids()
+    run = _snapshot_from_resolved(
+        "stray",
+        [pinned[0], "linebender__vello-1100"],
+    )
+    with pytest.raises(LiveBaselineError, match="linebender__vello-1100"):
+        rank_rmems_eval_v0_1([run])
+
+
+def test_harness_row_without_resolved_fails_loudly(tmp_path: Path) -> None:
+    cell = tmp_path / "x__y-1"
+    cell.mkdir()
+    (cell / "result.json").write_text(
+        json.dumps({"instance_id": "x__y-1", "status": "success"}),
+        encoding="utf-8",
+    )
+    with pytest.raises(LiveBaselineError, match="missing boolean resolved"):
+        ingest_run_directory(tmp_path, run_id="harness")
 
 
 def test_flagged_baselines_excluded_from_ranking_pool() -> None:
@@ -310,6 +341,28 @@ def test_byte_identical_gold_src_handles_new_file_hunks() -> None:
         gold_patch=gold_patch,
         model_patch=gold_patch,
     )
+
+
+def test_byte_identical_gold_src_keeps_hunk_lines_starting_with_dashes() -> None:
+    base_files = {"src/a.sql": "select 1;\n-- old\nselect 2;\nend\n"}
+    patch = (
+        "diff --git a/src/a.sql b/src/a.sql\n"
+        "--- a/src/a.sql\n"
+        "+++ b/src/a.sql\n"
+        "@@ -1,4 +1,3 @@\n"
+        " select 1;\n"
+        "--- old\n"
+        " select 2;\n"
+        " end\n"
+    )
+    assert byte_identical_gold_src(
+        base_files=base_files, gold_patch=patch, model_patch=patch
+    )
+
+
+def test_unified_hunk_insert_after_line_uses_zero_old_count() -> None:
+    out = _apply_unified_hunks("a\nb\nc\n", "@@ -2,0 +3,1 @@\n+X\n")
+    assert out == "a\nb\nX\nc\n"
 
 
 def test_byte_identical_gold_src_respects_hunk_line_offset() -> None:

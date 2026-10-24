@@ -4,8 +4,9 @@
     "source": "submission_results_json_plus_preds_json",
     "also_supports_harness_per_task_result_json": true,
     "reject_leaderboard_per_language_totals": true,
-    "ranking_instance_set": "pinned_task_ids_when_provided_else_intersection",
-    "pinned_rust_instance_ids": "data/swe_bench_live/multi_swe_bench_rust_239.json"
+    "ranking_instance_set": "rmems_eval_v0_1_always_pinned_239",
+    "pinned_rust_instance_ids": "data/swe_bench_live/multi_swe_bench_rust_239.json",
+    "third_party_leaderboard_mode": "explicit_intersection_only"
   },
   "entries": [
     {

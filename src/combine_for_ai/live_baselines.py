@@ -152,6 +152,10 @@ def _coerce_task_row(raw: Mapping[str, Any], *, source: Path | str) -> TaskResul
         )
     if "instance_id" not in raw:
         raise LiveBaselineError(f"missing instance_id in per-task result at {source}")
+    if not isinstance(raw.get("resolved"), bool):
+        raise LiveBaselineError(
+            f"missing boolean resolved in per-task result at {source}"
+        )
     return TaskResultRow.model_validate(raw)
 
 
@@ -374,6 +378,13 @@ def shared_instance_ids(*runs: RunSnapshot) -> frozenset[str]:
     return shared
 
 
+def _eligible_runs(
+    runs: Sequence[RunSnapshot], exclude_run_ids: Iterable[str]
+) -> list[RunSnapshot]:
+    excluded = frozenset(exclude_run_ids)
+    return [run for run in runs if run.run_id not in excluded]
+
+
 def _score_run_on_ids(run: RunSnapshot, universe: Sequence[str]) -> RankedRun:
     by_id = {row.instance_id: row for row in run.rows}
     resolved = 0
@@ -383,6 +394,10 @@ def _score_run_on_ids(run: RunSnapshot, universe: Sequence[str]) -> RankedRun:
         if row is None:
             missing += 1
             continue
+        if row.resolved is None:
+            raise LiveBaselineError(
+                f"missing boolean resolved for {instance_id!r} in run {run.run_id!r}"
+            )
         if row.resolved is True:
             resolved += 1
     evaluated = len(universe)
@@ -395,42 +410,58 @@ def _score_run_on_ids(run: RunSnapshot, universe: Sequence[str]) -> RankedRun:
     )
 
 
-def _ranking_universe(
-    eligible: Sequence[RunSnapshot],
-    pinned_instance_ids: Sequence[str] | None,
-) -> tuple[str, ...]:
-    if pinned_instance_ids is not None:
-        universe = tuple(pinned_instance_ids)
-        if not universe:
-            raise LiveBaselineError("pinned instance id list is empty")
-        return universe
-    common = shared_instance_ids(*eligible)
-    if not common:
-        raise LiveBaselineError("compared runs share no instance_id intersection")
-    return tuple(sorted(common))
+def _out_of_pin_ids(runs: Sequence[RunSnapshot], pin: Sequence[str]) -> list[str]:
+    allowed = frozenset(pin)
+    extra: list[str] = []
+    seen: set[str] = set()
+    for run in runs:
+        for instance_id in run.instance_ids:
+            if instance_id in allowed or instance_id in seen:
+                continue
+            seen.add(instance_id)
+            extra.append(instance_id)
+    return extra
+
+
+def _sort_ranked(ranked: list[RankedRun]) -> list[RankedRun]:
+    ranked.sort(key=lambda item: (-item.resolve_rate, -item.resolved_count, item.run_id))
+    return ranked
+
+
+def rank_on_pinned_instance_ids(
+    runs: Sequence[RunSnapshot],
+    pin: Sequence[str],
+    *,
+    exclude_run_ids: Iterable[str] = (),
+) -> list[RankedRun]:
+    """Score every run against ``pin``. Ids outside the pin raise; missing ids are unresolved."""
+    if not pin:
+        raise LiveBaselineError("pinned instance id list is empty")
+    eligible = _eligible_runs(runs, exclude_run_ids)
+    if not eligible:
+        return []
+    extra = _out_of_pin_ids(eligible, pin)
+    if extra:
+        raise LiveBaselineError(
+            "instance ids not in rmems-eval-v0.1 pin: " + ", ".join(extra)
+        )
+    return _sort_ranked([_score_run_on_ids(run, pin) for run in eligible])
 
 
 def rank_runs_on_shared_rows(
     runs: Sequence[RunSnapshot],
     *,
     exclude_run_ids: Iterable[str] = (),
-    pinned_instance_ids: Sequence[str] | None = None,
 ) -> list[RankedRun]:
-    """Rank runs on a pinned task list, or on shared ids when none is given.
-
-    A pinned list is the denominator. Missing ids count as unresolved and are
-    reported in ``missing_count``. Do not derive the denominator from a run's
-    own ``submitted_ids`` / ``total_instances``. Without a pin, third-party
-    leaderboard rows still use the intersection of reported instance ids.
-    """
-    excluded = frozenset(exclude_run_ids)
-    eligible = [run for run in runs if run.run_id not in excluded]
+    """Explicit third-party leaderboard mode: rank on the intersection of reported ids."""
+    eligible = _eligible_runs(runs, exclude_run_ids)
     if not eligible:
         return []
-    universe = _ranking_universe(eligible, pinned_instance_ids)
-    ranked = [_score_run_on_ids(run, universe) for run in eligible]
-    ranked.sort(key=lambda item: (-item.resolve_rate, -item.resolved_count, item.run_id))
-    return ranked
+    common = shared_instance_ids(*eligible)
+    if not common:
+        raise LiveBaselineError("compared runs share no instance_id intersection")
+    universe = tuple(sorted(common))
+    return _sort_ranked([_score_run_on_ids(run, universe) for run in eligible])
 
 
 def filter_usable_runs(
@@ -458,7 +489,7 @@ def git_blob_sha1(content: bytes) -> str:
 
 
 _DIFF_FILE_RE = re.compile(r"^diff --git a/(?P<path>.+?) b/(?P<path2>.+?)$")
-_HUNK_HEADER_RE = re.compile(r"^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@")
+_HUNK_HEADER_RE = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
 
 
 def _split_patch_files(patch: str) -> dict[str, str]:
@@ -478,15 +509,27 @@ def _split_patch_files(patch: str) -> dict[str, str]:
     return {path: "\n".join(chunk) + "\n" for path, chunk in files.items()}
 
 
-def _old_hunk_index(old_start: int) -> int:
-    """Map unified-diff old-start to a 0-based index. ``@@ -0,0`` means a new file."""
+def _hunk_target_index(old_start: int, old_count: int | None) -> int:
+    """Map unified-diff old range to a 0-based index into ``base_lines``.
+
+    ``@@ -0,0`` is a new file. ``@@ -N,0`` is an insertion after line N.
+    """
     if old_start == 0:
         return 0
+    count = 1 if old_count is None else old_count
+    if count == 0:
+        return old_start
     return old_start - 1
 
 
-def _seek_hunk(out: list[str], base_lines: list[str], idx: int, old_start: int) -> int:
-    target_idx = _old_hunk_index(old_start)
+def _seek_hunk(
+    out: list[str],
+    base_lines: list[str],
+    idx: int,
+    old_start: int,
+    old_count: int | None,
+) -> int:
+    target_idx = _hunk_target_index(old_start, old_count)
     if target_idx < idx:
         raise LiveBaselineError("patch hunks overlap or are out of order")
     out.extend(base_lines[idx:target_idx])
@@ -521,6 +564,16 @@ def _apply_hunk_body_line(
     raise LiveBaselineError(f"unsupported hunk line: {line!r}")
 
 
+def _start_hunk(
+    line: str, out: list[str], base_lines: list[str], idx: int
+) -> tuple[bool, int]:
+    hunk_match = _HUNK_HEADER_RE.match(line)
+    if not hunk_match:
+        return False, idx
+    old_count = int(hunk_match.group(2)) if hunk_match.group(2) is not None else None
+    return True, _seek_hunk(out, base_lines, idx, int(hunk_match.group(1)), old_count)
+
+
 def _apply_unified_hunks(base: str, file_patch: str) -> str:
     if not file_patch.strip():
         return base
@@ -529,12 +582,14 @@ def _apply_unified_hunks(base: str, file_patch: str) -> str:
     idx = 0
     in_hunk = False
     for line in file_patch.splitlines():
-        if line.startswith(("diff --git", "index ", "---", "+++")):
+        if line.startswith("diff --git"):
+            in_hunk = False
             continue
-        hunk_match = _HUNK_HEADER_RE.match(line)
-        if hunk_match:
+        if not in_hunk and line.startswith(("index ", "---", "+++")):
+            continue
+        started, idx = _start_hunk(line, out, base_lines, idx)
+        if started:
             in_hunk = True
-            idx = _seek_hunk(out, base_lines, idx, int(hunk_match.group(1)))
             continue
         if in_hunk:
             idx = _apply_hunk_body_line(line, base_lines=base_lines, out=out, idx=idx)
@@ -713,6 +768,7 @@ __all__ = [
     "load_baseline_registry",
     "load_per_task_result_json",
     "load_pinned_instance_ids",
+    "rank_on_pinned_instance_ids",
     "rank_runs_on_shared_rows",
     "shared_instance_ids",
 ]
