@@ -166,6 +166,10 @@ for how to supply language, agent, temporal and compression-analysis evidence.
 
 Primary board: [GitHub issues](https://github.com/rmems/combine-for-AI/issues) — epic **#20** (GOZ1 / MoE-SNN evaluation readiness for grok-ozempic).
 
+## License
+
+Apache License 2.0. Copyright Raul Cardenas Montoya. See [`LICENSE`](LICENSE).
+
 ## Docs
 
 See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
