@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
-import subprocess
 from pathlib import Path
 from typing import Iterable, Mapping
 
@@ -27,18 +27,9 @@ _TEST_FILE_SUFFIXES = (
 
 
 def git_blob_sha1(content: bytes) -> str:
-    """Git blob object id via ``git hash-object`` (SHA-1 by git's definition)."""
-    try:
-        completed = subprocess.run(
-            ["git", "hash-object", "--stdin"],
-            input=content,
-            capture_output=True,
-            check=True,
-            timeout=30,
-        )
-    except (OSError, subprocess.SubprocessError) as exc:
-        raise LiveBaselineError("git hash-object failed") from exc
-    return completed.stdout.decode("ascii").strip()
+    """Git blob object id: ``sha1(\"blob \" + len + NUL + content)``. Not a MAC."""
+    header = b"blob " + str(len(content)).encode("ascii") + b"\0"
+    return hashlib.sha1(header + content, usedforsecurity=False).hexdigest()  # nosec B324
 
 
 def _split_patch_files(patch: str) -> dict[str, str]:
