@@ -6,13 +6,12 @@ from typing import Sequence
 
 import pytest
 
+from combine_for_ai.live_gold import _apply_unified_hunks
 from combine_for_ai.live_baselines import (
     LiveBaselineError,
-    _apply_unified_hunks,
     annotate_row_hygiene,
     byte_identical_gold_src,
     contains_gold_test_patch,
-    filter_usable_runs,
     flagged_baseline_ids,
     git_blob_sha1,
     ingest_result_rows,
@@ -23,12 +22,15 @@ from combine_for_ai.live_baselines import (
     is_test_path,
     load_base_files,
     load_baseline_registry,
-    load_pinned_instance_ids,
-    rank_runs_on_shared_rows,
     rows_from_submission_bundle,
-    shared_instance_ids,
     RunSnapshot,
     TaskResultRow,
+)
+from combine_for_ai.live_rank import (
+    filter_usable_runs,
+    load_pinned_instance_ids,
+    rank_runs_on_shared_rows,
+    shared_instance_ids,
 )
 from combine_for_ai.rmems_eval_v0_1 import rank_runs as rank_rmems_eval_v0_1
 
@@ -143,6 +145,9 @@ def test_is_test_path_detects_rust_tests_dir_without_test_patch() -> None:
     assert is_test_path("src/lib.rs") is False
     assert is_test_path("pkg/widget_test.go") is True
     assert is_test_path("frontend/component.test.tsx") is True
+    assert is_test_path("crates/spec/src/lib.rs") is False
+    assert is_test_path("src/spec_parser.rs") is False
+    assert is_test_path("src/test_utils.rs") is False
 
 
 def test_ingest_run_directory_collects_instance_ids() -> None:

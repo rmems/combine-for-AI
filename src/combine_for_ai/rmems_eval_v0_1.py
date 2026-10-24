@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
 
-from combine_for_ai.live_baselines import (
+from combine_for_ai.live_baselines import RunSnapshot
+from combine_for_ai.live_rank import (
     PINNED_RUST_INSTANCE_IDS_PATH,
     RankedRun,
-    RunSnapshot,
     load_pinned_instance_ids,
     rank_on_pinned_instance_ids,
 )
