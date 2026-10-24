@@ -117,6 +117,28 @@ python scripts/compare_runs.py \
 
 Writes JSON, by-block CSV, and a short Markdown table (issue **#15**).
 
+## Headless archived reports
+
+Regenerate per-track plots and Markdown summaries without running a benchmark:
+
+```bash
+uv run --extra plots python scripts/plot_reports.py \
+  --input tests/fixtures/plot_evidence.sample.json \
+  --input tests/fixtures/goz_multiblock_metrics.sample.json \
+  --config configs/plots.sample.json --output-dir reports
+```
+
+Writes PNGs to `reports/plots/`, a linked summary to
+`reports/markdown/plot-report.md`, and traceable JSON/CSV summaries. This example
+is **fixture evidence, not qualified execution**. For archived runs, replace the
+inputs with prepared summaries or raw/normalized GOZ1 experiment JSON.
+Matplotlib is optional; `--no-plots` generates summaries without the `plots` extra.
+
+Values, failures, unavailable metrics and upstream SciPy-prepared intervals are
+retained, never averaged or estimated by rendering. Incompatible or incomplete
+cohorts are separated. See [the rendering contract and limitations](docs/REPORTING.md)
+for how to supply language, agent, temporal and compression-analysis evidence.
+
 ## Tracking
 
 Primary board: [GitHub issues](https://github.com/rmems/combine-for-AI/issues) — epic **#20** (GOZ1 / MoE-SNN evaluation readiness for grok-ozempic).
