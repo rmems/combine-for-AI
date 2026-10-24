@@ -9,6 +9,7 @@ exclude_paths:
   - "**/__pycache__/**"
   - ".venv/**"
   - "reports/**"
+  - "CLAUDE.md"
 engines:
   complexity:
     exclude_paths:

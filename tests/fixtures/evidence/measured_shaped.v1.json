@@ -1,0 +1,43 @@
+{
+  "architecture": "dense",
+  "budget": {
+    "max_samples": null,
+    "max_tokens": 512,
+    "time_limit_s": 30.0
+  },
+  "capabilities": [
+    "generation"
+  ],
+  "data_provenance": "real",
+  "environment_identity": "env:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb2",
+  "execution_kind": "measured",
+  "metrics": [
+    {
+      "definition": "latency_ms definition",
+      "name": "latency_ms",
+      "native_name": "latency_ms",
+      "provenance": "measured",
+      "reason": null,
+      "source_artifact_sha256": null,
+      "status": "ok",
+      "unit": "ms",
+      "value": 12.5
+    }
+  ],
+  "notes": null,
+  "record_id": "meas-1",
+  "requested_data_provenance": "real",
+  "schema": "combine_for_ai.evidence",
+  "schema_version": 1,
+  "seed": null,
+  "source_artifact_sha256": null,
+  "versions": {
+    "data": null,
+    "engine": null,
+    "model": null,
+    "runtime": null,
+    "scorer": null,
+    "task": null
+  },
+  "workload_track": "generation"
+}

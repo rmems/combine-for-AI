@@ -1,14 +1,13 @@
 from __future__ import annotations
 
-import csv
 import json
 from dataclasses import asdict
-from pathlib import Path
 from typing import Any
 
 from benchmarks.jsonio import ensure_dir, json_safe, write_json
 from benchmarks.metrics import MetricsSummary
 from benchmarks.telemetry import SystemSnapshot, TelemetrySnapshot, telemetry_to_dict
+from combine_for_ai.csvio import write_csv
 
 
 _TELEMETRY_SCALAR_KEYS = (
@@ -32,29 +31,6 @@ _TELEMETRY_SCALAR_KEYS = (
     "saaq_delta_q_legacy_trajectory",
     "saaq_delta_q_v15_trajectory",
 )
-
-
-_CSV_FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
-
-
-def write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
-    ensure_dir(path.parent)
-    if not rows:
-        raise ValueError("no rows to write to csv report")
-
-    fieldnames = list(rows[0].keys())
-
-    def csv_safe(value: Any) -> Any:
-        if isinstance(value, str) and value.startswith(_CSV_FORMULA_PREFIXES):
-            return f"'{value}"
-        return value
-
-    with path.open("w", encoding="utf-8", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=fieldnames)
-        writer.writeheader()
-        writer.writerows(
-            {key: csv_safe(value) for key, value in row.items()} for row in rows
-        )
 
 
 def metrics_to_row(metrics: MetricsSummary) -> dict[str, Any]:

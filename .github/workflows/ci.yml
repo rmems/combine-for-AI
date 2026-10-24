@@ -28,7 +28,15 @@ concurrency:
 
 jobs:
   test-and-lint:
+    name: Tests and lint (${{ matrix.environment }})
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - environment: core
+            extras: ""
+          - environment: plots
+            extras: "--extra plots"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -45,7 +53,7 @@ jobs:
           python-version-file: .python-version
 
       - name: uv sync
-        run: uv sync --frozen
+        run: uv sync --frozen ${{ matrix.extras }}
 
       - name: ruff
         run: uv run ruff check .
