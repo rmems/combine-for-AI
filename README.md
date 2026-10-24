@@ -2,8 +2,10 @@
 
 Neutral benchmark harness for **hybrid MoE/SNN quantization** experiments.
 
-Public slug / PyPI distribution / Python import package:
+Repository slug / distribution name / Python import package:
 **`combine-for-AI`** / **`combine-for-ai`** / **`combine_for_ai`**.
+
+`combine-for-ai` is the `[project].name` in `pyproject.toml`. It is not published on PyPI. Install from a clone of this repository.
 
 ## Role
 
@@ -35,12 +37,41 @@ Does **not** own:
 
 GOZ1 container format SoT: [`grok-ozempic/docs/goz1-format.md`](https://github.com/rmems/grok-ozempic/blob/main/docs/goz1-format.md) (v3 current: per-tensor `scale`, `gif_threshold`, `threshold_abs`).
 
-## Quickstart
+## Install
 
-Mock sample benchmark:
+Python 3.14 or newer is required (`requires-python` in `pyproject.toml`; `.python-version` pins 3.14).
+
+From a clone, [uv](https://docs.astral.sh/uv/) installs the locked runtime and dev dependencies (including pytest and ruff):
 
 ```bash
-uv sync
+uv sync --frozen
+```
+
+`uv sync` without `--frozen` also works when `uv.lock` matches `pyproject.toml`. CI uses `uv sync --frozen`.
+
+An editable install with Python 3.14 pulls runtime dependencies only (not the dev group, and not the lockfile pins):
+
+```bash
+python3.14 -m pip install -e .
+```
+
+A Python older than 3.14 cannot install this package. There is no `pip install combine-for-ai` from PyPI.
+
+Examples below that call `python scripts/...` need the project environment. Use `uv run python scripts/...`, or activate `.venv` after `uv sync` (`source .venv/bin/activate`).
+
+## Quickstart
+
+Mock sample benchmark (after the install above).
+
+With uv:
+
+```bash
+uv run python scripts/benchmark.py --config configs/benchmark.sample.json
+```
+
+After `python3.14 -m pip install -e .` in an activated virtual environment, the same script does not need uv:
+
+```bash
 python scripts/benchmark.py --config configs/benchmark.sample.json
 ```
 
@@ -142,6 +173,10 @@ for how to supply language, agent, temporal and compression-analysis evidence.
 ## Tracking
 
 Primary board: [GitHub issues](https://github.com/rmems/combine-for-AI/issues) — epic **#20** (GOZ1 / MoE-SNN evaluation readiness for grok-ozempic).
+
+## License
+
+Apache License 2.0. Copyright Raul Cardenas Montoya. See [`LICENSE`](LICENSE).
 
 ## Docs
 
