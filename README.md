@@ -61,10 +61,18 @@ Examples below that call `python scripts/...` need the project environment. Use 
 
 ## Quickstart
 
-Mock sample benchmark (after the install above):
+Mock sample benchmark (after the install above).
+
+With uv:
 
 ```bash
 uv run python scripts/benchmark.py --config configs/benchmark.sample.json
+```
+
+After `python3.14 -m pip install -e .` in an activated virtual environment, the same script does not need uv:
+
+```bash
+python scripts/benchmark.py --config configs/benchmark.sample.json
 ```
 
 Manifest-driven artifact smoke (GGUF / HF / AWQ / GPTQ / **GOZ1**):
