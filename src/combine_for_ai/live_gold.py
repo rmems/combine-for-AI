@@ -184,6 +184,10 @@ def _base_text_for_gold_path(path: str, file_patch: str, base_files: Mapping[str
     return None
 
 
+def _non_test_paths(files: Mapping[str, str], test_patch: str | None) -> set[str]:
+    return {path for path in files if not is_test_path(path, test_patch=test_patch)}
+
+
 def byte_identical_gold_src(
     *,
     base_files: Mapping[str, str],
@@ -193,24 +197,21 @@ def byte_identical_gold_src(
 ) -> bool:
     gold_files = _split_patch_files(gold_patch)
     model_files = _split_patch_files(model_patch)
-    compared = 0
-    for path in gold_files:
-        if is_test_path(path, test_patch=test_patch):
-            continue
-        compared += 1
+    gold_src = _non_test_paths(gold_files, test_patch)
+    if not gold_src or gold_src != _non_test_paths(model_files, test_patch):
+        return False
+    for path in gold_src:
         base = _base_text_for_gold_path(path, gold_files[path], base_files)
         if base is None:
             return False
         try:
             gold_bytes = _apply_unified_hunks(base, gold_files[path]).encode("utf-8")
-            if path not in model_files:
-                return False
             model_bytes = _apply_unified_hunks(base, model_files[path]).encode("utf-8")
         except LiveBaselineError:
             return False
         if git_blob_sha1(gold_bytes) != git_blob_sha1(model_bytes):
             return False
-    return compared > 0
+    return True
 
 
 def _normalize_patch(patch: str) -> str:

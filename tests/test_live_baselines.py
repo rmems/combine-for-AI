@@ -400,6 +400,30 @@ def test_byte_identical_gold_src_respects_hunk_line_offset() -> None:
     )
 
 
+def test_byte_identical_gold_src_false_when_model_edits_extra_src() -> None:
+    gold_patch = (
+        "diff --git a/src/x.rs b/src/x.rs\n"
+        "--- a/src/x.rs\n"
+        "+++ b/src/x.rs\n"
+        "@@ -1 +1 @@\n"
+        "-a\n"
+        "+A\n"
+    )
+    model_patch = gold_patch + (
+        "diff --git a/src/y.rs b/src/y.rs\n"
+        "--- a/src/y.rs\n"
+        "+++ b/src/y.rs\n"
+        "@@ -1 +1 @@\n"
+        "-q\n"
+        "+Q\n"
+    )
+    assert not byte_identical_gold_src(
+        base_files={"src/x.rs": "a\n", "src/y.rs": "q\n"},
+        gold_patch=gold_patch,
+        model_patch=model_patch,
+    )
+
+
 def test_byte_identical_gold_src_false_when_src_differs() -> None:
     base_files = {"src/lib.py": "old\n"}
     gold_patch = (
