@@ -9,6 +9,8 @@ exclude_paths:
   - "**/__pycache__/**"
   - ".venv/**"
   - "reports/**"
+  # Git blob ids are SHA-1 by spec; Bandit B324 has no usedforsecurity exception.
+  - "src/combine_for_ai/git_blob.py"
   - "CLAUDE.md"
 engines:
   complexity:
