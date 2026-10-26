@@ -3,6 +3,8 @@ name = "combine-for-ai"
 version = "0.1.0"
 description = "Neutral benchmark harness for hybrid MoE/SNN quantization experiments"
 readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 authors = [
     { name = "Bot", email = "montoyaraul34@gmail.com" }
 ]
