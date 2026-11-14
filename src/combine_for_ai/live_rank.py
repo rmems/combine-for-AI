@@ -105,6 +105,11 @@ def _filter_usable(
     registry: BaselineRegistry | None,
     baseline_id_for_run: Mapping[str, str] | None,
 ) -> list[RunSnapshot]:
+    if (registry is None) != (baseline_id_for_run is None):
+        raise LiveBaselineError(
+            "registry and baseline_id_for_run must be provided together "
+            "(pass both or neither)"
+        )
     if registry is None or baseline_id_for_run is None:
         return list(runs)
     return filter_usable_runs(runs, registry, baseline_id_for_run=baseline_id_for_run)

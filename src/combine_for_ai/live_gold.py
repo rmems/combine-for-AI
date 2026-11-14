@@ -105,7 +105,11 @@ def _scan_file_metadata(
     """Scan pre-hunk metadata. Returns devnull/flags and the first hunk index."""
     meta: list[str] = []
     i = start
-    while i < len(lines) and not lines[i].startswith("@@ "):
+    while (
+        i < len(lines)
+        and not lines[i].startswith("@@ ")
+        and not lines[i].startswith("diff --git")
+    ):
         meta.append(lines[i])
         i += 1
     text = "\n".join(meta)

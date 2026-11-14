@@ -707,3 +707,57 @@ def test_load_base_files_preserves_crlf(tmp_path: Path) -> None:
     (tmp_path / "lib.py").write_bytes(b"old\r\n")
     loaded = load_base_files(tmp_path, ["lib.py"])
     assert loaded["lib.py"] == "old\r\n"
+
+
+def test_rows_from_submission_bundle_rejects_resolved_outside_submitted() -> None:
+    results = {
+        "submitted_ids": ["repo__a-1"],
+        "resolved_ids": ["repo__a-1", "repo__zzz-9"],
+    }
+    with pytest.raises(LiveBaselineError, match="not in submitted set"):
+        rows_from_submission_bundle(results, {}, source="stray.json")
+
+
+def test_rows_from_submission_bundle_rejects_null_bucket() -> None:
+    results = {"submitted_ids": ["repo__a-1"], "resolved_ids": None}
+    with pytest.raises(LiveBaselineError, match="must be a list"):
+        rows_from_submission_bundle(results, {}, source="null-bucket.json")
+
+
+def test_rows_from_submission_bundle_all_unresolved_empty_positive() -> None:
+    results = {
+        "submitted_ids": ["repo__a-1"],
+        "success_ids": [],
+        "failure_ids": ["repo__a-1"],
+    }
+    rows = rows_from_submission_bundle(results, {}, source="all-fail.json")
+    assert rows[0].resolved is False
+
+
+def test_byte_identical_gold_src_pure_rename_followed_by_file() -> None:
+    base_files = {"src/a.rs": "same\n", "src/c.py": "old\n"}
+    gold_patch = (
+        "diff --git a/src/a.rs b/src/b.rs\n"
+        "rename from src/a.rs\n"
+        "rename to src/b.rs\n"
+        "diff --git a/src/c.py b/src/c.py\n"
+        "--- a/src/c.py\n"
+        "+++ b/src/c.py\n"
+        "@@ -1 +1 @@\n"
+        "-old\n"
+        "+new\n"
+    )
+    model_patch = (
+        "diff --git a/src/a.rs b/src/b.rs\n"
+        "rename from src/a.rs\n"
+        "rename to src/b.rs\n"
+        "diff --git a/src/c.py b/src/c.py\n"
+        "--- a/src/c.py\n"
+        "+++ b/src/c.py\n"
+        "@@ -1 +1 @@\n"
+        "-old\n"
+        "+new\n"
+    )
+    assert byte_identical_gold_src(
+        base_files=base_files, gold_patch=gold_patch, model_patch=model_patch
+    )

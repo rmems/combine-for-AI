@@ -240,10 +240,10 @@ def _require_complete_buckets(results: Mapping[str, Any]) -> None:
     # Without an authoritative submitted list, require both positive and negative
     # buckets so we do not ingest only the resolved subset and inflate scores.
     has_positive = any(
-        isinstance(results.get(key), list) and results[key] for key in _POSITIVE_ID_KEYS
+        isinstance(results.get(key), list) for key in _POSITIVE_ID_KEYS
     )
     has_negative = any(
-        isinstance(results.get(key), list) and results[key] for key in _NEGATIVE_ID_KEYS
+        isinstance(results.get(key), list) for key in _NEGATIVE_ID_KEYS
     )
     if not (has_positive and has_negative):
         raise LiveBaselineError(
@@ -282,9 +282,9 @@ _NEGATIVE_ID_KEYS = (
 
 
 def _id_set(results: Mapping[str, Any], key: str, *, source: str) -> set[str] | None:
-    value = results.get(key)
-    if value is None:
+    if key not in results:
         return None
+    value = results[key]
     if not isinstance(value, list):
         raise LiveBaselineError(f"submission results.json field {key!r} must be a list")
     return {_coerce_instance_id(item, bucket=key, source=source) for item in value}
@@ -336,8 +336,16 @@ def rows_from_submission_bundle(
 ) -> list[TaskResultRow]:
     """Expand submission ``results.json`` + ``preds.json`` into per-task rows."""
     resolved_ids = _resolved_id_set(results, source=source)
+    instance_ids = _instance_ids_from_submission_results(results, source=source)
+    submitted_set = set(instance_ids)
+    stray = sorted(resolved_ids - submitted_set)
+    if stray:
+        raise LiveBaselineError(
+            f"submission results.json resolved ids not in submitted set at {source}: "
+            f"{stray}"
+        )
     rows: list[TaskResultRow] = []
-    for instance_id in _instance_ids_from_submission_results(results, source=source):
+    for instance_id in instance_ids:
         pred_entry = preds.get(instance_id)
         rows.append(
             TaskResultRow(
