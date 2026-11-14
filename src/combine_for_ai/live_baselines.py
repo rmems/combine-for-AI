@@ -226,6 +226,32 @@ def _ids_from_buckets(results: Mapping[str, Any], *, source: str) -> list[str]:
     return ordered
 
 
+def _submitted_ids_or_none(results: Mapping[str, Any], *, source: str) -> list[str] | None:
+    submitted = results.get("submitted_ids")
+    if not isinstance(submitted, list) or not submitted:
+        return None
+    return [
+        _coerce_instance_id(item, bucket="submitted_ids", source=source)
+        for item in submitted
+    ]
+
+
+def _require_complete_buckets(results: Mapping[str, Any]) -> None:
+    # Without an authoritative submitted list, require both positive and negative
+    # buckets so we do not ingest only the resolved subset and inflate scores.
+    has_positive = any(
+        isinstance(results.get(key), list) and results[key] for key in _POSITIVE_ID_KEYS
+    )
+    has_negative = any(
+        isinstance(results.get(key), list) and results[key] for key in _NEGATIVE_ID_KEYS
+    )
+    if not (has_positive and has_negative):
+        raise LiveBaselineError(
+            "incomplete submission results.json: need submitted_ids or both "
+            "resolved/success and unresolved/failure buckets"
+        )
+
+
 def _instance_ids_from_submission_results(
     results: Mapping[str, Any], *, source: str
 ) -> list[str]:
@@ -235,21 +261,10 @@ def _instance_ids_from_submission_results(
         )
     if not is_submission_results_payload(results):
         raise LiveBaselineError("not a SWE-bench-Live submission results.json")
-    submitted = results.get("submitted_ids")
-    if isinstance(submitted, list) and submitted:
-        return [
-            _coerce_instance_id(item, bucket="submitted_ids", source=source)
-            for item in submitted
-        ]
-    # Without an authoritative submitted list, require both positive and negative
-    # buckets so we do not ingest only the resolved subset and inflate scores.
-    has_positive = any(isinstance(results.get(key), list) and results[key] for key in _POSITIVE_ID_KEYS)
-    has_negative = any(isinstance(results.get(key), list) and results[key] for key in _NEGATIVE_ID_KEYS)
-    if not (has_positive and has_negative):
-        raise LiveBaselineError(
-            "incomplete submission results.json: need submitted_ids or both "
-            "resolved/success and unresolved/failure buckets"
-        )
+    submitted_ids = _submitted_ids_or_none(results, source=source)
+    if submitted_ids is not None:
+        return submitted_ids
+    _require_complete_buckets(results)
     ordered = _ids_from_buckets(results, source=source)
     if not ordered:
         raise LiveBaselineError("submission results.json lists no instance ids")
@@ -352,6 +367,19 @@ def ingest_submission_directory(run_dir: Path, *, run_id: str | None = None) -> 
     return RunSnapshot(run_id=resolved_run_id, instance_ids=instance_ids, rows=tuple(rows))
 
 
+def _ingest_per_task_rows(run_dir: Path) -> list[TaskResultRow]:
+    rows = [
+        load_per_task_result_json(path)
+        for path in sorted(run_dir.rglob("result.json"))
+    ]
+    if not rows:
+        raise LiveBaselineError(
+            f"no submission results.json+preds.json or per-task result.json under {run_dir}"
+        )
+    _assert_unique_instance_ids(rows, context=run_dir)
+    return rows
+
+
 def ingest_run_directory(run_dir: Path, *, run_id: str | None = None) -> RunSnapshot:
     if not run_dir.is_dir():
         raise LiveBaselineError(f"run directory not found: {run_dir}")
@@ -365,14 +393,7 @@ def ingest_run_directory(run_dir: Path, *, run_id: str | None = None) -> RunSnap
         )
     if has_results and has_preds:
         return ingest_submission_directory(run_dir, run_id=resolved_run_id)
-    rows: list[TaskResultRow] = []
-    for path in sorted(run_dir.rglob("result.json")):
-        rows.append(load_per_task_result_json(path))
-    if not rows:
-        raise LiveBaselineError(
-            f"no submission results.json+preds.json or per-task result.json under {run_dir}"
-        )
-    _assert_unique_instance_ids(rows, context=run_dir)
+    rows = _ingest_per_task_rows(run_dir)
     instance_ids = tuple(row.instance_id for row in rows)
     return RunSnapshot(run_id=resolved_run_id, instance_ids=instance_ids, rows=tuple(rows))
 

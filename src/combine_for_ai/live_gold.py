@@ -99,6 +99,48 @@ def _parse_hunk_header(line: str) -> tuple[int, int, int, int] | None:
     return old_start, old_count, new_start, new_count
 
 
+def _scan_file_metadata(
+    lines: list[str], start: int
+) -> tuple[bool, bool, bool, bool, bool, int]:
+    """Scan pre-hunk metadata. Returns devnull/flags and the first hunk index."""
+    meta: list[str] = []
+    i = start
+    while i < len(lines) and not lines[i].startswith("@@ "):
+        meta.append(lines[i])
+        i += 1
+    text = "\n".join(meta)
+    devnull_old = bool(re.search(r"(?m)^--- /dev/null\s*$", text))
+    devnull_new = bool(re.search(r"(?m)^\+\+\+ /dev/null\s*$", text))
+    deleted = bool(re.search(r"(?m)^deleted file mode", text)) or devnull_new
+    new_file = bool(re.search(r"(?m)^new file mode", text))
+    renamed = bool(re.search(r"(?m)^rename (?:from|to) ", text))
+    return devnull_old, devnull_new, deleted, new_file, renamed, i
+
+
+_HUNK_BODY_PREFIXES = {"+": "add", "-": "delete", " ": "context"}
+
+
+def _parse_hunk_body(lines: list[str], start: int) -> tuple[tuple[_HunkLine, ...], int]:
+    """Parse hunk body lines starting at ``start`` (first line after the header)."""
+    hunk_lines: list[_HunkLine] = []
+    i = start
+    while i < len(lines) and not lines[i].startswith("@@ ") and not lines[i].startswith("diff --git"):
+        raw = lines[i]
+        if raw.startswith("\\"):
+            hunk_lines.append(_HunkLine(kind="no_newline", text=""))
+        elif raw == "":
+            # Empty line inside a hunk is treated as a context line with empty content.
+            hunk_lines.append(_HunkLine(kind="context", text=""))
+        elif raw[:1] in _HUNK_BODY_PREFIXES:
+            hunk_lines.append(
+                _HunkLine(kind=_HUNK_BODY_PREFIXES[raw[:1]], text=raw[1:])
+            )
+        else:
+            raise LiveBaselineError(f"unsupported hunk line: {raw!r}")
+        i += 1
+    return tuple(hunk_lines), i
+
+
 def _parse_file_patch(lines: list[str], start: int) -> tuple[_FilePatch, int]:
     """Parse one ``diff --git`` block starting at ``lines[start]``."""
     diff_match = _DIFF_FILE_RE.match(lines[start])
@@ -107,65 +149,30 @@ def _parse_file_patch(lines: list[str], start: int) -> tuple[_FilePatch, int]:
 
     old_path = diff_match.group("old")
     new_path = diff_match.group("new")
-    deleted = False
-    new_file = False
-    renamed = False
     hunks: list[_Hunk] = []
-    i = start + 1
 
-    # Pre-hunk metadata.
-    while i < len(lines):
-        line = lines[i]
-        if line.startswith("@@ "):
-            break
-        if line.startswith("deleted file mode"):
-            deleted = True
-        elif line.startswith("new file mode"):
-            new_file = True
-        elif line.startswith(("rename from ", "rename to ")):
-            renamed = True
-        elif line.startswith("--- "):
-            target = line[4:].strip()
-            if target == "/dev/null":
-                old_path = None
-        elif line.startswith("+++ "):
-            target = line[4:].strip()
-            if target == "/dev/null":
-                new_path = None
-                deleted = True
-        i += 1
+    devnull_old, devnull_new, deleted, new_file, renamed, i = _scan_file_metadata(
+        lines, start + 1
+    )
+    if devnull_old:
+        old_path = None
+    if devnull_new:
+        new_path = None
+        deleted = True
 
-    # Hunks.
     while i < len(lines):
         header = _parse_hunk_header(lines[i])
         if header is None:
             break
         old_start, old_count, new_start, new_count = header
-        i += 1
-        hunk_lines: list[_HunkLine] = []
-        while i < len(lines) and not lines[i].startswith("@@ ") and not lines[i].startswith("diff --git"):
-            raw = lines[i]
-            if raw.startswith("\\"):
-                hunk_lines.append(_HunkLine(kind="no_newline", text=""))
-            elif raw.startswith("+"):
-                hunk_lines.append(_HunkLine(kind="add", text=raw[1:]))
-            elif raw.startswith("-"):
-                hunk_lines.append(_HunkLine(kind="delete", text=raw[1:]))
-            elif raw.startswith(" "):
-                hunk_lines.append(_HunkLine(kind="context", text=raw[1:]))
-            elif raw == "":
-                # Empty line inside a hunk is treated as a context line with empty content.
-                hunk_lines.append(_HunkLine(kind="context", text=""))
-            else:
-                raise LiveBaselineError(f"unsupported hunk line: {raw!r}")
-            i += 1
+        hunk_lines, i = _parse_hunk_body(lines, i + 1)
         hunks.append(
             _Hunk(
                 old_start=old_start,
                 old_count=old_count,
                 new_start=new_start,
                 new_count=new_count,
-                lines=tuple(hunk_lines),
+                lines=hunk_lines,
             )
         )
 
@@ -206,12 +213,20 @@ def _parse_patch_files(patch: str) -> dict[str, _FilePatch]:
     return files
 
 
+_HUNK_LINE_PREFIXES = {"context": " ", "delete": "-", "add": "+"}
+
+
+def _format_hunk_line(hl: _HunkLine) -> str:
+    if hl.kind == "no_newline":
+        return "\\ No newline at end of file"
+    return f"{_HUNK_LINE_PREFIXES[hl.kind]}{hl.text}"
+
+
 def _format_file_patch(fp: _FilePatch) -> str:
     """Render a parsed file patch back to unified-diff text (for tests/helpers)."""
-    lines: list[str] = []
     old = f"a/{fp.old_path}" if fp.old_path else "/dev/null"
     new = f"b/{fp.new_path}" if fp.new_path else "/dev/null"
-    lines.append(f"diff --git {old} {new}")
+    lines = [f"diff --git {old} {new}"]
     if fp.new_file:
         lines.append("new file mode 100644")
     if fp.deleted:
@@ -225,15 +240,7 @@ def _format_file_patch(fp: _FilePatch) -> str:
         lines.append(
             f"@@ -{hunk.old_start},{hunk.old_count} +{hunk.new_start},{hunk.new_count} @@"
         )
-        for hl in hunk.lines:
-            if hl.kind == "context":
-                lines.append(f" {hl.text}")
-            elif hl.kind == "delete":
-                lines.append(f"-{hl.text}")
-            elif hl.kind == "add":
-                lines.append(f"+{hl.text}")
-            elif hl.kind == "no_newline":
-                lines.append("\\ No newline at end of file")
+        lines.extend(_format_hunk_line(hl) for hl in hunk.lines)
     return "\n".join(lines) + "\n"
 
 
@@ -267,6 +274,22 @@ def _require_base_line(base_lines: list[str], idx: int, expected: str, kind: str
         raise LiveBaselineError(f"patch {kind} does not match base file")
 
 
+def _apply_no_newline(out: list[str], last_add_index: int | None) -> None:
+    if last_add_index is not None and last_add_index < len(out):
+        out[last_add_index] = out[last_add_index].removesuffix("\n")
+
+
+def _validate_hunk_counts(hunk: _Hunk, consumed_old: int, emitted_new: int) -> None:
+    if consumed_old != hunk.old_count:
+        raise LiveBaselineError(
+            f"hunk old-count mismatch: declared {hunk.old_count}, consumed {consumed_old}"
+        )
+    if emitted_new != hunk.new_count:
+        raise LiveBaselineError(
+            f"hunk new-count mismatch: declared {hunk.new_count}, emitted {emitted_new}"
+        )
+
+
 def _apply_hunk(hunk: _Hunk, base_lines: list[str], out: list[str], idx: int) -> int:
     idx = _seek_hunk(out, base_lines, idx, hunk)
     consumed_old = 0
@@ -275,8 +298,7 @@ def _apply_hunk(hunk: _Hunk, base_lines: list[str], out: list[str], idx: int) ->
 
     for hl in hunk.lines:
         if hl.kind == "no_newline":
-            if last_add_index is not None and last_add_index < len(out):
-                out[last_add_index] = out[last_add_index].removesuffix("\n")
+            _apply_no_newline(out, last_add_index)
             last_add_index = None
             continue
         last_add_index = None
@@ -298,14 +320,7 @@ def _apply_hunk(hunk: _Hunk, base_lines: list[str], out: list[str], idx: int) ->
             emitted_new += 1
             last_add_index = len(out) - 1
 
-    if consumed_old != hunk.old_count:
-        raise LiveBaselineError(
-            f"hunk old-count mismatch: declared {hunk.old_count}, consumed {consumed_old}"
-        )
-    if emitted_new != hunk.new_count:
-        raise LiveBaselineError(
-            f"hunk new-count mismatch: declared {hunk.new_count}, emitted {emitted_new}"
-        )
+    _validate_hunk_counts(hunk, consumed_old, emitted_new)
     return idx
 
 
@@ -414,6 +429,34 @@ def _patch_result_for_path(
     return _apply_file_patch(base, file_patch)
 
 
+def _renames_match(gold_fp: _FilePatch, model_fp: _FilePatch) -> bool:
+    if gold_fp.renamed != model_fp.renamed:
+        return False
+    if not gold_fp.renamed:
+        return True
+    return gold_fp.old_path == model_fp.old_path and gold_fp.new_path == model_fp.new_path
+
+
+def _file_patch_results_match(
+    path: str,
+    gold_fp: _FilePatch,
+    model_fp: _FilePatch,
+    base_files: Mapping[str, str],
+) -> bool:
+    if not _renames_match(gold_fp, model_fp):
+        return False
+    try:
+        gold_result = _patch_result_for_path(path, gold_fp, base_files)
+        model_result = _patch_result_for_path(path, model_fp, base_files)
+    except LiveBaselineError:
+        return False
+    if gold_result is None and model_result is None:
+        return True
+    if gold_result is None or model_result is None:
+        return False
+    return gold_result == model_result
+
+
 def byte_identical_gold_src(
     *,
     base_files: Mapping[str, str],
@@ -427,23 +470,9 @@ def byte_identical_gold_src(
     if not gold_src or gold_src != _non_test_paths(model_files, test_patch):
         return False
     for path in gold_src:
-        gold_fp = gold_files[path]
-        model_fp = model_files[path]
-        # Renames must have the same destination and source.
-        if gold_fp.renamed != model_fp.renamed:
-            return False
-        if gold_fp.renamed and (gold_fp.old_path != model_fp.old_path or gold_fp.new_path != model_fp.new_path):
-            return False
-        try:
-            gold_result = _patch_result_for_path(path, gold_fp, base_files)
-            model_result = _patch_result_for_path(path, model_fp, base_files)
-        except LiveBaselineError:
-            return False
-        if gold_result is None and model_result is None:
-            continue
-        if gold_result is None or model_result is None:
-            return False
-        if gold_result != model_result:
+        if not _file_patch_results_match(
+            path, gold_files[path], model_files[path], base_files
+        ):
             return False
     return True
 
