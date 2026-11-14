@@ -68,6 +68,11 @@ file_patterns = ["**/tests/**", "tests/fixtures/**"]
 plugins = ["bandit"]
 file_patterns = ["benchmarks/dataset_cache_hf.py"]
 
+# Git blob object ids are SHA-1 by spec; Bandit B324 has no usedforsecurity exception.
+[[exclude]]
+plugins = ["bandit"]
+file_patterns = ["src/combine_for_ai/git_blob.py"]
+
 [smells]
 mode = "comment"
 

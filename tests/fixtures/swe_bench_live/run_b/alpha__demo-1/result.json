@@ -1,0 +1,5 @@
+{
+  "instance_id": "alpha__demo-1",
+  "resolved": true,
+  "model_patch": "diff --git a/src/lib.py b/src/lib.py\n--- a/src/lib.py\n+++ b/src/lib.py\n@@ -1 +1 @@\n-old\n+new\n"
+}
