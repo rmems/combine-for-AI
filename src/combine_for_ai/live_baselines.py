@@ -157,7 +157,10 @@ def _coerce_task_row(raw: Mapping[str, Any], *, source: Path | str) -> TaskResul
         raise LiveBaselineError(
             f"missing boolean resolved in per-task result at {source}"
         )
-    return TaskResultRow.model_validate(raw)
+    try:
+        return TaskResultRow.model_validate(raw)
+    except ValidationError as exc:
+        raise LiveBaselineError(f"invalid per-task result at {source}: {exc}") from exc
 
 
 def load_per_task_result_json(path: Path) -> TaskResultRow:
@@ -195,7 +198,15 @@ _RESULT_ID_BUCKETS = (
 )
 
 
-def _ids_from_buckets(results: Mapping[str, Any]) -> list[str]:
+def _coerce_instance_id(item: Any, *, bucket: str, source: str) -> str:
+    if not isinstance(item, str) or not item.strip():
+        raise LiveBaselineError(
+            f"submission results.json field {bucket!r} contains a non-string or blank id at {source}"
+        )
+    return item
+
+
+def _ids_from_buckets(results: Mapping[str, Any], *, source: str) -> list[str]:
     seen: set[str] = set()
     ordered: list[str] = []
     for bucket in _RESULT_ID_BUCKETS:
@@ -207,7 +218,7 @@ def _ids_from_buckets(results: Mapping[str, Any]) -> list[str]:
                 f"submission results.json field {bucket!r} must be a list"
             )
         for item in ids:
-            instance_id = str(item)
+            instance_id = _coerce_instance_id(item, bucket=bucket, source=source)
             if instance_id in seen:
                 continue
             seen.add(instance_id)
@@ -215,7 +226,9 @@ def _ids_from_buckets(results: Mapping[str, Any]) -> list[str]:
     return ordered
 
 
-def _instance_ids_from_submission_results(results: Mapping[str, Any]) -> list[str]:
+def _instance_ids_from_submission_results(
+    results: Mapping[str, Any], *, source: str
+) -> list[str]:
     if is_leaderboard_aggregate_payload(results):
         raise LiveBaselineError(
             "refusing leaderboard per-language totals; ingest submission results.json"
@@ -224,7 +237,10 @@ def _instance_ids_from_submission_results(results: Mapping[str, Any]) -> list[st
         raise LiveBaselineError("not a SWE-bench-Live submission results.json")
     submitted = results.get("submitted_ids")
     if isinstance(submitted, list) and submitted:
-        return [str(item) for item in submitted]
+        return [
+            _coerce_instance_id(item, bucket="submitted_ids", source=source)
+            for item in submitted
+        ]
     # Without an authoritative submitted list, require both positive and negative
     # buckets so we do not ingest only the resolved subset and inflate scores.
     has_positive = any(isinstance(results.get(key), list) and results[key] for key in _POSITIVE_ID_KEYS)
@@ -234,7 +250,7 @@ def _instance_ids_from_submission_results(results: Mapping[str, Any]) -> list[st
             "incomplete submission results.json: need submitted_ids or both "
             "resolved/success and unresolved/failure buckets"
         )
-    ordered = _ids_from_buckets(results)
+    ordered = _ids_from_buckets(results, source=source)
     if not ordered:
         raise LiveBaselineError("submission results.json lists no instance ids")
     return ordered
@@ -250,19 +266,19 @@ _NEGATIVE_ID_KEYS = (
 )
 
 
-def _id_set(results: Mapping[str, Any], key: str) -> set[str] | None:
+def _id_set(results: Mapping[str, Any], key: str, *, source: str) -> set[str] | None:
     value = results.get(key)
     if value is None:
         return None
     if not isinstance(value, list):
         raise LiveBaselineError(f"submission results.json field {key!r} must be a list")
-    return {str(item) for item in value}
+    return {_coerce_instance_id(item, bucket=key, source=source) for item in value}
 
 
 def _resolved_id_set(results: Mapping[str, Any], *, source: str) -> set[str]:
     """Require explicit resolved-id lists and reject contradictory buckets."""
-    resolved = _id_set(results, "resolved_ids")
-    success = _id_set(results, "success_ids")
+    resolved = _id_set(results, "resolved_ids", source=source)
+    success = _id_set(results, "success_ids", source=source)
     if resolved is None and success is None:
         raise LiveBaselineError(
             f"unknown submission results format at {source}: "
@@ -275,7 +291,7 @@ def _resolved_id_set(results: Mapping[str, Any], *, source: str) -> set[str]:
         positive.update(success)
     negative: set[str] = set()
     for key in _NEGATIVE_ID_KEYS:
-        bucket = _id_set(results, key)
+        bucket = _id_set(results, key, source=source)
         if bucket is not None:
             negative.update(bucket)
     overlap = positive & negative
@@ -306,7 +322,7 @@ def rows_from_submission_bundle(
     """Expand submission ``results.json`` + ``preds.json`` into per-task rows."""
     resolved_ids = _resolved_id_set(results, source=source)
     rows: list[TaskResultRow] = []
-    for instance_id in _instance_ids_from_submission_results(results):
+    for instance_id in _instance_ids_from_submission_results(results, source=source):
         pred_entry = preds.get(instance_id)
         rows.append(
             TaskResultRow(

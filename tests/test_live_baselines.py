@@ -677,3 +677,33 @@ def test_rank_rejects_inconsistent_snapshot() -> None:
     )
     with pytest.raises(LiveBaselineError, match="do not match"):
         rank_runs_on_shared_rows([bad])
+
+
+def test_rows_from_submission_bundle_rejects_non_string_id() -> None:
+    results = {"submitted_ids": [None], "resolved_ids": []}
+    with pytest.raises(LiveBaselineError, match="non-string or blank id"):
+        rows_from_submission_bundle(results, {}, source="null-id.json")
+
+
+def test_rows_from_submission_bundle_rejects_blank_id() -> None:
+    results = {"submitted_ids": ["  "], "resolved_ids": []}
+    with pytest.raises(LiveBaselineError, match="non-string or blank id"):
+        rows_from_submission_bundle(results, {}, source="blank-id.json")
+
+
+def test_coerce_task_row_wraps_validation_error() -> None:
+    from combine_for_ai.live_baselines import _coerce_task_row
+
+    with pytest.raises(LiveBaselineError, match="invalid per-task result"):
+        _coerce_task_row(
+            {"instance_id": "repo__a-1", "resolved": True, "model_patch": 123},
+            source="bad-types.json",
+        )
+
+
+def test_load_base_files_preserves_crlf(tmp_path: Path) -> None:
+    from combine_for_ai.live_baselines import load_base_files
+
+    (tmp_path / "lib.py").write_bytes(b"old\r\n")
+    loaded = load_base_files(tmp_path, ["lib.py"])
+    assert loaded["lib.py"] == "old\r\n"

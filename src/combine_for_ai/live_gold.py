@@ -379,7 +379,9 @@ def load_base_files(root: Path, paths: Iterable[str]) -> dict[str, str]:
     for path in paths:
         candidate = root / path
         if candidate.is_file():
-            loaded[path] = candidate.read_text(encoding="utf-8")
+            # Read bytes and decode explicitly: read_text() would translate CRLF
+            # to LF and break byte-identical patch comparison.
+            loaded[path] = candidate.read_bytes().decode("utf-8")
     return loaded
 
 
