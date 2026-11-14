@@ -14,7 +14,7 @@ from combine_for_ai.live_baselines import (
     flagged_baseline_ids,
 )
 
-PACKAGE_ROOT = Path(__file__).resolve().parents[2]
+PACKAGE_ROOT = Path(__file__).resolve().parent
 PINNED_RUST_INSTANCE_IDS_PATH = (
     PACKAGE_ROOT / "data" / "swe_bench_live" / "multi_swe_bench_rust_239.json"
 )
@@ -78,10 +78,40 @@ def _eligible_runs(
     runs: Sequence[RunSnapshot], exclude_run_ids: Iterable[str]
 ) -> list[RunSnapshot]:
     excluded = frozenset(exclude_run_ids)
-    return [run for run in runs if run.run_id not in excluded]
+    eligible = [run for run in runs if run.run_id not in excluded]
+    seen: set[str] = set()
+    for run in eligible:
+        if run.run_id in seen:
+            raise LiveBaselineError(f"duplicate run_id {run.run_id!r} in ranking input")
+        seen.add(run.run_id)
+    return eligible
+
+
+def _validate_run_snapshot(run: RunSnapshot) -> None:
+    row_ids = [row.instance_id for row in run.rows]
+    if len(row_ids) != len(set(row_ids)):
+        raise LiveBaselineError(f"duplicate instance_id in run {run.run_id!r} rows")
+    snapshot_ids = tuple(run.instance_ids)
+    if len(snapshot_ids) != len(set(snapshot_ids)):
+        raise LiveBaselineError(f"duplicate instance_id in run {run.run_id!r} instance_ids")
+    if set(snapshot_ids) != set(row_ids):
+        raise LiveBaselineError(
+            f"run {run.run_id!r} instance_ids do not match row instance_ids"
+        )
+
+
+def _filter_usable(
+    runs: Sequence[RunSnapshot],
+    registry: BaselineRegistry | None,
+    baseline_id_for_run: Mapping[str, str] | None,
+) -> list[RunSnapshot]:
+    if registry is None or baseline_id_for_run is None:
+        return list(runs)
+    return filter_usable_runs(runs, registry, baseline_id_for_run=baseline_id_for_run)
 
 
 def _score_run_on_ids(run: RunSnapshot, universe: Sequence[str]) -> RankedRun:
+    _validate_run_snapshot(run)
     by_id = {row.instance_id: row for row in run.rows}
     resolved = 0
     missing = 0
@@ -129,11 +159,14 @@ def rank_on_pinned_instance_ids(
     pin: Sequence[str],
     *,
     exclude_run_ids: Iterable[str] = (),
+    registry: BaselineRegistry | None = None,
+    baseline_id_for_run: Mapping[str, str] | None = None,
 ) -> list[RankedRun]:
     """Score every run against ``pin``. Ids outside the pin raise; missing ids are unresolved."""
     if not pin:
         raise LiveBaselineError("pinned instance id list is empty")
-    eligible = _eligible_runs(runs, exclude_run_ids)
+    usable = _filter_usable(runs, registry, baseline_id_for_run)
+    eligible = _eligible_runs(usable, exclude_run_ids)
     if not eligible:
         return []
     extra = _out_of_pin_ids(eligible, pin)
@@ -148,9 +181,12 @@ def rank_runs_on_shared_rows(
     runs: Sequence[RunSnapshot],
     *,
     exclude_run_ids: Iterable[str] = (),
+    registry: BaselineRegistry | None = None,
+    baseline_id_for_run: Mapping[str, str] | None = None,
 ) -> list[RankedRun]:
     """Explicit third-party leaderboard mode: rank on the intersection of reported ids."""
-    eligible = _eligible_runs(runs, exclude_run_ids)
+    usable = _filter_usable(runs, registry, baseline_id_for_run)
+    eligible = _eligible_runs(usable, exclude_run_ids)
     if not eligible:
         return []
     common = shared_instance_ids(*eligible)

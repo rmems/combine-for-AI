@@ -36,7 +36,7 @@ from combine_for_ai.rmems_eval_v0_1 import rank_runs as rank_rmems_eval_v0_1
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "swe_bench_live"
 SUBMISSIONS = FIXTURES / "submissions"
-REGISTRY = Path(__file__).resolve().parents[1] / "data" / "swe_bench_live" / "baselines.json"
+REGISTRY = Path(__file__).resolve().parents[1] / "src" / "combine_for_ai" / "data" / "swe_bench_live" / "baselines.json"
 
 
 def test_registry_pr59_documents_87_of_171_and_rmems_trajectory_note() -> None:
@@ -377,7 +377,7 @@ def test_byte_identical_gold_src_respects_hunk_line_offset() -> None:
         "diff --git a/src/lib.py b/src/lib.py\n"
         "--- a/src/lib.py\n"
         "+++ b/src/lib.py\n"
-        "@@ -16,3 +16,3 @@\n"
+        "@@ -15,3 +15,3 @@\n"
         " l15\n"
         "-l16\n"
         "+FIX\n"
@@ -387,7 +387,7 @@ def test_byte_identical_gold_src_respects_hunk_line_offset() -> None:
         "diff --git a/src/lib.py b/src/lib.py\n"
         "--- a/src/lib.py\n"
         "+++ b/src/lib.py\n"
-        "@@ -3,3 +3,3 @@\n"
+        "@@ -2,3 +2,3 @@\n"
         " l2\n"
         "-l3\n"
         "+FIX\n"
@@ -483,7 +483,7 @@ def test_annotate_row_hygiene_sets_flags() -> None:
         base_files={"src/lib.py": "old\n"},
     )
     assert annotated.byte_identical_gold_src is True
-    assert annotated.contains_gold_test_patch is False
+    assert annotated.contains_gold_test_patch is None
 
 
 def test_git_blob_sha1_matches_git() -> None:
@@ -496,3 +496,184 @@ def test_per_task_row_json_roundtrip_fixture() -> None:
     row = json.loads(path.read_text(encoding="utf-8"))
     rows = ingest_result_rows(row, source=str(path))
     assert rows[0].instance_id == "alpha__demo-1"
+
+
+def test_byte_identical_gold_src_preserves_crlf() -> None:
+    base_files = {"src/lib.py": "old\r\n"}
+    gold_patch = (
+        "diff --git a/src/lib.py b/src/lib.py\n"
+        "--- a/src/lib.py\n"
+        "+++ b/src/lib.py\n"
+        "@@ -1 +1 @@\n"
+        "-old\r\n"
+        "+new\r\n"
+    )
+    model_patch = (
+        "diff --git a/src/lib.py b/src/lib.py\n"
+        "--- a/src/lib.py\n"
+        "+++ b/src/lib.py\n"
+        "@@ -1 +1 @@\n"
+        "-old\r\n"
+        "+new\n"
+    )
+    assert not byte_identical_gold_src(
+        base_files=base_files, gold_patch=gold_patch, model_patch=model_patch
+    )
+
+
+def test_byte_identical_gold_src_distinguishes_rename_from_in_place_edit() -> None:
+    base_files = {"src/a.rs": "old\n"}
+    gold_patch = (
+        "diff --git a/src/a.rs b/src/b.rs\n"
+        "rename from src/a.rs\n"
+        "rename to src/b.rs\n"
+        "--- a/src/a.rs\n"
+        "+++ b/src/b.rs\n"
+        "@@ -1 +1 @@\n"
+        "-old\n"
+        "+new\n"
+    )
+    model_patch = (
+        "diff --git a/src/a.rs b/src/a.rs\n"
+        "--- a/src/a.rs\n"
+        "+++ b/src/a.rs\n"
+        "@@ -1 +1 @@\n"
+        "-old\n"
+        "+new\n"
+    )
+    assert not byte_identical_gold_src(
+        base_files=base_files, gold_patch=gold_patch, model_patch=model_patch
+    )
+
+
+def test_byte_identical_gold_src_applies_eof_newline_marker() -> None:
+    base_files = {"src/lib.py": "old\n"}
+    gold_patch = (
+        "diff --git a/src/lib.py b/src/lib.py\n"
+        "--- a/src/lib.py\n"
+        "+++ b/src/lib.py\n"
+        "@@ -1 +1 @@\n"
+        "-old\n"
+        "+new\n"
+    )
+    model_patch = (
+        "diff --git a/src/lib.py b/src/lib.py\n"
+        "--- a/src/lib.py\n"
+        "+++ b/src/lib.py\n"
+        "@@ -1 +1 @@\n"
+        "-old\n"
+        "+new\n"
+        "\\ No newline at end of file\n"
+    )
+    assert not byte_identical_gold_src(
+        base_files=base_files, gold_patch=gold_patch, model_patch=model_patch
+    )
+
+
+def test_byte_identical_gold_src_rejects_hunk_count_mismatch() -> None:
+    base_files = {"src/lib.py": "old\n"}
+    gold_patch = (
+        "diff --git a/src/lib.py b/src/lib.py\n"
+        "--- a/src/lib.py\n"
+        "+++ b/src/lib.py\n"
+        "@@ -1 +1 @@\n"
+        "-old\n"
+        "+new\n"
+    )
+    model_patch = (
+        "diff --git a/src/lib.py b/src/lib.py\n"
+        "--- a/src/lib.py\n"
+        "+++ b/src/lib.py\n"
+        "@@ -1,2 +1,2 @@\n"
+        "-old\n"
+        "+new\n"
+    )
+    assert not byte_identical_gold_src(
+        base_files=base_files, gold_patch=gold_patch, model_patch=model_patch
+    )
+
+
+def test_byte_identical_gold_src_distinguishes_delete_from_truncate() -> None:
+    base_files = {"src/lib.py": "old\n"}
+    gold_patch = (
+        "diff --git a/src/lib.py b/src/lib.py\n"
+        "deleted file mode 100644\n"
+        "--- a/src/lib.py\n"
+        "+++ /dev/null\n"
+        "@@ -1 +0,0 @@\n"
+        "-old\n"
+    )
+    model_patch = (
+        "diff --git a/src/lib.py b/src/lib.py\n"
+        "--- a/src/lib.py\n"
+        "+++ b/src/lib.py\n"
+        "@@ -1 +0,0 @@\n"
+        "-old\n"
+    )
+    assert not byte_identical_gold_src(
+        base_files=base_files, gold_patch=gold_patch, model_patch=model_patch
+    )
+
+
+def test_ingest_result_rows_rejects_empty_rows() -> None:
+    with pytest.raises(LiveBaselineError, match="no per-task rows"):
+        ingest_result_rows({"rows": []}, source="empty.json")
+
+
+def test_ingest_result_rows_rejects_malformed_row() -> None:
+    with pytest.raises(LiveBaselineError, match="must be a JSON object"):
+        ingest_result_rows({"rows": [None]}, source="bad.json")
+
+
+def test_ingest_result_rows_rejects_blank_instance_id() -> None:
+    with pytest.raises(LiveBaselineError, match="blank instance_id"):
+        ingest_result_rows({"instance_id": "  ", "resolved": True}, source="blank.json")
+
+
+def test_rows_from_submission_bundle_rejects_contradictory_buckets() -> None:
+    results = {
+        "submitted_ids": ["repo__a-1"],
+        "resolved_ids": ["repo__a-1"],
+        "unresolved_ids": ["repo__a-1"],
+    }
+    with pytest.raises(LiveBaselineError, match="contradictory"):
+        rows_from_submission_bundle(results, {}, source="contradictory.json")
+
+
+def test_rows_from_submission_bundle_rejects_non_list_bucket() -> None:
+    results = {
+        "submitted_ids": ["repo__a-1"],
+        "resolved_ids": ["repo__a-1"],
+        "unresolved_ids": "not-a-list",
+    }
+    with pytest.raises(LiveBaselineError, match="must be a list"):
+        rows_from_submission_bundle(results, {}, source="bad-bucket.json")
+
+
+def test_rows_from_submission_bundle_rejects_incomplete_submission() -> None:
+    results = {"resolved_ids": ["repo__a-1"]}
+    with pytest.raises(LiveBaselineError, match="incomplete submission"):
+        rows_from_submission_bundle(results, {}, source="incomplete.json")
+
+
+def test_ingest_run_directory_rejects_partial_bundle(tmp_path: Path) -> None:
+    (tmp_path / "results.json").write_text("{}", encoding="utf-8")
+    with pytest.raises(LiveBaselineError, match="incomplete submission bundle"):
+        ingest_run_directory(tmp_path, run_id="partial")
+
+
+def test_rank_rejects_duplicate_run_id() -> None:
+    run = ingest_run_directory(FIXTURES / "run_a", run_id="dup")
+    with pytest.raises(LiveBaselineError, match="duplicate run_id"):
+        rank_runs_on_shared_rows([run, run])
+
+
+def test_rank_rejects_inconsistent_snapshot() -> None:
+    run = ingest_run_directory(FIXTURES / "run_a", run_id="bad")
+    bad = RunSnapshot(
+        run_id="bad",
+        instance_ids=("alpha__demo-1",),
+        rows=run.rows,
+    )
+    with pytest.raises(LiveBaselineError, match="do not match"):
+        rank_runs_on_shared_rows([bad])

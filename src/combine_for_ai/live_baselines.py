@@ -18,7 +18,7 @@ from combine_for_ai.live_gold import (
     load_base_files,
 )
 
-PACKAGE_ROOT = Path(__file__).resolve().parents[2]
+PACKAGE_ROOT = Path(__file__).resolve().parent
 DEFAULT_BASELINES_PATH = PACKAGE_ROOT / "data" / "swe_bench_live" / "baselines.json"
 
 _LEADERBOARD_LANGUAGE_KEYS = frozenset({"lite", "java", "go", "rust", "python", "javascript", "typescript"})
@@ -150,6 +150,9 @@ def _coerce_task_row(raw: Mapping[str, Any], *, source: Path | str) -> TaskResul
         )
     if "instance_id" not in raw:
         raise LiveBaselineError(f"missing instance_id in per-task result at {source}")
+    instance_id = raw.get("instance_id")
+    if not isinstance(instance_id, str) or not instance_id.strip():
+        raise LiveBaselineError(f"blank instance_id in per-task result at {source}")
     if not isinstance(raw.get("resolved"), bool):
         raise LiveBaselineError(
             f"missing boolean resolved in per-task result at {source}"
@@ -196,9 +199,13 @@ def _ids_from_buckets(results: Mapping[str, Any]) -> list[str]:
     seen: set[str] = set()
     ordered: list[str] = []
     for bucket in _RESULT_ID_BUCKETS:
-        ids = results.get(bucket)
-        if not isinstance(ids, list):
+        if bucket not in results:
             continue
+        ids = results[bucket]
+        if not isinstance(ids, list):
+            raise LiveBaselineError(
+                f"submission results.json field {bucket!r} must be a list"
+            )
         for item in ids:
             instance_id = str(item)
             if instance_id in seen:
@@ -217,38 +224,67 @@ def _instance_ids_from_submission_results(results: Mapping[str, Any]) -> list[st
         raise LiveBaselineError("not a SWE-bench-Live submission results.json")
     submitted = results.get("submitted_ids")
     if isinstance(submitted, list) and submitted:
-        ordered = [str(item) for item in submitted]
-    else:
-        ordered = _ids_from_buckets(results)
+        return [str(item) for item in submitted]
+    # Without an authoritative submitted list, require both positive and negative
+    # buckets so we do not ingest only the resolved subset and inflate scores.
+    has_positive = any(isinstance(results.get(key), list) and results[key] for key in _POSITIVE_ID_KEYS)
+    has_negative = any(isinstance(results.get(key), list) and results[key] for key in _NEGATIVE_ID_KEYS)
+    if not (has_positive and has_negative):
+        raise LiveBaselineError(
+            "incomplete submission results.json: need submitted_ids or both "
+            "resolved/success and unresolved/failure buckets"
+        )
+    ordered = _ids_from_buckets(results)
     if not ordered:
         raise LiveBaselineError("submission results.json lists no instance ids")
     return ordered
 
 
-def _id_list(results: Mapping[str, Any], key: str) -> list[str] | None:
+_POSITIVE_ID_KEYS = ("resolved_ids", "success_ids")
+_NEGATIVE_ID_KEYS = (
+    "unresolved_ids",
+    "failure_ids",
+    "error_ids",
+    "incomplete_ids",
+    "empty_patch_ids",
+)
+
+
+def _id_set(results: Mapping[str, Any], key: str) -> set[str] | None:
     value = results.get(key)
-    if key not in results:
+    if value is None:
         return None
     if not isinstance(value, list):
         raise LiveBaselineError(f"submission results.json field {key!r} must be a list")
-    return [str(item) for item in value]
+    return {str(item) for item in value}
 
 
 def _resolved_id_set(results: Mapping[str, Any], *, source: str) -> set[str]:
-    """Require an explicit resolved-id list. Missing keys must not look like zero resolved."""
-    resolved = _id_list(results, "resolved_ids")
-    success = _id_list(results, "success_ids")
+    """Require explicit resolved-id lists and reject contradictory buckets."""
+    resolved = _id_set(results, "resolved_ids")
+    success = _id_set(results, "success_ids")
     if resolved is None and success is None:
         raise LiveBaselineError(
             f"unknown submission results format at {source}: "
             "need resolved_ids or success_ids (refusing silent zero-resolved ingest)"
         )
-    ids: set[str] = set()
+    positive: set[str] = set()
     if resolved is not None:
-        ids.update(resolved)
+        positive.update(resolved)
     if success is not None:
-        ids.update(success)
-    return ids
+        positive.update(success)
+    negative: set[str] = set()
+    for key in _NEGATIVE_ID_KEYS:
+        bucket = _id_set(results, key)
+        if bucket is not None:
+            negative.update(bucket)
+    overlap = positive & negative
+    if overlap:
+        raise LiveBaselineError(
+            f"contradictory resolution buckets at {source}: "
+            f"ids appear as both resolved and unresolved: {sorted(overlap)}"
+        )
+    return positive
 
 
 def _model_patch_from_preds_entry(entry: Any) -> str | None:
@@ -304,7 +340,14 @@ def ingest_run_directory(run_dir: Path, *, run_id: str | None = None) -> RunSnap
     if not run_dir.is_dir():
         raise LiveBaselineError(f"run directory not found: {run_dir}")
     resolved_run_id = run_id or run_dir.name
-    if (run_dir / "results.json").is_file() and (run_dir / "preds.json").is_file():
+    has_results = (run_dir / "results.json").is_file()
+    has_preds = (run_dir / "preds.json").is_file()
+    if has_results != has_preds:
+        raise LiveBaselineError(
+            f"incomplete submission bundle in {run_dir}: "
+            "results.json and preds.json must both be present"
+        )
+    if has_results and has_preds:
         return ingest_submission_directory(run_dir, run_id=resolved_run_id)
     rows: list[TaskResultRow] = []
     for path in sorted(run_dir.rglob("result.json")):
@@ -343,7 +386,15 @@ def _raw_rows_from_payload(payload: Mapping[str, Any]) -> list[Any]:
 def ingest_result_rows(payload: Mapping[str, Any], *, source: str = "<payload>") -> list[TaskResultRow]:
     """Ingest an explicit list of per-task rows (never leaderboard totals)."""
     _reject_non_task_ingest(payload, source)
-    rows = [_coerce_task_row(item, source=source) for item in _raw_rows_from_payload(payload)]
+    raw_rows = _raw_rows_from_payload(payload)
+    if not raw_rows:
+        raise LiveBaselineError(f"no per-task rows in ingest payload at {source}")
+    for item in raw_rows:
+        if not isinstance(item, Mapping):
+            raise LiveBaselineError(
+                f"per-task row at {source} must be a JSON object, got {type(item).__name__}"
+            )
+    rows = [_coerce_task_row(item, source=source) for item in raw_rows]
     _assert_unique_instance_ids(rows, context=source)
     return rows
 
@@ -364,9 +415,9 @@ def annotate_row_hygiene(
         test_patch=test_patch,
     )
     data["contains_gold_test_patch"] = (
-        contains_gold_test_patch(model_patch=model_patch, test_patch=test_patch or "")
-        if test_patch
-        else False
+        contains_gold_test_patch(model_patch=model_patch, test_patch=test_patch)
+        if test_patch is not None
+        else None
     )
     return TaskResultRow.model_validate(data)
 
