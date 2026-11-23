@@ -1,9 +1,10 @@
-# combine-for-AI
+# peira
 
 Neutral benchmark harness for **hybrid MoE/SNN quantization** experiments.
 
-Repository slug / distribution name / Python import package:
-**`combine-for-AI`** / **`combine-for-ai`** / **`combine_for_ai`**.
+Repository slug: **`peira`** (renamed from `combine-for-AI` on 2026-11-23; the old URL redirects).
+Distribution name / Python import package — still `combine-for-ai` until the package rename lands:
+**`combine-for-ai`** / **`combine_for_ai`**.
 
 `combine-for-ai` is the `[project].name` in `pyproject.toml`. It is not published on PyPI. Install from a clone of this repository.
 
@@ -33,7 +34,7 @@ Does **not** own:
 | [magere-brug](https://github.com/rmems/magere-brug) | SAAQ recipes + handoff manifests |
 | [corinth-canal](https://github.com/rmems/corinth-canal) | SAAQ latent telemetry runs |
 | [myelin-accelerator](https://github.com/Limen-Neural/myelin-accelerator) | CUDA GEMV/GEMM for ternary/GOZ1 |
-| **combine-for-AI** | Ingest, metrics, reports, comparison |
+| **peira** | Ingest, metrics, reports, comparison |
 
 GOZ1 container format SoT: [`grok-ozempic/docs/goz1-format.md`](https://github.com/rmems/grok-ozempic/blob/main/docs/goz1-format.md) (v3 current: per-tensor `scale`, `gif_threshold`, `threshold_abs`).
 
@@ -107,7 +108,7 @@ Beyond accuracy/perplexity, the report schema supports (nullable) fields used by
 
 Smoke runs on GOZ1 packs attach header fields: `goz1_version`, `goz1_tensor_count`, `goz1_scale_source`.
 
-Import grok-ozempic experiment JSON (multiblock `metrics.json` or route-preservation reports) into combine rows:
+Import grok-ozempic experiment JSON (multiblock `metrics.json` or route-preservation reports) into peira rows:
 
 ```bash
 python scripts/import_goz_experiment.py \
@@ -172,7 +173,7 @@ for how to supply language, agent, temporal and compression-analysis evidence.
 
 ## Tracking
 
-Primary board: [GitHub issues](https://github.com/rmems/combine-for-AI/issues) — epic **#20** (GOZ1 / MoE-SNN evaluation readiness for grok-ozempic).
+Primary board: [GitHub issues](https://github.com/rmems/peira/issues) — epic **#20** (GOZ1 / MoE-SNN evaluation readiness for grok-ozempic).
 
 ## License
 
