@@ -155,9 +155,13 @@ _SCALE_RANK = ("pack_v3", "pack_v2", "legacy_oracle")
 
 def _require_schema_version(raw: dict[str, Any]) -> None:
     """Accept missing version as v1; reject unknown explicit versions."""
-    ver = raw.get(
-        "peira_import_schema",
-        raw.get("combine_import_schema", raw.get("schema_version")),
+    ver = next(
+        (
+            raw[key]
+            for key in ("peira_import_schema", "combine_import_schema", "schema_version")
+            if raw.get(key) is not None
+        ),
+        None,
     )
     if ver is None:
         return

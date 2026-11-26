@@ -27,9 +27,13 @@ def require_legacy_metadata(raw: dict[str, Any]) -> None:
 
 
 def _require_normalized_schema(raw: dict[str, Any], path: Path) -> None:
-    version = raw.get(
-        "peira_import_schema",
-        raw.get("combine_import_schema", raw.get("schema_version", 1)),
+    version = next(
+        (
+            raw[key]
+            for key in ("peira_import_schema", "combine_import_schema", "schema_version")
+            if raw.get(key) is not None
+        ),
+        1,
     )
     if version not in SUPPORTED_VERSIONS:
         raise ValueError("unsupported legacy schema_version")
