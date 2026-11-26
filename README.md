@@ -4,7 +4,7 @@ Post-training evaluation harness for locally trained LLMs — custom task suites
 verification-based scoring, contamination checks, and go/no-go gates with
 per-run provenance.
 
-Repository slug: **`peira`** (renamed from `combine-for-AI` on 2026-11-23; the old URL redirects).
+Repository slug: **`peira`** (renamed 2026-11-23; the old URL redirects).
 Distribution name / import package: **`peira`** / **`peira`**.
 
 `peira` is the `[project].name` in `pyproject.toml`. It is not published on PyPI. Install from a clone of this repository.

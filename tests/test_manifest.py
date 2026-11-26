@@ -180,37 +180,14 @@ def test_load_example_manifests() -> None:
         assert manifest.source_artifact.format
 
 
-def test_benchmark_linkage_accepts_legacy_nfl_keys() -> None:
-    """Legacy magere handoff used nfl_combine_* keys."""
+def test_benchmark_linkage_parses_peira_keys() -> None:
     raw = {
         "manifest_version": "1.0.0",
         "model_name": "legacy-link",
         "source_artifact": {"format": "gguf", "path": "x.gguf"},
         "benchmark_linkage": {
-            "nfl_combine_run_id": "run-old",
-            "nfl_combine_config_path": "configs/benchmark.sample.json",
-        },
-    }
-    m = load_manifest_from_string(json.dumps(raw))
-    assert m.benchmark_linkage is not None
-    assert m.benchmark_linkage.peira_run_id == "run-old"
-    assert m.benchmark_linkage.peira_config_path == "configs/benchmark.sample.json"
-    dumped = m.benchmark_linkage.model_dump(by_alias=True)
-    assert dumped["peira_run_id"] == "run-old"
-    assert dumped["peira_config_path"] == "configs/benchmark.sample.json"
-    assert "nfl_combine_run_id" not in dumped
-    assert "nfl_combine_config_path" not in dumped
-
-
-def test_benchmark_linkage_accepts_legacy_combine_keys() -> None:
-    """Pre-rename magere handoff used combine_* keys."""
-    raw = {
-        "manifest_version": "1.0.0",
-        "model_name": "legacy-link",
-        "source_artifact": {"format": "gguf", "path": "x.gguf"},
-        "benchmark_linkage": {
-            "combine_run_id": "run-old",
-            "combine_config_path": "configs/benchmark.sample.json",
+            "peira_run_id": "run-old",
+            "peira_config_path": "configs/benchmark.sample.json",
         },
     }
     m = load_manifest_from_string(json.dumps(raw))

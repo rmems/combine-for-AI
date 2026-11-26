@@ -30,7 +30,7 @@ def _require_normalized_schema(raw: dict[str, Any], path: Path) -> None:
     version = next(
         (
             raw[key]
-            for key in ("peira_import_schema", "combine_import_schema", "schema_version")
+            for key in ("peira_import_schema", "schema_version")
             if raw.get(key) is not None
         ),
         1,

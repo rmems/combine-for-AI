@@ -6,7 +6,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, Field, ValidationError
 
 
 # Little-endian ASCII "GOZ1" — format SoT: rmems/grok-ozempic/docs/goz1-format.md
@@ -102,28 +102,10 @@ class SAAQMetadata(BaseModel):
 
 
 class BenchmarkLinkage(BaseModel):
-    """Links a model manifest to a peira run.
+    """Links a model manifest to a peira run."""
 
-    Accepts legacy ``combine_*`` and ``nfl_combine_*`` keys for older magere
-    handoff files.
-    """
-
-    model_config = ConfigDict(populate_by_name=True)
-
-    peira_run_id: str | None = Field(
-        default=None,
-        validation_alias=AliasChoices(
-            "peira_run_id", "combine_run_id", "nfl_combine_run_id"
-        ),
-        serialization_alias="peira_run_id",
-    )
-    peira_config_path: str | None = Field(
-        default=None,
-        validation_alias=AliasChoices(
-            "peira_config_path", "combine_config_path", "nfl_combine_config_path"
-        ),
-        serialization_alias="peira_config_path",
-    )
+    peira_run_id: str | None = None
+    peira_config_path: str | None = None
     grok_ozempic_report_path: str | None = None
     grok_ozempic_experiment_id: str | None = None
 

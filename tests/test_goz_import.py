@@ -121,28 +121,6 @@ def test_reject_unsupported_schema_version() -> None:
             import_goz_experiment(path)
 
 
-def test_accepts_legacy_combine_import_schema_key() -> None:
-    raw = {
-        "combine_import_schema": 1,
-        "chain": {
-            "per_block": [
-                {
-                    "block": 0,
-                    "expert_only": {
-                        "router_top1_agreement": 0.5,
-                        "router_top2_set_agreement": 0.0,
-                    },
-                }
-            ],
-        },
-    }
-    with tempfile.TemporaryDirectory() as tmp:
-        path = Path(tmp) / "legacy-key.json"
-        path.write_text(json.dumps(raw), encoding="utf-8")
-        result = import_goz_experiment(path, arms=("expert_only",))
-        assert len(result.rows) == 1
-
-
 def test_reject_unsupported_report_format() -> None:
     path = FIXTURES / "goz_route_preservation.sample.json"
     result = import_goz_experiment(path)
