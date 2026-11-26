@@ -12,12 +12,12 @@ from typing import Any, Literal
 from pydantic import Field, ValidationError
 
 from benchmarks.reporting import write_csv
-from combine_for_ai.jsonio import ensure_dir, write_json
-from combine_for_ai.report_evidence import RenderingModel, load_report_evidence, read_json
+from peira.jsonio import ensure_dir, write_json
+from peira.report_evidence import RenderingModel, load_report_evidence, read_json
 
 
 class PlotConfig(RenderingModel):
-    schema_version: Literal["combine.plot-config.v1"]
+    schema_version: Literal["peira.plot-config.v1"]
     width_inches: float = Field(default=9, ge=6, le=20)
     height_inches: float = Field(default=5, ge=4, le=20)
     dpi: int = Field(default=120, ge=72, le=300)
@@ -253,7 +253,7 @@ def _payload(
     cohorts: list[dict[str, Any]],
 ) -> dict[str, Any]:
     return {
-        "schema_version": "combine.plot-report.v1",
+        "schema_version": "peira.plot-report.v1",
         "plot_config": config.model_dump(),
         "plot_config_sha256": config_hash,
         "sources": sources,
@@ -292,7 +292,7 @@ def _maybe_plot(
     if not output.plots or not _has_value(metric):
         return
     # Optional dependency: plot_render imports Matplotlib.
-    from combine_for_ai.plot_render import render_plot
+    from peira.plot_render import render_plot
 
     relative = f"plots/{cohort['id']}-{index:02d}.png"
     render_plot(

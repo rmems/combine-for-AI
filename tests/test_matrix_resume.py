@@ -178,7 +178,7 @@ def test_incompatible_matrix_definition_is_rejected(tmp_path: Path) -> None:
 
 def test_corrupt_tail_keeps_earlier_records(tmp_path: Path) -> None:
     path = tmp_path / "journal.jsonl"
-    first = {"kind": "header", "schema": "combine.matrix.journal.v1"}
+    first = {"kind": "header", "schema": "peira.matrix.journal.v1"}
     second = {"kind": "transition", "cell_id": "abc", "state": "succeeded", "attempt": 1}
     path.write_bytes(encode_record(first) + encode_record(second) + b'{"v":1,"crc32":"deadbeef","body":')
     replay = recover_journal_file(path)
@@ -194,7 +194,7 @@ def test_corrupt_tail_keeps_earlier_records(tmp_path: Path) -> None:
 
 def test_crc_mismatch_at_tail_is_detected(tmp_path: Path) -> None:
     path = tmp_path / "journal.jsonl"
-    body = {"kind": "header", "schema": "combine.matrix.journal.v1"}
+    body = {"kind": "header", "schema": "peira.matrix.journal.v1"}
     bad = (
         json.dumps(
             {"body": {"kind": "transition", "state": "running"}, "crc32": "00000000", "v": 1},

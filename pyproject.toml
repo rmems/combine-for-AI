@@ -1,7 +1,7 @@
 [project]
-name = "combine-for-ai"
+name = "peira"
 version = "0.1.0"
-description = "Neutral benchmark harness for hybrid MoE/SNN quantization experiments"
+description = "Post-training evaluation harness for locally trained LLMs — custom task suites, verification-based scoring, contamination checks, and go/no-go gates with per-run provenance"
 readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
@@ -21,7 +21,7 @@ dependencies = [
 plots = ["matplotlib>=3.10,<4"]
 
 [project.scripts]
-combine-for-ai = "combine_for_ai:main"
+peira = "peira:main"
 
 [dependency-groups]
 dev = ["pytest>=8.0.0", "ruff>=0.14.0,<0.15.0"]

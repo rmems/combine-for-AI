@@ -1,6 +1,6 @@
 # Headless reports from archived evidence
 
-This is the offline rendering capability for [issue #12](https://github.com/rmems/combine-for-AI/issues/12),
+This is the offline rendering capability for [issue #12](https://github.com/rmems/peira/issues/12),
 not a dashboard, evaluator, profiler or statistics library. It does not run an
 engine, qualify a backend, estimate energy or compute a cross-track score.
 
@@ -42,12 +42,12 @@ paths, config and locked dependency environment produce identical output bytes;
 there are no generated timestamps or random filenames. Different Matplotlib/font
 versions or platforms can change PNG bytes. Source paths are part of cohort IDs.
 
-## Prepared rendering input (`combine.plot-evidence.v1`)
+## Prepared rendering input (`peira.plot-evidence.v1`)
 
 [The multi-track fixture](../tests/fixtures/plot_evidence.sample.json) is a complete,
 executable example. Its values/intervals are shape-only fixtures, **not real
 measurements or statistically qualified results**. The Pydantic models in
-`src/combine_for_ai/report_evidence.py` define the validated rendering contract.
+`src/peira/report_evidence.py` define the validated rendering contract.
 
 Root fields are `schema_version`, optional `run` (engine-owned run IDs, URLs and
 metadata), and `records` (an empty array is valid). Each record supplies:

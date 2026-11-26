@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import Iterable, Protocol
 
 from benchmarks.datasets import DatasetRecord
-from combine_for_ai.evidence import Capability, ExecutionKind
+from peira.evidence import Capability, ExecutionKind
 
 
 @dataclass(frozen=True)

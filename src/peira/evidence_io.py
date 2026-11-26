@@ -13,14 +13,14 @@ from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-from combine_for_ai.csvio import CSV_FORMULA_PREFIXES, write_csv
-from combine_for_ai.evidence import (
+from peira.csvio import CSV_FORMULA_PREFIXES, write_csv
+from peira.evidence import (
     EvidenceError,
     EvidenceRecord,
     load_evidence,
     parse_evidence,
 )
-from combine_for_ai.jsonio import write_json
+from peira.jsonio import write_json
 
 _RECORD_COLUMNS = (
     "record_ordinal",

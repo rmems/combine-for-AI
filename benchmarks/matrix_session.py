@@ -38,7 +38,7 @@ from benchmarks.matrix_types import (
     SimulatedInterrupt,
 )
 from benchmarks.fixture_presets import mock_performance
-from combine_for_ai.evidence import ExecutionKind
+from peira.evidence import ExecutionKind
 from benchmarks.metrics import MetricsAccumulator
 from benchmarks.models import (
     build_model_adapter,

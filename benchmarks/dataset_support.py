@@ -155,10 +155,10 @@ def sample_path_for(entry: CatalogEntry) -> Path:
 
 
 def default_cache_dir() -> Path:
-    override = os.environ.get("COMBINE_DATASET_CACHE")
+    override = os.environ.get("PEIRA_DATASET_CACHE")
     if override:
         return Path(override)
-    return Path.home() / ".cache" / "combine-for-ai" / "datasets"
+    return Path.home() / ".cache" / "peira" / "datasets"
 
 
 def resolve_cache_dir(spec: DatasetSpec) -> Path:
@@ -276,7 +276,7 @@ def _fallback_jsonl(
 
 
 def _cache_mode(spec: DatasetSpec) -> CacheMode:
-    raw = spec.cache_mode or os.environ.get("COMBINE_DATASET_CACHE_MODE")
+    raw = spec.cache_mode or os.environ.get("PEIRA_DATASET_CACHE_MODE")
     return parse_cache_mode(raw or DEFAULT_CACHE_MODE)
 
 

@@ -100,7 +100,7 @@ class EvidenceRecord(RenderingModel):
 
 
 class EvidenceArchive(RenderingModel):
-    schema_version: Literal["combine.plot-evidence.v1"]
+    schema_version: Literal["peira.plot-evidence.v1"]
     run: dict[str, Any] = Field(default_factory=dict)
     records: list[EvidenceRecord]
 

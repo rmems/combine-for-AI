@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from combine_for_ai.goz_import import SCHEMA_MULTIBLOCK_V1, SCHEMA_ROUTE_PRESERVATION_V1
+from peira.goz_import import SCHEMA_MULTIBLOCK_V1, SCHEMA_ROUTE_PRESERVATION_V1
 
 
 SUPPORTED_VERSIONS = (1, "1", "v1", "1.0")

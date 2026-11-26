@@ -38,7 +38,7 @@
   "notes": "line one | pipe\nline two",
   "record_id": "imp-synth",
   "requested_data_provenance": null,
-  "schema": "combine_for_ai.evidence",
+  "schema": "peira.evidence",
   "schema_version": 1,
   "seed": -3,
   "source_artifact_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1",

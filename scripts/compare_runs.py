@@ -15,7 +15,7 @@ if str(_REPO_ROOT) not in sys.path:
 if str(_REPO_ROOT / "src") not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT / "src"))
 
-from combine_for_ai.compare import (  # noqa: E402
+from peira.compare import (  # noqa: E402
     CompareError,
     build_comparison,
     load_experiment_rows,

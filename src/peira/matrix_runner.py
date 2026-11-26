@@ -13,7 +13,7 @@ from benchmarks.jsonio import ensure_dir, write_json
 from benchmarks.reporting import write_csv
 from benchmarks.runner import run_benchmarks_from_config
 
-from combine_for_ai.matrix import (
+from peira.matrix import (
     PROGRESS_FILENAME,
     PROGRESS_VERSION,
     CellOutcome,

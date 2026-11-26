@@ -172,10 +172,10 @@ def parse_cache_mode(value: str) -> CacheMode:
 
 
 def default_cache_root() -> Path:
-    override = os.environ.get("COMBINE_DATASET_CACHE_ROOT")
+    override = os.environ.get("PEIRA_DATASET_CACHE_ROOT")
     if override:
         return Path(override).expanduser()
-    return Path.home() / ".cache" / "combine-for-ai" / "datasets"
+    return Path.home() / ".cache" / "peira" / "datasets"
 
 
 def requested_revision(spec: DatasetSpec) -> str:

@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from combine_for_ai.evidence import (
+from peira.evidence import (
     Capability,
     CapabilityError,
     DataProvenance,
@@ -23,7 +23,7 @@ from combine_for_ai.evidence import (
     require_capabilities,
     unavailable_metric,
 )
-from combine_for_ai.evidence_io import (
+from peira.evidence_io import (
     parse_evidence_markdown,
     read_evidence_csv,
     read_evidence_json,
@@ -261,7 +261,7 @@ def test_malformed_metric_value_is_an_evidence_error(tmp_path: Path) -> None:
 
 
 def test_csv_guard_prefixes_are_real_control_characters() -> None:
-    from combine_for_ai.csvio import CSV_FORMULA_PREFIXES
+    from peira.csvio import CSV_FORMULA_PREFIXES
 
     assert "\t" in CSV_FORMULA_PREFIXES and "\r" in CSV_FORMULA_PREFIXES
     assert "\\t" not in CSV_FORMULA_PREFIXES
@@ -316,9 +316,9 @@ def test_read_evidence_json_wraps_non_object_records(tmp_path: Path) -> None:
 
 
 def test_evidence_csv_writer_lives_in_the_installed_package() -> None:
-    import combine_for_ai.evidence_io as io_module
+    import peira.evidence_io as io_module
     from benchmarks.reporting import write_csv as reporting_write_csv
-    from combine_for_ai.csvio import write_csv
+    from peira.csvio import write_csv
 
     assert io_module.write_csv is write_csv
     assert reporting_write_csv is write_csv

@@ -26,7 +26,7 @@ Run `ruff check .` and `pytest -q` before committing; CI fails on either.
 
 ## Architecture map
 
-- `src/combine_for_ai/`: installable package. `manifest.py` (magere-brug handoff ingestion and dispatch), `goz_import.py`
+- `src/peira/`: installable package. `manifest.py` (magere-brug handoff ingestion and dispatch), `goz_import.py`
   (grok-ozempic experiment JSON to report rows), `compare.py` (baseline vs treatment arms), `matrix*.py` (models x quant x datasets
   campaigns), `environment*.py` (sanitized environment fingerprints), `jsonio.py`.
 - `benchmarks/`: runner, metrics, scorers, reporting, telemetry, corinth-canal ingest, and the dataset loaders and cache

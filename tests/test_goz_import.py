@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from combine_for_ai.goz_import import (
+from peira.goz_import import (
     SCHEMA_MULTIBLOCK_V1,
     SCHEMA_ROUTE_PRESERVATION_V1,
     GozExperimentKind,
@@ -111,14 +111,36 @@ def test_preserve_zero_top2_agreement() -> None:
 
 def test_reject_unsupported_schema_version() -> None:
     raw = {
-        "combine_import_schema": "v99",
+        "peira_import_schema": "v99",
         "chain": {"per_block": [{"block": 0, "expert_only": {}}]},
     }
     with tempfile.TemporaryDirectory() as tmp:
         path = Path(tmp) / "bad-ver.json"
         path.write_text(json.dumps(raw), encoding="utf-8")
-        with pytest.raises(GozImportError, match="unsupported combine_import_schema"):
+        with pytest.raises(GozImportError, match="unsupported peira_import_schema"):
             import_goz_experiment(path)
+
+
+def test_accepts_legacy_combine_import_schema_key() -> None:
+    raw = {
+        "combine_import_schema": 1,
+        "chain": {
+            "per_block": [
+                {
+                    "block": 0,
+                    "expert_only": {
+                        "router_top1_agreement": 0.5,
+                        "router_top2_set_agreement": 0.0,
+                    },
+                }
+            ],
+        },
+    }
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "legacy-key.json"
+        path.write_text(json.dumps(raw), encoding="utf-8")
+        result = import_goz_experiment(path, arms=("expert_only",))
+        assert len(result.rows) == 1
 
 
 def test_reject_unsupported_report_format() -> None:

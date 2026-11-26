@@ -6,13 +6,13 @@ from unittest import mock
 
 import pytest
 
-from combine_for_ai.compare import (
+from peira.compare import (
     CompareError,
     build_comparison,
     load_experiment_rows,
     write_comparison_reports,
 )
-from combine_for_ai.goz_import import import_goz_experiment, write_import_reports
+from peira.goz_import import import_goz_experiment, write_import_reports
 
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"

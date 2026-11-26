@@ -9,8 +9,8 @@ from typing import Any, Mapping, Sequence
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
-from combine_for_ai.live_errors import LiveBaselineError
-from combine_for_ai.live_gold import (
+from peira.live_errors import LiveBaselineError
+from peira.live_gold import (
     byte_identical_gold_src,
     contains_gold_test_patch,
     git_blob_sha1,

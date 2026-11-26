@@ -1,5 +1,5 @@
 {
-  "schema": "combine_for_ai.golden_scorers.v1",
+  "schema": "peira.golden_scorers.v1",
   "notes": "Offline golden inputs and expected scorer outputs. Perplexity is exp(-mean(natural-log logprobs)). Classification, cloze, and exact-match math scores are exact 0/1. Perplexity uses the stated tolerance.",
   "metric_families": {
     "classification": {

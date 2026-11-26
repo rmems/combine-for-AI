@@ -7,7 +7,7 @@ import pytest
 
 from pydantic import ValidationError
 
-from combine_for_ai.manifest import (
+from peira.manifest import (
     ArtifactFormat,
     ArtifactStatus,
     ModelManifest,

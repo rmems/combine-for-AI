@@ -1,4 +1,4 @@
-"""Import grok-ozempic experiment JSON into combine report rows.
+"""Import grok-ozempic experiment JSON into peira report rows.
 
 Supports:
 - Multiblock residual fidelity ``metrics.json`` (chain.per_block)
@@ -40,7 +40,7 @@ class GozImportError(ValueError):
 
 @dataclass(frozen=True)
 class ImportedExperimentRow:
-    """One combine-normalized experiment row (JSON/CSV friendly)."""
+    """One normalized experiment row (JSON/CSV friendly)."""
 
     schema: str
     experiment_kind: str
@@ -110,7 +110,7 @@ class GozImportResult:
             "provenance": self.provenance,
             "decision": self.decision,
             "benchmark_linkage": {
-                "combine_run_id": rid,
+                "peira_run_id": rid,
                 "grok_ozempic_report_path": self.source_path,
                 "grok_ozempic_experiment_id": (
                     (self.provenance or {}).get("issue")
@@ -155,11 +155,14 @@ _SCALE_RANK = ("pack_v3", "pack_v2", "legacy_oracle")
 
 def _require_schema_version(raw: dict[str, Any]) -> None:
     """Accept missing version as v1; reject unknown explicit versions."""
-    ver = raw.get("combine_import_schema", raw.get("schema_version"))
+    ver = raw.get(
+        "peira_import_schema",
+        raw.get("combine_import_schema", raw.get("schema_version")),
+    )
     if ver is None:
         return
     if ver not in _SUPPORTED_SCHEMA_VERSIONS:
-        raise GozImportError(f"unsupported combine_import_schema version: {ver!r}")
+        raise GozImportError(f"unsupported peira_import_schema version: {ver!r}")
 
 
 def detect_experiment_kind(raw: dict[str, Any]) -> GozExperimentKind:
@@ -521,7 +524,7 @@ def import_goz_experiment(
     *,
     arms: tuple[str, ...] = ("expert_only", "fp16_control"),
 ) -> GozImportResult:
-    """Load a grok-ozempic experiment JSON and normalize to combine rows."""
+    """Load a grok-ozempic experiment JSON and normalize to peira rows."""
     path = Path(path)
     raw = load_experiment_json(path)
     kind = detect_experiment_kind(raw)

@@ -8,7 +8,7 @@
 
 **Tech Stack:** Python 3.14, existing Pydantic and JSON/CSV writers, optional Matplotlib Agg.
 
-**Spec:** https://github.com/rmems/combine-for-AI/issues/12
+**Spec:** https://github.com/rmems/peira/issues/12
 
 ## Global Constraints
 
@@ -19,7 +19,7 @@
 
 ### Task 1: Validated archived inputs and cohort separation
 
-**Files:** `src/combine_for_ai/report_evidence.py`, `tests/test_plot_reports.py`, `tests/fixtures/plot_evidence.sample.json`.
+**Files:** `src/peira/report_evidence.py`, `tests/test_plot_reports.py`, `tests/fixtures/plot_evidence.sample.json`.
 
 **Interfaces:** `load_report_evidence(paths)` returns source metadata and validated source-isolated cohorts. Rendering records declare track, independent provenance, context, counts and named metrics with units/definitions/scopes and optional SciPy-prepared intervals.
 
@@ -30,7 +30,7 @@
 
 ### Task 2: Headless rendering and reproducible command
 
-**Files:** `src/combine_for_ai/plot_reports.py`, `scripts/plot_reports.py`, `configs/plots.sample.json`, `pyproject.toml`, `uv.lock`, `README.md`, `docs/REPORTING.md`, `.github/workflows/ci.yml`.
+**Files:** `src/peira/plot_reports.py`, `scripts/plot_reports.py`, `configs/plots.sample.json`, `pyproject.toml`, `uv.lock`, `README.md`, `docs/REPORTING.md`, `.github/workflows/ci.yml`.
 
 **Interfaces:** `generate_reports(paths, output_dir, config_path, plots=True)` writes deterministic JSON/CSV/Markdown and optional PNG plots. CLI accepts repeated `--input`, `--config`, `--output-dir` and `--no-plots`.
 
@@ -41,6 +41,6 @@
 - [x] Run `uv sync --frozen --extra plots`, `uv run ruff check .`, `uv run pytest -q`, and the existing smoke CLI help. Render and inspect representative fixture, empty/partial and prepared-interval plots.
 - [x] Review diff; commit, push new branch and open PR with `Closes #12`. Verify PR body/base/draft state and report actual delivery state; never merge.
 
-Delivered as [PR #54](https://github.com/rmems/combine-for-AI/pull/54), opened at
+Delivered as [PR #54](https://github.com/rmems/peira/pull/54), opened at
 19:18 America/Chicago on October 8, 2026, against `main`. Closing reference to
 issue #12 verified; the PR remains open and unmerged.

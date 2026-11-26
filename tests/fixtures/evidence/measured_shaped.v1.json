@@ -27,7 +27,7 @@
   "notes": null,
   "record_id": "meas-1",
   "requested_data_provenance": "real",
-  "schema": "combine_for_ai.evidence",
+  "schema": "peira.evidence",
   "schema_version": 1,
   "seed": null,
   "source_artifact_sha256": null,

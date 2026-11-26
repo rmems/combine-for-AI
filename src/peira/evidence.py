@@ -37,7 +37,7 @@ from pydantic import (
 )
 
 
-EVIDENCE_SCHEMA = "combine_for_ai.evidence"
+EVIDENCE_SCHEMA = "peira.evidence"
 EVIDENCE_SCHEMA_VERSION = 1
 #: Pre-envelope payloads (artifact-smoke rows, matrix cells) carry no version.
 LEGACY_SCHEMA_VERSION = 0

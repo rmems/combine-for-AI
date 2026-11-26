@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Cursor Cloud Agent install script for combine-for-AI (`install` in .cursor/environment.json).
+# Cursor Cloud Agent install script for peira (`install` in .cursor/environment.json).
 #
 # Cursor runs this from the repository root during every Build, on its default
 # Ubuntu base image (CPU only: cloud agents have no GPU), then snapshots the disk.
@@ -87,7 +87,7 @@ tool_dirs=("$repo_root/.venv/bin" "$HOME/.local/bin")
     # shellcheck disable=SC2016 # $PATH must expand when the profile is sourced, not now.
     printf 'export PATH=%q:$PATH\n' "$dir"
   done
-} | $SUDO tee /etc/profile.d/cursor-env-combine-for-AI.sh >/dev/null
+} | $SUDO tee /etc/profile.d/cursor-env-peira.sh >/dev/null
 
 shopt -s nullglob
 for dir in "${tool_dirs[@]}"; do
@@ -106,4 +106,4 @@ for dir in "${tool_dirs[@]}"; do
 done
 shopt -u nullglob
 
-echo "Cursor install for combine-for-AI finished."
+echo "Cursor install for peira finished."

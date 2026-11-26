@@ -31,7 +31,7 @@ except ImportError:
     hf_load_dataset = None
 
 # v4 records the validation task so cached rows retain their task contract.
-NORMALIZED_CACHE_SCHEMA = "combine.normalized_hf_cache.v4"
+NORMALIZED_CACHE_SCHEMA = "peira.normalized_hf_cache.v4"
 RowMapper = Callable[[dict[str, Any]], DatasetRecord | None]
 CacheHit = tuple[list[DatasetRecord], dict[str, Any]]
 CachedRows = tuple[list[DatasetRecord], dict[str, Any]]

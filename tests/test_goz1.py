@@ -9,7 +9,7 @@ import pytest
 from pydantic import ValidationError
 
 from benchmarks.artifact_smoke import run_artifact_smoke, select_artifact_for_smoke
-from combine_for_ai.manifest import (
+from peira.manifest import (
     GOZ1_MAGIC,
     ArtifactFormat,
     ArtifactStatus,

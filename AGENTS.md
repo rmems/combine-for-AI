@@ -4,20 +4,20 @@ Guidance for coding agents (Amp, Codex, Cursor, Claude Code, and others) working
 
 ## Purpose
 
-`combine-for-AI` is a neutral benchmark harness for hybrid MoE/SNN quantization experiments
+`peira` is a neutral benchmark harness for hybrid MoE/SNN quantization experiments
 (see `README.md`). It owns evaluation scripts and dataset loaders, artifact manifest ingestion
 (magere-brug handoff JSON/YAML), metric collection, CSV/JSON/Markdown reports, and the GOZ1/SAAQ
 evaluation path for `rmems/grok-ozempic` packs. It does **not** own quantization kernels or GOZ1
 packing (`grok-ozempic`, `myelin-accelerator`), precision-tier inventory (`xai-dissect`), or SAAQ
 calibration loops (`corinth-canal`, `magere-brug`).
 
-Distribution / import names: `combine-for-AI` (slug), `combine-for-ai` (PyPI), `combine_for_ai` (import).
+Distribution / import names: `peira` (slug and PyPI), `peira` (import).
 
 ## Layout
 
 | Path | Contents |
 |------|----------|
-| `src/combine_for_ai/` | Library package |
+| `src/peira/` | Library package |
 | `scripts/` | CLI entry points (`benchmark.py`, `run_smoke_benchmark.py`, ...) |
 | `benchmarks/` | Benchmark definitions |
 | `configs/` | Sample benchmark, dataset, manifest and matrix configs |

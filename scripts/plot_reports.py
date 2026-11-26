@@ -11,7 +11,7 @@ _ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_ROOT))
 sys.path.insert(0, str(_ROOT / "src"))
 
-from combine_for_ai.plot_reports import generate_reports  # noqa: E402
+from peira.plot_reports import generate_reports  # noqa: E402
 
 
 def main(argv: list[str] | None = None) -> int:

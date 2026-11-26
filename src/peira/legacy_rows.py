@@ -5,8 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from combine_for_ai.legacy_schema import GOZ_METRICS, GOZ_SCHEMAS, SUPPORTED_VERSIONS
-from combine_for_ai.legacy_values import is_nonnegative_int, require_finite_metric
+from peira.legacy_schema import GOZ_METRICS, GOZ_SCHEMAS, SUPPORTED_VERSIONS
+from peira.legacy_values import is_nonnegative_int, require_finite_metric
 
 
 def normalized_rows(raw: dict[str, Any], path: Path) -> list[dict[str, Any]]:
@@ -27,14 +27,17 @@ def require_legacy_metadata(raw: dict[str, Any]) -> None:
 
 
 def _require_normalized_schema(raw: dict[str, Any], path: Path) -> None:
-    version = raw.get("combine_import_schema", raw.get("schema_version", 1))
+    version = raw.get(
+        "peira_import_schema",
+        raw.get("combine_import_schema", raw.get("schema_version", 1)),
+    )
     if version not in SUPPORTED_VERSIONS:
         raise ValueError("unsupported legacy schema_version")
     run = raw.get("run") or {}
     if not isinstance(run, dict) or run.get("schema") not in GOZ_SCHEMAS:
         raise ValueError(
             f"{path}: legacy report lacks a supported GOZ1 schema; "
-            "prepare combine.plot-evidence.v1 summaries (do not promote mock presets)"
+            "prepare peira.plot-evidence.v1 summaries (do not promote mock presets)"
         )
 
 

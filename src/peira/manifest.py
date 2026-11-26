@@ -102,22 +102,27 @@ class SAAQMetadata(BaseModel):
 
 
 class BenchmarkLinkage(BaseModel):
-    """Links a model manifest to a combine-for-AI run.
+    """Links a model manifest to a peira run.
 
-    Accepts legacy ``nfl_combine_*`` keys for older magere handoff files.
+    Accepts legacy ``combine_*`` and ``nfl_combine_*`` keys for older magere
+    handoff files.
     """
 
     model_config = ConfigDict(populate_by_name=True)
 
-    combine_run_id: str | None = Field(
+    peira_run_id: str | None = Field(
         default=None,
-        validation_alias=AliasChoices("combine_run_id", "nfl_combine_run_id"),
-        serialization_alias="combine_run_id",
+        validation_alias=AliasChoices(
+            "peira_run_id", "combine_run_id", "nfl_combine_run_id"
+        ),
+        serialization_alias="peira_run_id",
     )
-    combine_config_path: str | None = Field(
+    peira_config_path: str | None = Field(
         default=None,
-        validation_alias=AliasChoices("combine_config_path", "nfl_combine_config_path"),
-        serialization_alias="combine_config_path",
+        validation_alias=AliasChoices(
+            "peira_config_path", "combine_config_path", "nfl_combine_config_path"
+        ),
+        serialization_alias="peira_config_path",
     )
     grok_ozempic_report_path: str | None = None
     grok_ozempic_experiment_id: str | None = None

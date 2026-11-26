@@ -69,7 +69,7 @@
   "notes": null,
   "record_id": "meta-1",
   "requested_data_provenance": null,
-  "schema": "combine_for_ai.evidence",
+  "schema": "peira.evidence",
   "schema_version": 1,
   "seed": null,
   "source_artifact_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1",

@@ -11,8 +11,8 @@ import json
 from pathlib import Path
 from typing import Any
 
-from combine_for_ai.legacy_evidence import legacy_records
-from combine_for_ai.report_models import (
+from peira.legacy_evidence import legacy_records
+from peira.report_models import (
     CONTEXT_KEYS,
     EvidenceArchive,
     EvidenceRecord,
@@ -77,7 +77,7 @@ def _load_archive(
 
 
 def _is_legacy(raw: dict[str, Any]) -> bool:
-    return "records" not in raw and raw.get("schema_version") != "combine.plot-evidence.v1"
+    return "records" not in raw and raw.get("schema_version") != "peira.plot-evidence.v1"
 
 
 def _parse_records(raw: dict[str, Any], path: Path, legacy: bool) -> list[EvidenceRecord]:

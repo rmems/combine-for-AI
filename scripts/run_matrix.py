@@ -17,12 +17,12 @@ if str(_REPO_ROOT / "src") not in sys.path:
 from benchmarks.journal import replay_journal  # noqa: E402
 from benchmarks.matrix import RetryPolicy  # noqa: E402
 from benchmarks.matrix_runner import load_matrix_config, run_matrix  # noqa: E402
-from combine_for_ai.matrix import (  # noqa: E402
+from peira.matrix import (  # noqa: E402
     MatrixError as ExperimentMatrixError,
     MatrixSelection,
     load_experiment_matrix,
 )
-from combine_for_ai.matrix_runner import MatrixRunner, MatrixRunOptions  # noqa: E402
+from peira.matrix_runner import MatrixRunner, MatrixRunOptions  # noqa: E402
 
 
 def build_parser() -> argparse.ArgumentParser:

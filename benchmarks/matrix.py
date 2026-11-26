@@ -16,7 +16,7 @@ from typing import Any, Mapping, TypeVar
 from benchmarks.datasets import DatasetSpec
 from benchmarks.models import ModelSpec
 
-MATRIX_IDENTITY_VERSION = "combine.matrix.cell.v1"
+MATRIX_IDENTITY_VERSION = "peira.matrix.cell.v1"
 _SAFE_NAME = re.compile(r"^[A-Za-z0-9._-]+$")
 
 

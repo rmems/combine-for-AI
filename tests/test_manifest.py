@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from combine_for_ai.manifest import (
+from peira.manifest import (
     ArtifactFormat,
     ArtifactStatus,
     GeneratedArtifact,
@@ -193,10 +193,27 @@ def test_benchmark_linkage_accepts_legacy_nfl_keys() -> None:
     }
     m = load_manifest_from_string(json.dumps(raw))
     assert m.benchmark_linkage is not None
-    assert m.benchmark_linkage.combine_run_id == "run-old"
-    assert m.benchmark_linkage.combine_config_path == "configs/benchmark.sample.json"
+    assert m.benchmark_linkage.peira_run_id == "run-old"
+    assert m.benchmark_linkage.peira_config_path == "configs/benchmark.sample.json"
     dumped = m.benchmark_linkage.model_dump(by_alias=True)
-    assert dumped["combine_run_id"] == "run-old"
-    assert dumped["combine_config_path"] == "configs/benchmark.sample.json"
+    assert dumped["peira_run_id"] == "run-old"
+    assert dumped["peira_config_path"] == "configs/benchmark.sample.json"
     assert "nfl_combine_run_id" not in dumped
     assert "nfl_combine_config_path" not in dumped
+
+
+def test_benchmark_linkage_accepts_legacy_combine_keys() -> None:
+    """Pre-rename magere handoff used combine_* keys."""
+    raw = {
+        "manifest_version": "1.0.0",
+        "model_name": "legacy-link",
+        "source_artifact": {"format": "gguf", "path": "x.gguf"},
+        "benchmark_linkage": {
+            "combine_run_id": "run-old",
+            "combine_config_path": "configs/benchmark.sample.json",
+        },
+    }
+    m = load_manifest_from_string(json.dumps(raw))
+    assert m.benchmark_linkage is not None
+    assert m.benchmark_linkage.peira_run_id == "run-old"
+    assert m.benchmark_linkage.peira_config_path == "configs/benchmark.sample.json"

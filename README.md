@@ -1,12 +1,13 @@
 # peira
 
-Neutral benchmark harness for **hybrid MoE/SNN quantization** experiments.
+Post-training evaluation harness for locally trained LLMs — custom task suites,
+verification-based scoring, contamination checks, and go/no-go gates with
+per-run provenance.
 
 Repository slug: **`peira`** (renamed from `combine-for-AI` on 2026-11-23; the old URL redirects).
-Distribution name / Python import package — still `combine-for-ai` until the package rename lands:
-**`combine-for-ai`** / **`combine_for_ai`**.
+Distribution name / import package: **`peira`** / **`peira`**.
 
-`combine-for-ai` is the `[project].name` in `pyproject.toml`. It is not published on PyPI. Install from a clone of this repository.
+`peira` is the `[project].name` in `pyproject.toml`. It is not published on PyPI. Install from a clone of this repository.
 
 ## Role
 
@@ -56,7 +57,7 @@ An editable install with Python 3.14 pulls runtime dependencies only (not the de
 python3.14 -m pip install -e .
 ```
 
-A Python older than 3.14 cannot install this package. There is no `pip install combine-for-ai` from PyPI.
+A Python older than 3.14 cannot install this package. There is no `pip install peira` from PyPI.
 
 Examples below that call `python scripts/...` need the project environment. Use `uv run python scripts/...`, or activate `.venv` after `uv sync` (`source .venv/bin/activate`).
 

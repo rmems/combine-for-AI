@@ -5,10 +5,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from combine_for_ai.goz_import import SCHEMA_MULTIBLOCK_V1
-from combine_for_ai.legacy_schema import GATE_ALIASES, GOZ_METRICS
-from combine_for_ai.legacy_values import require_finite_metric
-from combine_for_ai.report_models import CONTEXT_KEYS, EvidenceRecord, PreparedMetric
+from peira.goz_import import SCHEMA_MULTIBLOCK_V1
+from peira.legacy_schema import GATE_ALIASES, GOZ_METRICS
+from peira.legacy_values import require_finite_metric
+from peira.report_models import CONTEXT_KEYS, EvidenceRecord, PreparedMetric
 
 
 def legacy_record(row: dict[str, Any], raw: dict[str, Any], path: Path) -> EvidenceRecord:

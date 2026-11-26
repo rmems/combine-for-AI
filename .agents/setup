@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Amp orb setup for combine-for-AI.
+# Amp orb setup for peira.
 #
 # Amp runs this from the repository root when it builds a project orb snapshot
 # (Debian 12, CPU only: orbs have no GPU). It must finish within 20 minutes and
@@ -57,7 +57,7 @@ repo_root="$(pwd)"
 tool_dirs=("$repo_root/.venv/bin" "$HOME/.local/bin")
 # shellcheck disable=SC2016 # $PATH must expand when the profile is sourced, not now.
 printf 'export PATH=%q:$PATH\n' "$(IFS=:; echo "${tool_dirs[*]}")" |
-  $SUDO tee /etc/profile.d/amp-orb-combine-for-AI.sh >/dev/null
+  $SUDO tee /etc/profile.d/amp-orb-peira.sh >/dev/null
 for dir in "${tool_dirs[@]}"; do
   [ -d "$dir" ] || continue
   for tool in "$dir"/*; do
@@ -72,4 +72,4 @@ for dir in "${tool_dirs[@]}"; do
   done
 done
 
-echo "Amp orb setup for combine-for-AI finished."
+echo "Amp orb setup for peira finished."

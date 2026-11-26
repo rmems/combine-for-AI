@@ -7,8 +7,8 @@ import pytest
 
 from subprocess import CompletedProcess
 
-from combine_for_ai.environment_probe import _apply_cuda_visibility, git_rev_parse_head
-from combine_for_ai.environment import (
+from peira.environment_probe import _apply_cuda_visibility, git_rev_parse_head
+from peira.environment import (
     REDACTED,
     REDACTED_USER,
     AcceleratorBackend,
@@ -222,7 +222,7 @@ def test_live_probe_succeeds_on_cpu_without_cuda_placeholders() -> None:
         repo_root=Path(__file__).resolve().parents[1],
     )
     payload = fingerprint.to_canonical_dict()
-    assert payload["schema"] == "combine_for_ai.environment_fingerprint.v1"
+    assert payload["schema"] == "peira.environment_fingerprint.v1"
     assert payload["version"] == 1
     assert payload["python"]["version"]
     if payload["accelerator"]["backend"] == "cpu":
@@ -272,15 +272,15 @@ def test_dirty_worktrees_with_different_porcelain_differ() -> None:
     first = fingerprint_from_snapshot(
         _cpu_snapshot(
             git_dirty=True,
-            git_porcelain=" M src/combine_for_ai/environment.py",
-            git_diff="diff --git a/src/combine_for_ai/environment.py b/src/combine_for_ai/environment.py\n+one",
+            git_porcelain=" M src/peira/environment.py",
+            git_diff="diff --git a/src/peira/environment.py b/src/peira/environment.py\n+one",
         )
     )
     second = fingerprint_from_snapshot(
         _cpu_snapshot(
             git_dirty=True,
-            git_porcelain=" M src/combine_for_ai/environment.py",
-            git_diff="diff --git a/src/combine_for_ai/environment.py b/src/combine_for_ai/environment.py\n+two",
+            git_porcelain=" M src/peira/environment.py",
+            git_diff="diff --git a/src/peira/environment.py b/src/peira/environment.py\n+two",
         )
     )
     assert first.digest() != clean.digest()
@@ -320,7 +320,7 @@ def test_cuda_visibility_filters_enumerated_devices(
 def test_cuda_visibility_maps_gpu_uuid(monkeypatch: pytest.MonkeyPatch) -> None:
     devices = ("NVIDIA A100", "NVIDIA H100")
     monkeypatch.setattr(
-        "combine_for_ai.environment_probe._nvidia_smi_uuid_to_name",
+        "peira.environment_probe._nvidia_smi_uuid_to_name",
         lambda timeout: {
             "gpu-aaaa-bbbb": "NVIDIA A100",
             "gpu-cccc-dddd": "NVIDIA H100",
@@ -331,7 +331,7 @@ def test_cuda_visibility_maps_gpu_uuid(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_rocm_parser_ignores_cpu_agents(monkeypatch: pytest.MonkeyPatch) -> None:
-    from combine_for_ai.environment_probe import rocm_devices_and_driver
+    from peira.environment_probe import rocm_devices_and_driver
 
     sample = """
 Agent 1
@@ -342,7 +342,7 @@ Agent 2
   Device Type:             GPU
 """
     monkeypatch.setattr(
-        "combine_for_ai.environment_probe._run_rocminfo",
+        "peira.environment_probe._run_rocminfo",
         lambda timeout: sample,
     )
     devices, _ = rocm_devices_and_driver()
@@ -365,7 +365,7 @@ def test_git_probe_uses_literal_git_argv(monkeypatch: pytest.MonkeyPatch) -> Non
         return CompletedProcess(argv, 0, stdout="deadbeef\n", stderr="")
 
     monkeypatch.setattr(
-        "combine_for_ai.environment_probe.subprocess.run",
+        "peira.environment_probe.subprocess.run",
         fake_run,
     )
     assert git_rev_parse_head(None) == "deadbeef"
@@ -381,10 +381,10 @@ def test_clean_git_status_records_dirty_false(monkeypatch: pytest.MonkeyPatch) -
         return CompletedProcess(argv, 1, stdout="", stderr="")
 
     monkeypatch.setattr(
-        "combine_for_ai.environment_probe.subprocess.run",
+        "peira.environment_probe.subprocess.run",
         fake_run,
     )
-    from combine_for_ai.environment_probe import probe_git
+    from peira.environment_probe import probe_git
 
     commit, dirty, porcelain, diff = probe_git(None)
     assert commit == "c" * 40

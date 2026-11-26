@@ -1,4 +1,4 @@
-"""CSV report writing for packaged combine_for_ai report writers.
+"""CSV report writing for packaged peira report writers.
 
 ``benchmarks.reporting`` re-exports :func:`write_csv`, so dev checkouts keep a
 single implementation (same pattern as ``jsonio``).
@@ -10,7 +10,7 @@ import csv
 from pathlib import Path
 from typing import Any
 
-from combine_for_ai.jsonio import ensure_dir
+from peira.jsonio import ensure_dir
 
 #: Cells starting with these are spreadsheet formulas; the writer prefixes ``'``.
 CSV_FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")

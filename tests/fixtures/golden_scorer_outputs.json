@@ -1,5 +1,5 @@
 {
-  "schema": "combine_for_ai.golden_scorer_outputs.v1",
+  "schema": "peira.golden_scorer_outputs.v1",
   "source_fixture": "tests/fixtures/golden_scorers.json",
   "network_access": false,
   "rows": [

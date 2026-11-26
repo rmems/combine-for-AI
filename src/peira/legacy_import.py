@@ -5,14 +5,14 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from combine_for_ai.goz_import import (
+from peira.goz_import import (
     GozExperimentKind,
     detect_experiment_kind,
     import_multiblock_metrics,
     import_route_preservation,
 )
-from combine_for_ai.legacy_schema import ARMS, RAW_METRIC_KEYS
-from combine_for_ai.legacy_values import is_nonnegative_int, require_finite_metric
+from peira.legacy_schema import ARMS, RAW_METRIC_KEYS
+from peira.legacy_values import is_nonnegative_int, require_finite_metric
 
 
 def imported_rows(raw: dict[str, Any], path: Path) -> list[dict[str, Any]]:

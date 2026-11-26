@@ -7,7 +7,7 @@ from typing import Any
 from benchmarks.jsonio import ensure_dir, json_safe, write_json
 from benchmarks.metrics import MetricsSummary
 from benchmarks.telemetry import SystemSnapshot, TelemetrySnapshot, telemetry_to_dict
-from combine_for_ai.csvio import write_csv
+from peira.csvio import write_csv
 
 
 _TELEMETRY_SCALAR_KEYS = (

@@ -80,7 +80,7 @@ def test_json_safe_leaves_non_float_values_alone() -> None:
 
 def test_import_report_of_a_nan_metric_is_valid_json(tmp_path: Path) -> None:
     """End-to-end: a NaN cosine upstream must not corrupt the import report."""
-    from combine_for_ai.goz_import import import_goz_experiment, write_import_reports
+    from peira.goz_import import import_goz_experiment, write_import_reports
 
     payload = json.loads(
         (FIXTURES / "goz_multiblock_metrics.sample.json").read_text(encoding="utf-8")

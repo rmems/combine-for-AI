@@ -161,6 +161,6 @@ def aggregate_payload(
         "counts": counts,
         "definition_fingerprint": definition.fingerprint,
         "matrix_name": definition.name,
-        "schema": "combine.matrix.aggregate.v1",
+        "schema": "peira.matrix.aggregate.v1",
         "truncated_tail_recovered": truncated_tail,
     }

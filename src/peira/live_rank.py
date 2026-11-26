@@ -7,8 +7,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
-from combine_for_ai.live_errors import LiveBaselineError
-from combine_for_ai.live_baselines import (
+from peira.live_errors import LiveBaselineError
+from peira.live_baselines import (
     BaselineRegistry,
     RunSnapshot,
     flagged_baseline_ids,

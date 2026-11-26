@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Import a grok-ozempic experiment JSON into combine report rows (issue #22)."""
+"""Import a grok-ozempic experiment JSON into peira report rows (issue #22)."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ if str(_REPO_ROOT) not in sys.path:
 if str(_REPO_ROOT / "src") not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT / "src"))
 
-from combine_for_ai.goz_import import (  # noqa: E402
+from peira.goz_import import (  # noqa: E402
     GozImportError,
     import_goz_experiment,
     write_import_reports,
@@ -25,7 +25,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
             "Import grok-ozempic multiblock metrics.json or route-preservation "
-            "JSON into combine CSV/JSON reports."
+            "JSON into peira CSV/JSON reports."
         )
     )
     parser.add_argument(

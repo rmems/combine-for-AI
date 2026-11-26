@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from combine_for_ai.plot_reports import generate_reports
+from peira.plot_reports import generate_reports
 
 FIXTURES = Path(__file__).parent / "fixtures"
 ROOT = Path(__file__).parents[1]
@@ -20,7 +20,7 @@ CONFIG = ROOT / "configs" / "plots.sample.json"
 def archive(tmp_path, records):
     path = tmp_path / "archive.json"
     path.write_text(
-        json.dumps({"schema_version": "combine.plot-evidence.v1", "records": records})
+        json.dumps({"schema_version": "peira.plot-evidence.v1", "records": records})
     )
     return path
 
@@ -42,7 +42,7 @@ def test_prepared_values_intervals_counts_and_source_hash_survive(tmp_path):
         == hashlib.sha256(source.read_bytes()).hexdigest()
     )
     assert payload["sources"][0]["run"]["url"] == "https://example.org/runs/fixture"
-    assert payload["plot_config"]["schema_version"] == "combine.plot-config.v1"
+    assert payload["plot_config"]["schema_version"] == "peira.plot-config.v1"
     language = next(c for c in payload["cohorts"] if c["workload_track"] == "language")
     accuracy = next(m for m in language["metrics"] if m["name"] == "accuracy")
     observation = accuracy["observations"][0]
@@ -190,13 +190,13 @@ def test_missing_unknown_or_malformed_input_is_actionable(tmp_path):
     path.write_text('{"schema_version": "future", "records": []}')
     with pytest.raises(ValueError, match="schema"):
         report(path, tmp_path)
-    path.write_text('{"schema_version": "combine.plot-evidence.v1", "records": [null]}')
+    path.write_text('{"schema_version": "peira.plot-evidence.v1", "records": [null]}')
     with pytest.raises(ValueError):
         report(path, tmp_path)
     path.write_text(
         json.dumps(
             {
-                "combine_import_schema": 2,
+                "peira_import_schema": 2,
                 "run": {"schema": "grok_ozempic.multiblock_metrics.v1"},
                 "results": [],
             }
@@ -215,7 +215,7 @@ def test_legacy_results_without_run_fail_without_traceback(tmp_path):
 
 
 def test_legacy_goz1_raw_and_import_reports_keep_route_and_residual_views(tmp_path):
-    from combine_for_ai.goz_import import import_goz_experiment, write_import_reports
+    from peira.goz_import import import_goz_experiment, write_import_reports
 
     source = FIXTURES / "goz_multiblock_metrics.sample.json"
     imported = import_goz_experiment(source)
@@ -259,7 +259,7 @@ def test_legacy_route_threshold_failure_does_not_erase_observation(tmp_path):
 
 
 def test_legacy_normalized_rows_from_different_origins_stay_separate(tmp_path):
-    from combine_for_ai.goz_import import import_goz_experiment
+    from peira.goz_import import import_goz_experiment
 
     imported = import_goz_experiment(FIXTURES / "goz_multiblock_metrics.sample.json")
     raw = imported.to_payload(run_id="mixed")
@@ -429,7 +429,7 @@ def test_prepared_interval_outside_estimate_preserves_confidence_precision(tmp_p
 
 def _normalized(rows):
     return {
-        "combine_import_schema": 1,
+        "peira_import_schema": 1,
         "run": {"schema": "grok_ozempic.multiblock_metrics.v1"},
         "results": rows,
     }
@@ -480,13 +480,13 @@ def test_markdown_archive_text_cannot_embed_links_or_images(tmp_path):
 
 def test_invalid_plot_config_and_evidence_fail_as_value_errors(tmp_path):
     config = tmp_path / "plots.json"
-    config.write_text(json.dumps({"schema_version": "combine.plot-config.v1", "dpi": 1}))
+    config.write_text(json.dumps({"schema_version": "peira.plot-config.v1", "dpi": 1}))
     source = FIXTURES / "plot_evidence.sample.json"
     with pytest.raises(ValueError, match="plot config"):
         generate_reports([source], tmp_path / "out", config, plots=False)
     malformed = tmp_path / "malformed.json"
     malformed.write_text(
-        json.dumps({"schema_version": "combine.plot-evidence.v1", "records": [{}]})
+        json.dumps({"schema_version": "peira.plot-evidence.v1", "records": [{}]})
     )
     with pytest.raises(ValueError, match="invalid archive"):
         report(malformed, tmp_path)
@@ -494,7 +494,7 @@ def test_invalid_plot_config_and_evidence_fail_as_value_errors(tmp_path):
 
 def test_cli_rejects_invalid_config_without_traceback(tmp_path):
     config = tmp_path / "plots.json"
-    config.write_text(json.dumps({"schema_version": "combine.plot-config.v1", "dpi": 1}))
+    config.write_text(json.dumps({"schema_version": "peira.plot-config.v1", "dpi": 1}))
     result = subprocess.run(
         [
             sys.executable,
@@ -594,7 +594,7 @@ def test_non_finite_legacy_metric_is_rejected(tmp_path):
 
 
 def test_source_path_label_is_not_opened(tmp_path):
-    from combine_for_ai.goz_import import import_goz_experiment
+    from peira.goz_import import import_goz_experiment
 
     imported = import_goz_experiment(FIXTURES / "goz_multiblock_metrics.sample.json")
     raw = imported.to_payload(run_id="label")
@@ -628,7 +628,7 @@ def test_large_block_cohort_still_writes_summaries_and_plot(tmp_path):
 
 def test_block_intervals_follow_series_color_and_dodge():
     pytest.importorskip("matplotlib")
-    from combine_for_ai.plot_render import _draw_observations
+    from peira.plot_render import _draw_observations
     from matplotlib import pyplot as plt
 
     observations = [

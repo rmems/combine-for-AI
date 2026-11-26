@@ -20,7 +20,7 @@ from typing import Any, Mapping
 from benchmarks.jsonio import ensure_dir
 from benchmarks.matrix import MatrixError, canonical_dumps
 
-JOURNAL_SCHEMA = "combine.matrix.journal.v1"
+JOURNAL_SCHEMA = "peira.matrix.journal.v1"
 JOURNAL_VERSION = 1
 
 
