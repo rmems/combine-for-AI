@@ -12,16 +12,16 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
-from combine_for_ai.jsonio import write_json
+from peira.jsonio import write_json
 
-from combine_for_ai.environment import (
+from peira.environment import (
     EnvironmentFingerprint,
     differing_material_fields,
 )
 
 
-MATRIX_CELL_SCHEMA = "combine_for_ai.matrix_cell.v1"
-MATRIX_AGGREGATE_SCHEMA = "combine_for_ai.matrix_aggregate.v1"
+MATRIX_CELL_SCHEMA = "peira.matrix_cell.v1"
+MATRIX_AGGREGATE_SCHEMA = "peira.matrix_aggregate.v1"
 _RUN_ID_RE = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
 _SUPPORTED_FORMATS = frozenset({"json", "markdown"})
 

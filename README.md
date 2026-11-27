@@ -1,12 +1,14 @@
 # peira
 
-Neutral benchmark harness for **hybrid MoE/SNN quantization** experiments.
+Post-training evaluation harness for locally trained LLMs — custom task suites,
+verification-based scoring, and per-run provenance. Contamination checks and
+go/no-go gates are on the evaluation roadmap: peira reports metric availability
+and provenance, and does not decide whether a run passes.
 
-Repository slug: **`peira`** (renamed from `combine-for-AI` on 2026-11-23; the old URL redirects).
-Distribution name / Python import package — still `combine-for-ai` until the package rename lands:
-**`combine-for-ai`** / **`combine_for_ai`**.
+Repository slug: **`peira`** (renamed 2026-11-23; the old URL redirects).
+Distribution name / import package: **`peira`** / **`peira`**.
 
-`combine-for-ai` is the `[project].name` in `pyproject.toml`. It is not published on PyPI. Install from a clone of this repository.
+`peira` is the `[project].name` in `pyproject.toml`. It is not published on PyPI. Install from a clone of this repository.
 
 ## Role
 
@@ -56,7 +58,7 @@ An editable install with Python 3.14 pulls runtime dependencies only (not the de
 python3.14 -m pip install -e .
 ```
 
-A Python older than 3.14 cannot install this package. There is no `pip install combine-for-ai` from PyPI.
+A Python older than 3.14 cannot install this package. There is no `pip install peira` from PyPI.
 
 Examples below that call `python scripts/...` need the project environment. Use `uv run python scripts/...`, or activate `.venv` after `uv sync` (`source .venv/bin/activate`).
 
@@ -127,7 +129,7 @@ Orchestrate a models × quantization × datasets campaign (Linear **RM-105**). T
 python scripts/run_matrix.py --config configs/matrix/corinth_canal.sample.json
 ```
 
-The sample config is the 22-cell corinth-canal Vultr sprint lineup (OLMoE, Qwen3Moe, Gemma4, DeepSeek2, LlamaMoe, Zaya) on the mock backend. TOML is also accepted (`configs/matrix/corinth_canal.sample.toml`). Interrupted runs resume from `reports/matrix-progress.json`; pass `--fresh` to rerun.
+The sample config is the 22-cell corinth-canal Vultr sprint lineup (OLMoE, Qwen3Moe, Gemma4, DeepSeek2, LlamaMoe, Zaya) on the mock backend. TOML is also accepted (`configs/matrix/corinth_canal.sample.toml`). Interrupted runs resume from `reports/matrix-progress.json`; pass `--fresh` to rerun. Journal-style configs (`configs/matrix.sample.json`) resume from `<matrix_name>/journal.jsonl` under the output dir; `--fresh` discards the journal and reruns every cell.
 
 ```bash
 python scripts/run_matrix.py \
@@ -170,6 +172,30 @@ Values, failures, unavailable metrics and upstream SciPy-prepared intervals are
 retained, never averaged or estimated by rendering. Incompatible or incomplete
 cohorts are separated. See [the rendering contract and limitations](docs/REPORTING.md)
 for how to supply language, agent, temporal and compression-analysis evidence.
+
+## Rename compatibility
+
+The 2026-11 `combine-for-AI` → `peira` rename changed on-disk schema
+identifiers and field names deliberately; pre-rename artifacts are **rejected,
+not migrated**, so they cannot be silently misread:
+
+- **Matrix journals**: `combine.matrix.journal.v1` journals cannot be resumed —
+  cell identities changed with the rename. Rerun with `--fresh`.
+- **Dataset cache**: the normalized HF cache schema moved from
+  `combine.normalized_hf_cache.v4` to `peira.normalized_hf_cache.v4`, the
+  default cache dir moved to `~/.cache/peira/datasets`, and the
+  `COMBINE_DATASET_CACHE*` environment variables are now `PEIRA_DATASET_CACHE*`.
+  A pre-rename cache pair in an explicit `cache_dir` now raises a clear error
+  instead of silently scoring bundled fixtures — rebuild it by running once
+  with fetching enabled.
+- **Report inputs**: `combine.plot-evidence.v1` archives,
+  `combine.plot-config.v1` configs, and `combine_for_ai.evidence` records are
+  rejected by name; regenerate them as their `peira.*` equivalents.
+- **Manifest linkage**: `combine_*` / `nfl_combine_*` keys and the
+  `combine_import_schema` version key are not read as peira fields. A manifest
+  whose linkage exists only under the old keys fails validation, and an
+  unsupported version declared via `combine_import_schema` is still rejected
+  rather than read as v1.
 
 ## Tracking
 

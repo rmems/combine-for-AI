@@ -20,7 +20,7 @@ from typing import Any, Mapping
 from benchmarks.jsonio import ensure_dir
 from benchmarks.matrix import MatrixError, canonical_dumps
 
-JOURNAL_SCHEMA = "combine.matrix.journal.v1"
+JOURNAL_SCHEMA = "peira.matrix.journal.v1"
 JOURNAL_VERSION = 1
 
 
@@ -158,7 +158,7 @@ class ResumeJournal:
         self._handle: Any | None = None
         self._lock: Any | None = None
 
-    def open(self) -> JournalReplay:
+    def open(self, *, reset: bool = False) -> JournalReplay:
         ensure_dir(self.path.parent)
         lock_path = self.path.with_name(self.path.name + ".lock")
         self._lock = lock_path.open("a+")
@@ -168,6 +168,10 @@ class ResumeJournal:
             self._lock.close()
             self._lock = None
             raise JournalError(f"matrix journal is locked: {self.path}") from exc
+        if reset:
+            # Reset only after the exclusive lock is held so a rejected
+            # concurrent --fresh run cannot unlink an in-use journal.
+            self.path.unlink(missing_ok=True)
         replay = recover_journal_file(self.path)
         self._handle = self.path.open("ab")
         return replay

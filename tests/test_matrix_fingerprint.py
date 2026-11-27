@@ -6,12 +6,12 @@ from pathlib import Path
 
 import pytest
 
-from combine_for_ai.environment import (
+from peira.environment import (
     AcceleratorBackend,
     EnvironmentSnapshot,
     fingerprint_from_snapshot,
 )
-from combine_for_ai.matrix_fingerprint import (
+from peira.matrix_fingerprint import (
     MatrixCellResult,
     MatrixReportError,
     aggregate_matrix_report,
@@ -69,8 +69,8 @@ def _cell(
 def test_cell_payload_embeds_versioned_fingerprint_and_digest() -> None:
     cell = _cell("toy/fp16/lambada", _snapshot())
     payload = cell.to_payload()
-    assert payload["schema"] == "combine_for_ai.matrix_cell.v1"
-    assert payload["fingerprint"]["schema"] == "combine_for_ai.environment_fingerprint.v1"
+    assert payload["schema"] == "peira.matrix_cell.v1"
+    assert payload["fingerprint"]["schema"] == "peira.environment_fingerprint.v1"
     assert payload["fingerprint"]["version"] == 1
     assert payload["fingerprint_digest"] == cell.fingerprint.digest()
     assert len(payload["fingerprint_digest"]) == 64

@@ -7,8 +7,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Mapping
 
-from combine_for_ai.git_blob import git_blob_sha1
-from combine_for_ai.live_errors import LiveBaselineError
+from peira.git_blob import git_blob_sha1
+from peira.live_errors import LiveBaselineError
 
 _DIFF_FILE_RE = re.compile(r"^diff --git a/(?P<old>.+?) b/(?P<new>.+?)$")
 _HUNK_HEADER_RE = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")

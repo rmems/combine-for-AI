@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from combine_for_ai.goz_import import (
+from peira.goz_import import (
     SCHEMA_MULTIBLOCK_V1,
     SCHEMA_ROUTE_PRESERVATION_V1,
     GozExperimentKind,
@@ -111,14 +111,81 @@ def test_preserve_zero_top2_agreement() -> None:
 
 def test_reject_unsupported_schema_version() -> None:
     raw = {
-        "combine_import_schema": "v99",
+        "peira_import_schema": "v99",
         "chain": {"per_block": [{"block": 0, "expert_only": {}}]},
     }
     with tempfile.TemporaryDirectory() as tmp:
         path = Path(tmp) / "bad-ver.json"
         path.write_text(json.dumps(raw), encoding="utf-8")
-        with pytest.raises(GozImportError, match="unsupported combine_import_schema"):
+        with pytest.raises(GozImportError, match="unsupported peira_import_schema"):
             import_goz_experiment(path)
+
+
+def _write_experiment(tmp: str, raw: dict) -> Path:
+    path = Path(tmp) / "experiment.json"
+    path.write_text(json.dumps(raw), encoding="utf-8")
+    return path
+
+
+def test_reject_unsupported_version_under_prerename_key() -> None:
+    """combine_import_schema is probed only to reject declared bad versions."""
+    raw = {
+        "combine_import_schema": 2,
+        "chain": {"per_block": [{"block": 0, "expert_only": {}}]},
+    }
+    with tempfile.TemporaryDirectory() as tmp:
+        with pytest.raises(GozImportError, match="unsupported peira_import_schema"):
+            import_goz_experiment(_write_experiment(tmp, raw))
+
+
+def test_prerename_version_key_does_not_override_schema_version() -> None:
+    """A supported combine_import_schema value must not hide schema_version."""
+    raw = {
+        "combine_import_schema": 1,
+        "schema_version": 2,
+        "chain": {"per_block": [{"block": 0, "expert_only": {}}]},
+    }
+    with tempfile.TemporaryDirectory() as tmp:
+        with pytest.raises(GozImportError, match="unsupported peira_import_schema"):
+            import_goz_experiment(_write_experiment(tmp, raw))
+
+
+def test_malformed_prerename_version_is_goz_error_not_typeerror() -> None:
+    """An array under the pre-rename key must not traceback past GozImportError."""
+    raw = {
+        "peira_import_schema": 1,
+        "combine_import_schema": [],
+        "chain": {"per_block": [{"block": 0, "expert_only": {}}]},
+    }
+    with tempfile.TemporaryDirectory() as tmp:
+        with pytest.raises(GozImportError, match="unsupported peira_import_schema"):
+            import_goz_experiment(_write_experiment(tmp, raw))
+
+
+def test_reject_explicit_null_schema_version() -> None:
+    """A declared null version is not an unversioned v1 input."""
+    raw = {
+        "schema_version": None,
+        "chain": {"per_block": [{"block": 0, "expert_only": {}}]},
+    }
+    with tempfile.TemporaryDirectory() as tmp:
+        with pytest.raises(GozImportError, match="unsupported peira_import_schema"):
+            import_goz_experiment(_write_experiment(tmp, raw))
+
+
+def test_null_version_falls_back_to_later_key() -> None:
+    raw = {
+        "peira_import_schema": None,
+        "schema_version": 1,
+        "chain": {
+            "per_block": [
+                {"block": 0, "expert_only": {"router_top1_agreement": 0.5}}
+            ]
+        },
+    }
+    with tempfile.TemporaryDirectory() as tmp:
+        result = import_goz_experiment(_write_experiment(tmp, raw), arms=("expert_only",))
+        assert len(result.rows) == 1
 
 
 def test_reject_unsupported_report_format() -> None:

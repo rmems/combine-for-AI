@@ -307,7 +307,7 @@ def test_classification_rejects_conflicting_expected() -> None:
 
 def test_golden_fixture_is_self_contained() -> None:
     golden = _load_golden()
-    assert golden["schema"] == "combine_for_ai.golden_scorers.v1"
+    assert golden["schema"] == "peira.golden_scorers.v1"
     families = set(golden["metric_families"])
     assert families == {
         "classification",

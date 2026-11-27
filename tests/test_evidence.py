@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from combine_for_ai.evidence import (
+from peira.evidence import (
     Capability,
     CapabilityError,
     DataProvenance,
@@ -23,7 +23,7 @@ from combine_for_ai.evidence import (
     require_capabilities,
     unavailable_metric,
 )
-from combine_for_ai.evidence_io import (
+from peira.evidence_io import (
     parse_evidence_markdown,
     read_evidence_csv,
     read_evidence_json,
@@ -158,6 +158,52 @@ def test_unknown_or_future_schema_is_rejected() -> None:
         parse_evidence({**payload, "surprise": 1})
 
 
+def test_prerename_schema_id_is_rejected_by_name() -> None:
+    """Pre-rename 'combine_for_ai.evidence' records fail loud, not migrate."""
+    payload = {**mock_record().to_payload(), "schema": "combine_for_ai.evidence"}
+    with pytest.raises(EvidenceError, match="predates the peira rename"):
+        load_evidence(payload)
+
+
+def test_prerename_schema_id_is_rejected_without_schema_version() -> None:
+    """A versionless payload with the old identifier must not be migrated."""
+    payload = {
+        "schema": "combine_for_ai.evidence",
+        "cell_id": "c",
+        "metrics": {
+            "accuracy": 0.5,
+            "perplexity": 2.0,
+            "throughput": 1.0,
+            "latency_ms": 1.0,
+            "vram_gb": 1.0,
+            "routing_entropy": 0.1,
+        },
+    }
+    with pytest.raises(EvidenceError, match="predates the peira rename"):
+        load_evidence(payload)
+
+
+
+def test_prerename_schema_id_in_result_wrapper_is_rejected() -> None:
+    """A pre-rename identifier nested under result must not be migrated."""
+    payload = {
+        "result": {
+            "schema": "combine_for_ai.evidence",
+            "cell_id": "c",
+            "metrics": {
+                "accuracy": 0.5,
+                "perplexity": 2.0,
+                "throughput": 1.0,
+                "latency_ms": 1.0,
+                "vram_gb": 1.0,
+                "routing_entropy": 0.1,
+            },
+        }
+    }
+    with pytest.raises(EvidenceError, match="predates the peira rename"):
+        load_evidence(payload)
+
+
 # --- legacy migration -------------------------------------------------------
 
 
@@ -261,7 +307,7 @@ def test_malformed_metric_value_is_an_evidence_error(tmp_path: Path) -> None:
 
 
 def test_csv_guard_prefixes_are_real_control_characters() -> None:
-    from combine_for_ai.csvio import CSV_FORMULA_PREFIXES
+    from peira.csvio import CSV_FORMULA_PREFIXES
 
     assert "\t" in CSV_FORMULA_PREFIXES and "\r" in CSV_FORMULA_PREFIXES
     assert "\\t" not in CSV_FORMULA_PREFIXES
@@ -316,9 +362,9 @@ def test_read_evidence_json_wraps_non_object_records(tmp_path: Path) -> None:
 
 
 def test_evidence_csv_writer_lives_in_the_installed_package() -> None:
-    import combine_for_ai.evidence_io as io_module
+    import peira.evidence_io as io_module
     from benchmarks.reporting import write_csv as reporting_write_csv
-    from combine_for_ai.csvio import write_csv
+    from peira.csvio import write_csv
 
     assert io_module.write_csv is write_csv
     assert reporting_write_csv is write_csv

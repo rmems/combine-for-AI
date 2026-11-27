@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from combine_for_ai.evidence import (
+from peira.evidence import (
     Budget,
     DataProvenance,
     EvidenceRecord,

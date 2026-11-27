@@ -14,8 +14,8 @@ from benchmarks.models import (
     build_model_adapter,
     default_quantization_registry,
 )
-from combine_for_ai.manifest import GOZ1_MAGIC
-from combine_for_ai.evidence import Capability, ExecutionKind, MetricStatus, load_evidence
+from peira.manifest import GOZ1_MAGIC
+from peira.evidence import Capability, ExecutionKind, MetricStatus, load_evidence
 
 
 def test_default_profiles_carry_no_performance_numbers() -> None:
@@ -89,7 +89,7 @@ def test_empty_failure_reason_still_yields_an_error_reason() -> None:
 
 def test_smoke_report_file_reads_back_its_embedded_envelope(tmp_path: Path) -> None:
     from benchmarks.artifact_smoke import run_artifact_smoke
-    from combine_for_ai.evidence_io import read_evidence_json
+    from peira.evidence_io import read_evidence_json
 
     payload = run_artifact_smoke(tmp_path / "missing.json", tmp_path / "out", ["json"])
     [record] = read_evidence_json(next((tmp_path / "out" / "json").glob("*.json")))
@@ -109,7 +109,7 @@ def test_mock_overrides_must_be_positive_and_finite(bad: float) -> None:
 
 def test_smoke_data_provenance_distinguishes_bundled_from_supplied(tmp_path: Path) -> None:
     from benchmarks.artifact_smoke import run_artifact_smoke
-    from combine_for_ai.evidence import DataProvenance
+    from peira.evidence import DataProvenance
 
     artifact = tmp_path / "m.gguf"
     artifact.write_text("ok", encoding="utf-8")

@@ -13,7 +13,7 @@ from benchmarks.fixture_presets import mock_performance
 from benchmarks.models import ModelSpec, build_model_adapter, default_quantization_registry
 from benchmarks.reporting import write_csv, write_json
 from benchmarks.runner import build_metadata
-from combine_for_ai.evidence import (
+from peira.evidence import (
     Budget,
     DataProvenance,
     EvidenceRecord,
@@ -25,7 +25,7 @@ from combine_for_ai.evidence import (
     WorkloadTrack,
     unavailable_metric,
 )
-from combine_for_ai.manifest import (
+from peira.manifest import (
     ArtifactFormat,
     ArtifactStatus,
     GeneratedArtifact,

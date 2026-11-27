@@ -8,7 +8,7 @@ from benchmarks.runner import run_benchmarks
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Run the combine-for-AI quantization benchmark harness."
+        description="Run the peira quantization benchmark harness."
     )
     parser.add_argument(
         "--config",

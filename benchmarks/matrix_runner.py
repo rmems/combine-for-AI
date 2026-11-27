@@ -61,6 +61,7 @@ def run_matrix(
     *,
     retry: RetryPolicy | None = None,
     hooks: MatrixHooks | None = None,
+    fresh: bool = False,
 ) -> MatrixRunResult:
     definition = load_matrix_config(config_path)
     policy = retry if retry is not None else definition.retry
@@ -69,7 +70,7 @@ def run_matrix(
     journal_path = matrix_dir / "journal.jsonl"
     aggregate_path = matrix_dir / "aggregate.json"
     journal = ResumeJournal(journal_path)
-    replay = journal.open()
+    replay = journal.open(reset=fresh)
     try:
         statuses, aggregate = execute_session(
             SessionContext(

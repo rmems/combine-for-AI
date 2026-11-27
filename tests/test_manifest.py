@@ -7,9 +7,10 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from combine_for_ai.manifest import (
+from peira.manifest import (
     ArtifactFormat,
     ArtifactStatus,
+    BenchmarkLinkage,
     GeneratedArtifact,
     ModelManifest,
     SourceArtifact,
@@ -180,23 +181,68 @@ def test_load_example_manifests() -> None:
         assert manifest.source_artifact.format
 
 
-def test_benchmark_linkage_accepts_legacy_nfl_keys() -> None:
-    """Legacy magere handoff used nfl_combine_* keys."""
+def test_benchmark_linkage_parses_peira_keys() -> None:
     raw = {
         "manifest_version": "1.0.0",
         "model_name": "legacy-link",
         "source_artifact": {"format": "gguf", "path": "x.gguf"},
         "benchmark_linkage": {
-            "nfl_combine_run_id": "run-old",
-            "nfl_combine_config_path": "configs/benchmark.sample.json",
+            "peira_run_id": "run-old",
+            "peira_config_path": "configs/benchmark.sample.json",
         },
     }
     m = load_manifest_from_string(json.dumps(raw))
     assert m.benchmark_linkage is not None
-    assert m.benchmark_linkage.combine_run_id == "run-old"
-    assert m.benchmark_linkage.combine_config_path == "configs/benchmark.sample.json"
-    dumped = m.benchmark_linkage.model_dump(by_alias=True)
-    assert dumped["combine_run_id"] == "run-old"
-    assert dumped["combine_config_path"] == "configs/benchmark.sample.json"
-    assert "nfl_combine_run_id" not in dumped
-    assert "nfl_combine_config_path" not in dumped
+    assert m.benchmark_linkage.peira_run_id == "run-old"
+    assert m.benchmark_linkage.peira_config_path == "configs/benchmark.sample.json"
+
+
+def _manifest_with_linkage(linkage: dict) -> str:
+    return json.dumps(
+        {
+            "manifest_version": "1.0.0",
+            "model_name": "legacy-link",
+            "source_artifact": {"format": "gguf", "path": "x.gguf"},
+            "benchmark_linkage": linkage,
+        }
+    )
+
+
+@pytest.mark.parametrize(
+    "linkage",
+    [
+        {"combine_run_id": "run-old", "combine_config_path": "configs/x.json"},
+        {"nfl_combine_run_id": "run-old", "nfl_combine_config_path": "configs/x.json"},
+        {"combine_run_id": "run-old"},
+    ],
+)
+def test_benchmark_linkage_rejects_prerename_only_keys(linkage: dict) -> None:
+    """Pre-rename combine_* keys must fail loud, not drop the run id."""
+    with pytest.raises(ValidationError, match="peira_run_id"):
+        load_manifest_from_string(_manifest_with_linkage(linkage))
+
+
+def test_benchmark_linkage_peira_keys_take_precedence() -> None:
+    m = load_manifest_from_string(
+        _manifest_with_linkage(
+            {"peira_run_id": "run-new", "combine_run_id": "run-old"}
+        )
+    )
+    assert m.benchmark_linkage is not None
+    assert m.benchmark_linkage.peira_run_id == "run-new"
+
+
+def test_goz1_sample_manifest_linkage_uses_current_keys() -> None:
+    """The sample's linkage keys must be real BenchmarkLinkage fields."""
+    path = (
+        Path(__file__).resolve().parents[1]
+        / "configs"
+        / "manifests"
+        / "goz1.sample.json"
+    )
+    manifest = load_manifest(path)
+    linkage = manifest.benchmark_linkage
+    assert linkage is not None
+    raw_keys = set(json.loads(path.read_text(encoding="utf-8"))["benchmark_linkage"])
+    assert raw_keys <= set(BenchmarkLinkage.model_fields)
+    assert linkage.peira_config_path == "configs/benchmark.sample.json"

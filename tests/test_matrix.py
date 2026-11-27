@@ -9,7 +9,7 @@ import pytest
 
 from benchmarks.dataset_support import catalog_entry, resolve_hf_split
 from benchmarks.datasets import DatasetSpec
-from combine_for_ai.matrix import (
+from peira.matrix import (
     CORINTH_CANAL_FAMILIES,
     CellOutcome,
     CellStatus,
@@ -25,7 +25,7 @@ from combine_for_ai.matrix import (
     relative_drop,
     ratio,
 )
-from combine_for_ai.matrix_runner import MatrixRunner, MatrixRunOptions, build_matrix_report
+from peira.matrix_runner import MatrixRunner, MatrixRunOptions, build_matrix_report
 from scripts.run_matrix import build_parser, main
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -656,7 +656,7 @@ def test_cli_returns_nonzero_when_cells_fail(tmp_path: Path) -> None:
 
 
 def test_non_integer_bits_in_progress_are_rejected() -> None:
-    from combine_for_ai.matrix import MatrixModelSpec, outcome_from_progress
+    from peira.matrix import MatrixModelSpec, outcome_from_progress
 
     cell = MatrixCell(
         model=MatrixModelSpec(

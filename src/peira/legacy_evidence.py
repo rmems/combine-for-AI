@@ -9,10 +9,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from combine_for_ai.legacy_import import imported_rows
-from combine_for_ai.legacy_metrics import legacy_record
-from combine_for_ai.legacy_rows import normalized_rows, require_legacy_metadata
-from combine_for_ai.report_models import EvidenceRecord
+from peira.legacy_import import imported_rows
+from peira.legacy_metrics import legacy_record
+from peira.legacy_rows import normalized_rows, require_legacy_metadata
+from peira.report_models import EvidenceRecord
 
 
 def legacy_records(raw: dict[str, Any], path: Path) -> list[EvidenceRecord]:

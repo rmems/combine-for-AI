@@ -57,7 +57,7 @@ class DatasetCache:
     def for_spec(spec: DatasetSpec) -> "DatasetCache":
         mode_raw = (
             spec.cache_mode
-            or os.environ.get("COMBINE_DATASET_CACHE_MODE")
+            or os.environ.get("PEIRA_DATASET_CACHE_MODE")
             or DEFAULT_CACHE_MODE
         )
         root_raw = spec.cache_root

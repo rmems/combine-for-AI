@@ -7,7 +7,7 @@ corinth-canal's ``saaq_latent_calibration`` writes a per-run directory:
 - ``run_manifest.json`` — full ``ExperimentManifest``
 - ``tick_telemetry.txt`` — per-tick spike / timing lines
 
-Missing pieces are skipped rather than treated as errors so a combine
+Missing pieces are skipped rather than treated as errors so a peira
 benchmark can still finish when only GOZ1 (or nothing upstream) is present.
 """
 
@@ -69,7 +69,7 @@ ArtifactKind = Literal["summary", "manifest", "legacy"]
 
 @dataclass(frozen=True)
 class CorinthCanalRun:
-    """Normalized SAAQ run used to overlay combine telemetry and metrics."""
+    """Normalized SAAQ run used to overlay peira telemetry and metrics."""
 
     experiment_id: str
     artifact_version: str = SAAQ_ARTIFACT_VERSION

@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
 
-from combine_for_ai.live_baselines import BaselineRegistry, RunSnapshot, load_baseline_registry
-from combine_for_ai.live_rank import (
+from peira.live_baselines import BaselineRegistry, RunSnapshot, load_baseline_registry
+from peira.live_rank import (
     PINNED_RUST_INSTANCE_IDS_PATH,
     RankedRun,
     load_pinned_instance_ids,

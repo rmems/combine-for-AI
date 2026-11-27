@@ -15,7 +15,7 @@ from benchmarks.dataset_cache import provenance_from_metadata
 from benchmarks.dataset_support import is_language_modeling as _language_modeling
 from benchmarks.datasets import DatasetSpec, LoadedDataset, default_dataset_registry
 from benchmarks.fixture_presets import mock_performance
-from combine_for_ai.evidence import ExecutionKind
+from peira.evidence import ExecutionKind
 from benchmarks.metrics import MetricsAccumulator, MetricsSummary
 from benchmarks.models import (
     ModelSpec,

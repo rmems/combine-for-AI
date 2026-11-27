@@ -11,7 +11,7 @@ import matplotlib
 matplotlib.use("Agg", force=True)
 from matplotlib import pyplot as plt  # noqa: E402
 
-from combine_for_ai.jsonio import ensure_dir
+from peira.jsonio import ensure_dir
 
 
 _MAX_FOOTER_LINES = 12
@@ -35,7 +35,7 @@ def render_plot(path: Path, config: Any, figure: dict[str, Any]) -> None:
         fig.savefig(
             path,
             dpi=config.dpi,
-            metadata={"Software": "combine-for-ai headless reports v1"},
+            metadata={"Software": "peira headless reports v1"},
         )
     finally:
         plt.close(fig)

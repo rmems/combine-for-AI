@@ -12,7 +12,7 @@ import math
 from dataclasses import dataclass
 
 from benchmarks.models import QuantizationProfile
-from combine_for_ai.evidence import ExecutionKind
+from peira.evidence import ExecutionKind
 
 
 @dataclass(frozen=True)

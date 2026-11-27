@@ -1,5 +1,5 @@
 {
-  "schema_version": "combine.plot-evidence.v1",
+  "schema_version": "peira.plot-evidence.v1",
   "run": {"run_id": "offline-shape-fixture", "url": "https://example.org/runs/fixture"},
   "records": [
     {
@@ -12,7 +12,7 @@
         "task": "multiple-choice@v1", "scorer": "exact-match@v1",
         "dataset": "toy@v1", "split": "test", "sample_ids": ["a", "b", "c", "d"],
         "engine": "fixture-engine@v1", "config": {"batch_size": 1},
-        "runtime": "fixture-cpu", "harness": "combine-fixture-v1",
+        "runtime": "fixture-cpu", "harness": "peira-fixture-v1",
         "environment": {"hardware": "fixture-cpu"}, "budgets": {"tokens": 64},
         "preprocessing": "none", "seeds": [11, 29]
       },

@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from combine_for_ai.goz_import import (
+from peira.goz_import import (
     PACK_PROVENANCE_FIELDS,
     GozImportError,
     import_goz_experiment,

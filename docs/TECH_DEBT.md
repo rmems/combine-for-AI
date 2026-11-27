@@ -13,7 +13,7 @@ Status legend: **open** · **in review** (PR up) · **done** (merged).
 
 ## P0 — confirmed live defects with small, safe fixes
 
-### D1 · Report JSON is not valid JSON · *in review — [#32](https://github.com/rmems/combine-for-AI/pull/32)*
+### D1 · Report JSON is not valid JSON · *in review — [#32](https://github.com/rmems/peira/pull/32)*
 
 `benchmarks/reporting.py:17` · `write_json`
 
@@ -33,7 +33,7 @@ drop it as a follow-up once both land.
 
 ### D2 · `--run-id` path traversal in the importer · *open*
 
-`src/combine_for_ai/goz_import.py:541` · `write_import_reports`
+`src/peira/goz_import.py:541` · `write_import_reports`
 
 The user-supplied `--run-id` is interpolated straight into the output path with
 no validation.
@@ -48,12 +48,12 @@ writer never got it — the fix was applied to one caller instead of to the shar
 concern.
 
 **Fix scope (small PR)** — lift `_validate_run_id` into
-`src/combine_for_ai/run_id.py`, call it from both `write_comparison_reports` and
+`src/peira/run_id.py`, call it from both `write_comparison_reports` and
 `write_import_reports`, and reuse the traversal tests already in
 `tests/test_compare.py`. Touches `goz_import.py`, so land after #28 or stack on
 its branch.
 
-### D3 · Generated artifacts are not ignored · *in review — [#30](https://github.com/rmems/combine-for-AI/pull/30)*
+### D3 · Generated artifacts are not ignored · *in review — [#30](https://github.com/rmems/peira/pull/30)*
 
 `.gitignore`
 
@@ -87,7 +87,7 @@ fall back to `"unknown"` for commit and branch. Test with a `tmp_path` cwd.
 
 ### D5 · Run-id collisions, triplicated · *partly done*
 
-`benchmarks/runner.py:81` · `src/combine_for_ai/goz_import.py:116`
+`benchmarks/runner.py:81` · `src/peira/goz_import.py:116`
 (fixed in `scripts/compare_runs.py` by #28)
 
 Three independent copies of the same timestamp-only id, all with the same
@@ -102,7 +102,7 @@ produced 1 distinct id. Fixed there in #28; the other two copies are unchanged.
 **Fix scope (small PR)** — one `run_id.py` helper (pairs naturally with D2),
 called from all three sites.
 
-### D6 · Workflow unsafe defaults and a dead trigger · *in review — [#31](https://github.com/rmems/combine-for-AI/pull/31)*
+### D6 · Workflow unsafe defaults and a dead trigger · *in review — [#31](https://github.com/rmems/peira/pull/31)*
 
 `.github/workflows/*.yml`
 
@@ -199,7 +199,7 @@ raises `ImportError`, and assert the error message.
 `benchmarks/reporting.py:35` — `row = asdict(metrics); return row`. Adds a name
 and an import edge, nothing else. Inline it or give it a reason to exist.
 
-### D13 · No issue templates or contributing guide · *open — [issue #18](https://github.com/rmems/combine-for-AI/issues/18)*
+### D13 · No issue templates or contributing guide · *open — [issue #18](https://github.com/rmems/peira/issues/18)*
 
 Already filed and labelled P3; recording it here so the register matches the
 tracker.
@@ -213,7 +213,7 @@ scopes to `contents: read`, the exposure is small — worth doing, not urgent.
 
 ### D15 · `compare._json_safe` is redundant once D1 lands · *blocked on #28 + #32*
 
-`src/combine_for_ai/compare.py` — a private re-implementation of the sanitizing
+`src/peira/compare.py` — a private re-implementation of the sanitizing
 walk that D1 puts in the shared writer. Delete once both PRs are in.
 
 ---

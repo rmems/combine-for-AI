@@ -37,10 +37,13 @@ from pydantic import (
 )
 
 
-EVIDENCE_SCHEMA = "combine_for_ai.evidence"
+EVIDENCE_SCHEMA = "peira.evidence"
 EVIDENCE_SCHEMA_VERSION = 1
 #: Pre-envelope payloads (artifact-smoke rows, matrix cells) carry no version.
 LEGACY_SCHEMA_VERSION = 0
+#: Identifier written before the combine-for-AI -> peira rename. It is
+#: recognized only to fail loudly; pre-rename evidence is never accepted.
+_PRERENAME_EVIDENCE_SCHEMA = "combine_for_ai.evidence"
 
 _SHA256_RE = re.compile(r"[0-9a-f]{64}")
 
@@ -255,6 +258,11 @@ class EvidenceRecord(BaseModel):
     @field_validator("schema_id")
     @classmethod
     def _schema_name(cls, value: str) -> str:
+        if value == _PRERENAME_EVIDENCE_SCHEMA:
+            raise ValueError(
+                f"evidence schema '{value}' predates the peira rename and is "
+                f"not accepted; regenerate the record as '{EVIDENCE_SCHEMA}'"
+            )
         if value != EVIDENCE_SCHEMA:
             raise ValueError(f"unknown evidence schema '{value}'")
         return value
@@ -434,6 +442,7 @@ def _migrate_v0(payload: Mapping[str, Any]) -> dict[str, Any]:
     """
     if isinstance(payload.get("result"), Mapping):
         payload = payload["result"]
+        _reject_prerename_schema(payload)
     if isinstance(payload.get("metrics"), Mapping):
         return _migrate_matrix_cell(payload)
     if "run_id" in payload and "status" in payload:
@@ -444,6 +453,14 @@ def _migrate_v0(payload: Mapping[str, Any]) -> dict[str, Any]:
 _MIGRATIONS: dict[int, Callable[[Mapping[str, Any]], dict[str, Any]]] = {
     LEGACY_SCHEMA_VERSION: _migrate_v0,
 }
+
+
+def _reject_prerename_schema(payload: Mapping[str, Any]) -> None:
+    if payload.get("schema") == _PRERENAME_EVIDENCE_SCHEMA:
+        raise EvidenceError(
+            f"evidence schema '{_PRERENAME_EVIDENCE_SCHEMA}' predates the peira rename and is "
+            f"not accepted; regenerate the record as '{EVIDENCE_SCHEMA}'"
+        )
 
 
 def _payload_version(payload: Mapping[str, Any]) -> int:
@@ -464,6 +481,7 @@ def load_evidence(payload: Mapping[str, Any]) -> EvidenceRecord:
     embedded = payload.get("evidence")
     if "schema_version" not in payload and isinstance(embedded, Mapping):
         return load_evidence(embedded)
+    _reject_prerename_schema(payload)
     version = _payload_version(payload)
     current: Mapping[str, Any] = payload
     while version < EVIDENCE_SCHEMA_VERSION:

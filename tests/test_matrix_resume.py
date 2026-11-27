@@ -176,9 +176,42 @@ def test_incompatible_matrix_definition_is_rejected(tmp_path: Path) -> None:
         run_matrix(config_path, output)
 
 
+def _rewrite_header_schema(journal_path: Path, schema: str) -> None:
+    records = [
+        {**record, "schema": schema} if record.get("kind") == "header" else record
+        for record in replay_journal(journal_path).records
+    ]
+    journal_path.write_bytes(b"".join(encode_record(record) for record in records))
+
+
+def test_prerename_journal_is_rejected_with_fresh_hint(tmp_path: Path) -> None:
+    config_path = write_matrix_config(tmp_path, quantization=["fp16"])
+    output = tmp_path / "out"
+    result = run_matrix(config_path, output)
+    _rewrite_header_schema(result.journal_path, "combine.matrix.journal.v1")
+
+    with pytest.raises(IncompatibleMatrixError, match="--fresh"):
+        run_matrix(config_path, output)
+
+    fresh = run_matrix(config_path, output, fresh=True)
+    assert all(status.state is CellState.SUCCEEDED for status in fresh.statuses.values())
+
+
+def test_cli_fresh_discards_prerename_journal(tmp_path: Path) -> None:
+    config_path = write_matrix_config(tmp_path, quantization=["fp16"])
+    output = tmp_path / "out"
+    result = run_matrix(config_path, output)
+    _rewrite_header_schema(result.journal_path, "combine.matrix.journal.v1")
+
+    rc = run_matrix_main(
+        ["--config", str(config_path), "--output-dir", str(output), "--fresh"]
+    )
+    assert rc == 0
+
+
 def test_corrupt_tail_keeps_earlier_records(tmp_path: Path) -> None:
     path = tmp_path / "journal.jsonl"
-    first = {"kind": "header", "schema": "combine.matrix.journal.v1"}
+    first = {"kind": "header", "schema": "peira.matrix.journal.v1"}
     second = {"kind": "transition", "cell_id": "abc", "state": "succeeded", "attempt": 1}
     path.write_bytes(encode_record(first) + encode_record(second) + b'{"v":1,"crc32":"deadbeef","body":')
     replay = recover_journal_file(path)
@@ -194,7 +227,7 @@ def test_corrupt_tail_keeps_earlier_records(tmp_path: Path) -> None:
 
 def test_crc_mismatch_at_tail_is_detected(tmp_path: Path) -> None:
     path = tmp_path / "journal.jsonl"
-    body = {"kind": "header", "schema": "combine.matrix.journal.v1"}
+    body = {"kind": "header", "schema": "peira.matrix.journal.v1"}
     bad = (
         json.dumps(
             {"body": {"kind": "transition", "state": "running"}, "crc32": "00000000", "v": 1},
@@ -422,19 +455,22 @@ def test_aggregate_exposes_retry_count_and_disposition(tmp_path: Path) -> None:
     assert "disposition" in resumed.aggregate["cells"][0]
 
 
-def test_cli_rejects_zero_max_attempts(tmp_path: Path) -> None:
+def test_cli_rejects_zero_max_attempts(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     config_path = write_matrix_config(tmp_path, quantization=["fp16"])
-    with pytest.raises(MatrixError, match="max_attempts"):
-        run_matrix_main(
-            [
-                "--config",
-                str(config_path),
-                "--output-dir",
-                str(tmp_path / "out"),
-                "--max-attempts",
-                "0",
-            ]
-        )
+    # The journal CLI catches MatrixError so the message reaches stderr
+    # without a traceback (see _run_journal_cli).
+    code = run_matrix_main(
+        [
+            "--config",
+            str(config_path),
+            "--output-dir",
+            str(tmp_path / "out"),
+            "--max-attempts",
+            "0",
+        ]
+    )
+    assert code == 1
+    assert "max_attempts" in capsys.readouterr().err
 
 
 def test_matrix_name_rejects_dot_and_dotdot_path_components() -> None:
@@ -661,6 +697,36 @@ def test_journal_lock_rejects_a_second_writer(tmp_path: Path) -> None:
     released = ResumeJournal(path)
     released.open()
     released.close()
+
+
+def test_fresh_open_leaves_journal_intact_when_locked(tmp_path: Path) -> None:
+    from benchmarks.journal import ResumeJournal, encode_record
+
+    path = tmp_path / "journal.jsonl"
+    path.write_bytes(encode_record({"kind": "header", "schema": "peira.matrix.journal.v1"}))
+    original = path.read_bytes()
+    held = ResumeJournal(path)
+    held.open()
+    try:
+        with pytest.raises(JournalError, match="locked"):
+            ResumeJournal(path).open(reset=True)
+        assert path.read_bytes() == original
+    finally:
+        held.close()
+
+
+def test_open_reset_clears_journal_after_lock(tmp_path: Path) -> None:
+    from benchmarks.journal import ResumeJournal, encode_record
+
+    path = tmp_path / "journal.jsonl"
+    path.write_bytes(encode_record({"kind": "header", "schema": "peira.matrix.journal.v1"}))
+    journal = ResumeJournal(path)
+    replay = journal.open(reset=True)
+    try:
+        assert replay.records == ()
+        assert not path.exists() or path.stat().st_size == 0
+    finally:
+        journal.close()
 
 
 def test_cli_exits_nonzero_when_journal_cells_fail(tmp_path: Path) -> None:

@@ -6,8 +6,8 @@ from typing import Sequence
 
 import pytest
 
-from combine_for_ai.live_gold import _apply_unified_hunks
-from combine_for_ai.live_baselines import (
+from peira.live_gold import _apply_unified_hunks
+from peira.live_baselines import (
     LiveBaselineError,
     annotate_row_hygiene,
     byte_identical_gold_src,
@@ -26,17 +26,17 @@ from combine_for_ai.live_baselines import (
     RunSnapshot,
     TaskResultRow,
 )
-from combine_for_ai.live_rank import (
+from peira.live_rank import (
     filter_usable_runs,
     load_pinned_instance_ids,
     rank_runs_on_shared_rows,
     shared_instance_ids,
 )
-from combine_for_ai.rmems_eval_v0_1 import rank_runs as rank_rmems_eval_v0_1
+from peira.rmems_eval_v0_1 import rank_runs as rank_rmems_eval_v0_1
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "swe_bench_live"
 SUBMISSIONS = FIXTURES / "submissions"
-REGISTRY = Path(__file__).resolve().parents[1] / "src" / "combine_for_ai" / "data" / "swe_bench_live" / "baselines.json"
+REGISTRY = Path(__file__).resolve().parents[1] / "src" / "peira" / "data" / "swe_bench_live" / "baselines.json"
 
 
 def test_registry_pr59_documents_87_of_171_and_rmems_trajectory_note() -> None:
@@ -692,7 +692,7 @@ def test_rows_from_submission_bundle_rejects_blank_id() -> None:
 
 
 def test_coerce_task_row_wraps_validation_error() -> None:
-    from combine_for_ai.live_baselines import _coerce_task_row
+    from peira.live_baselines import _coerce_task_row
 
     with pytest.raises(LiveBaselineError, match="invalid per-task result"):
         _coerce_task_row(
@@ -702,7 +702,7 @@ def test_coerce_task_row_wraps_validation_error() -> None:
 
 
 def test_load_base_files_preserves_crlf(tmp_path: Path) -> None:
-    from combine_for_ai.live_baselines import load_base_files
+    from peira.live_baselines import load_base_files
 
     (tmp_path / "lib.py").write_bytes(b"old\r\n")
     loaded = load_base_files(tmp_path, ["lib.py"])

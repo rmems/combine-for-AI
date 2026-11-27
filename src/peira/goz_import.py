@@ -1,4 +1,4 @@
-"""Import grok-ozempic experiment JSON into combine report rows.
+"""Import grok-ozempic experiment JSON into peira report rows.
 
 Supports:
 - Multiblock residual fidelity ``metrics.json`` (chain.per_block)
@@ -40,7 +40,7 @@ class GozImportError(ValueError):
 
 @dataclass(frozen=True)
 class ImportedExperimentRow:
-    """One combine-normalized experiment row (JSON/CSV friendly)."""
+    """One normalized experiment row (JSON/CSV friendly)."""
 
     schema: str
     experiment_kind: str
@@ -110,7 +110,7 @@ class GozImportResult:
             "provenance": self.provenance,
             "decision": self.decision,
             "benchmark_linkage": {
-                "combine_run_id": rid,
+                "peira_run_id": rid,
                 "grok_ozempic_report_path": self.source_path,
                 "grok_ozempic_experiment_id": (
                     (self.provenance or {}).get("issue")
@@ -148,18 +148,47 @@ def _as_int(value: Any) -> int | None:
         return None
 
 
-_SUPPORTED_SCHEMA_VERSIONS = frozenset({1, "1", "v1", "1.0"})
+# Tuple (not a set): membership must not raise TypeError when a JSON
+# object or array is supplied under a version key.
+_SUPPORTED_SCHEMA_VERSIONS = (1, "1", "v1", "1.0")
 _SUPPORTED_REPORT_FORMATS = frozenset({"json", "csv"})
 _SCALE_RANK = ("pack_v3", "pack_v2", "legacy_oracle")
 
+#: Canonical keys that select the import schema version, in precedence order.
+#: The pre-rename spelling ``combine_import_schema`` is not a selector (it
+#: must not override ``schema_version``) and is probed only so a declared
+#: unsupported or null version is rejected instead of silently read as v1.
+SCHEMA_VERSION_KEYS = ("peira_import_schema", "schema_version")
+_PRERENAME_SCHEMA_VERSION_KEY = "combine_import_schema"
+
+
+def declared_schema_version(raw: dict[str, Any]) -> Any:
+    """Return the first non-null declared version under ``SCHEMA_VERSION_KEYS``.
+
+    Returns ``1`` only when no canonical version key is present at all
+    (unversioned legacy input). A canonical key that is present but ``None``
+    yields ``None`` so an explicit null is rejected instead of silently
+    treated as v1.
+
+    If the pre-rename key is present and is not a supported version (including
+    an explicit ``None``), that value is returned so callers reject it. A
+    supported value under the pre-rename key is ignored for selection.
+    """
+    if _PRERENAME_SCHEMA_VERSION_KEY in raw:
+        prerename = raw[_PRERENAME_SCHEMA_VERSION_KEY]
+        if prerename not in _SUPPORTED_SCHEMA_VERSIONS:
+            return prerename
+    return next(
+        (raw[key] for key in SCHEMA_VERSION_KEYS if raw.get(key) is not None),
+        None if any(key in raw for key in SCHEMA_VERSION_KEYS) else 1,
+    )
+
 
 def _require_schema_version(raw: dict[str, Any]) -> None:
-    """Accept missing version as v1; reject unknown explicit versions."""
-    ver = raw.get("combine_import_schema", raw.get("schema_version"))
-    if ver is None:
-        return
+    """Accept missing version as v1; reject unknown or null declared versions."""
+    ver = declared_schema_version(raw)
     if ver not in _SUPPORTED_SCHEMA_VERSIONS:
-        raise GozImportError(f"unsupported combine_import_schema version: {ver!r}")
+        raise GozImportError(f"unsupported peira_import_schema version: {ver!r}")
 
 
 def detect_experiment_kind(raw: dict[str, Any]) -> GozExperimentKind:
@@ -521,7 +550,7 @@ def import_goz_experiment(
     *,
     arms: tuple[str, ...] = ("expert_only", "fp16_control"),
 ) -> GozImportResult:
-    """Load a grok-ozempic experiment JSON and normalize to combine rows."""
+    """Load a grok-ozempic experiment JSON and normalize to peira rows."""
     path = Path(path)
     raw = load_experiment_json(path)
     kind = detect_experiment_kind(raw)
@@ -586,10 +615,12 @@ __all__ = [
     "PACK_PROVENANCE_FIELDS",
     "SCHEMA_MULTIBLOCK_V1",
     "SCHEMA_ROUTE_PRESERVATION_V1",
+    "SCHEMA_VERSION_KEYS",
     "GozExperimentKind",
     "GozImportError",
     "ImportedExperimentRow",
     "GozImportResult",
+    "declared_schema_version",
     "detect_experiment_kind",
     "load_experiment_json",
     "import_multiblock_metrics",

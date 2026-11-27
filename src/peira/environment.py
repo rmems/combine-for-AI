@@ -18,14 +18,14 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Mapping, Sequence, assert_never
 
-from combine_for_ai.environment_probe import (
+from peira.environment_probe import (
     discover_repo_root,
     probe_accelerator,
     probe_git,
 )
 
 
-FINGERPRINT_SCHEMA = "combine_for_ai.environment_fingerprint.v1"
+FINGERPRINT_SCHEMA = "peira.environment_fingerprint.v1"
 FINGERPRINT_VERSION = 1
 DIGEST_ALGORITHM = "sha256"
 REDACTED = "[REDACTED]"

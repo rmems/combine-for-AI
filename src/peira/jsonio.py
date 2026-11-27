@@ -1,4 +1,4 @@
-"""Standard-JSON writing for packaged combine_for_ai report writers."""
+"""Standard-JSON writing for packaged peira report writers."""
 
 from __future__ import annotations
 

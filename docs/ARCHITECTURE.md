@@ -3,7 +3,7 @@
 ## Ecosystem boundaries
 
 ```text
-xai-dissect ──manifests──► grok-ozempic ──GOZ1 packs──► combine-for-AI (eval/report)
+xai-dissect ──manifests──► grok-ozempic ──GOZ1 packs──► peira (eval/report)
                                  │                            ▲
                                  ▼                            │
                           myelin-accelerator            magere-brug handoff
@@ -19,7 +19,7 @@ xai-dissect ──manifests──► grok-ozempic ──GOZ1 packs──► comb
 | Telemetry | Local GPU snapshot + optional corinth/myelin overlay |
 | Reports | JSON/CSV (+ markdown generators); MoE/SNN fields nullable |
 
-**combine-for-AI does not** pack GOZ1 files, run Grok-1 residual experiments, or own CUDA kernels.
+**peira does not** pack GOZ1 files, run Grok-1 residual experiments, or own CUDA kernels.
 
 ## Manifest ingestion
 
@@ -37,7 +37,7 @@ xai-dissect ──manifests──► grok-ozempic ──GOZ1 packs──► comb
   - optional nested **`goz1`**: `container_version`, `packing_scheme`, `gif_threshold`, tensor counts, `scale_source`
 - `backend_compatibility`: flags including `goz1`, `myelin_accelerator`, …
 - `saaq_metadata`: routing / route-agreement fields for SAAQ research
-- `benchmark_linkage`: combine run id + optional `grok_ozempic_report_path`
+- `benchmark_linkage`: peira run id + optional `grok_ozempic_report_path`
 
 ### GOZ1 notes
 
@@ -98,7 +98,7 @@ Golden scorers (`benchmarks.scorers`) are deterministic. Failures always name `d
 
 Config: `configs/matrix/*.json` or `*.toml`. Cartesian product of `models` × `quantization` (per-model override allowed) × `datasets`, with optional `select` / `exclude` plus CLI filters (`--models`, `--families`, `--quant-methods`, `--datasets`).
 
-`MatrixRunner` (`src/combine_for_ai/matrix_runner.py`) iterates cells, invokes `run_benchmarks_from_config` for each, writes `reports/cells/<cell_id>/`, and aggregates:
+`MatrixRunner` (`src/peira/matrix_runner.py`) iterates cells, invokes `run_benchmarks_from_config` for each, writes `reports/cells/<cell_id>/`, and aggregates:
 
 - `relative_accuracy_drop` = `(baseline_acc - treatment_acc) / baseline_acc`
 - `compression_ratio` = `baseline_bits / treatment_bits`
@@ -109,7 +109,7 @@ Baseline is `baseline_quantization` (default `fp16`) for the same model+dataset.
 
 CLI: `python scripts/run_matrix.py --config configs/matrix/corinth_canal.sample.json`.
 
-Environment fingerprints for matrix cells (compatibility warnings when pooling runs) live in `combine_for_ai.matrix_fingerprint` with probes in `combine_for_ai.environment`.
+Environment fingerprints for matrix cells (compatibility warnings when pooling runs) live in `peira.matrix_fingerprint` with probes in `peira.environment`.
 
 ## Metrics
 
@@ -135,7 +135,7 @@ Science note (from grok-ozempic #61/#64/#68): expert-only ternary is routing-saf
 
 ## grok-ozempic experiment import
 
-`combine_for_ai.goz_import` normalizes upstream experiment JSON without re-running quant or residual harnesses.
+`peira.goz_import` normalizes upstream experiment JSON without re-running quant or residual harnesses.
 
 | Kind | Detection | Schema id |
 |------|-----------|-----------|
@@ -155,7 +155,7 @@ Payload includes `benchmark_linkage.grok_ozempic_report_path` and optional decis
 
 ## Hybrid comparison runner
 
-`combine_for_ai.compare` builds matrices from imported or raw experiment rows:
+`peira.compare` builds matrices from imported or raw experiment rows:
 
 - Baseline arm (default `fp16_control`) vs treatment (default `expert_only`)
 - Paired by `block_index` with deltas for route top-1/2, cosine, residual drift, etc.
@@ -167,7 +167,7 @@ See `benchmarks/telemetry.py`: `SystemSnapshot`, `GPUMetrics` (optional `pynvml`
 
 ### corinth-canal SAAQ ingest
 
-`benchmarks/corinth_canal.py` parses a validation run directory (or a single artifact) and overlays SAAQ scalars onto combine metrics/reports.
+`benchmarks/corinth_canal.py` parses a validation run directory (or a single artifact) and overlays SAAQ scalars onto peira metrics/reports.
 
 Canonical filenames from `saaq_latent_calibration`:
 
@@ -212,7 +212,7 @@ Epic: GitHub **#20** — GOZ1 / MoE-SNN evaluation readiness for grok-ozempic.
 
 ## Evidence envelope (RM-1894)
 
-`combine_for_ai.evidence` defines the versioned record (`schema_version` 1) every
+`peira.evidence` defines the versioned record (`schema_version` 1) every
 new result should use; `evidence_io` round-trips it through JSON, CSV and Markdown.
 
 Independent axes (none is inferred from another):

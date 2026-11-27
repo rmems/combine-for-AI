@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from benchmarks.dataset_cache_models import CacheValidationError
 from benchmarks.dataset_hf_pin import (
     dataset_source_uri,
     is_commit_sha,
@@ -31,7 +32,10 @@ except ImportError:
     hf_load_dataset = None
 
 # v4 records the validation task so cached rows retain their task contract.
-NORMALIZED_CACHE_SCHEMA = "combine.normalized_hf_cache.v4"
+NORMALIZED_CACHE_SCHEMA = "peira.normalized_hf_cache.v4"
+#: Schema written before the combine-for-AI -> peira rename. It is probed only
+#: to fail loudly: a pre-rename cache pair is never read as valid v4 data.
+_PRE_RENAME_CACHE_SCHEMA = "combine.normalized_hf_cache.v4"
 RowMapper = Callable[[dict[str, Any]], DatasetRecord | None]
 CacheHit = tuple[list[DatasetRecord], dict[str, Any]]
 CachedRows = tuple[list[DatasetRecord], dict[str, Any]]
@@ -58,10 +62,12 @@ def write_normalized_jsonl(path: Path, records: list[DatasetRecord]) -> None:
             handle.write("\n")
 
 
-def cache_key_digest(spec: MappedHfSpec) -> str:
+def cache_key_digest(
+    spec: MappedHfSpec, schema: str = NORMALIZED_CACHE_SCHEMA
+) -> str:
     key = json.dumps(
         [
-            NORMALIZED_CACHE_SCHEMA,
+            schema,
             spec.hf_id,
             spec.hf_subset,
             spec.split,
@@ -74,7 +80,11 @@ def cache_key_digest(spec: MappedHfSpec) -> str:
 
 
 def normalized_cache_path(spec: MappedHfSpec) -> Path:
-    digest = cache_key_digest(spec)
+    return _normalized_path_for(spec, NORMALIZED_CACHE_SCHEMA)
+
+
+def _normalized_path_for(spec: MappedHfSpec, schema: str) -> Path:
+    digest = cache_key_digest(spec, schema)
     cache_dir = _require_cache_dir(spec)
     return cache_dir / "normalized" / spec.name / spec.split / f"{digest}.jsonl"
 
@@ -126,16 +136,49 @@ def records_from_hf(
     if hit is not None:
         return hit
     if not allow_fetch:
-        raise RuntimeError(
-            f"offline cache miss for Hugging Face dataset {spec.hf_id}"
-        )
+        raise _cache_miss_error(spec)
     try:
         return _fetch_mapped_from_hf(path, spec, map_row, remote)
-    except (ImportError, OSError, RuntimeError, TypeError, ValueError):
+    except (ImportError, OSError, RuntimeError, TypeError, ValueError) as exc:
         if cached is not None:
             cached[1]["stale"] = True
             return cached
+        legacy = _pre_rename_cache_pair(spec)
+        if legacy is not None:
+            raise _incompatible_cache_error(spec, legacy) from exc
         raise
+
+
+def _cache_miss_error(spec: MappedHfSpec) -> Exception:
+    legacy = _pre_rename_cache_pair(spec)
+    if legacy is not None:
+        return _incompatible_cache_error(spec, legacy)
+    return RuntimeError(f"offline cache miss for Hugging Face dataset {spec.hf_id}")
+
+
+def _pre_rename_cache_pair(spec: MappedHfSpec) -> Path | None:
+    """A cache pair written under the pre-rename schema, if one exists.
+
+    The schema string feeds the cache-key digest, so an upgraded harness would
+    otherwise report an ordinary miss and let callers substitute bundled
+    fixtures for rows the user already cached.
+    """
+    path = _normalized_path_for(spec, _PRE_RENAME_CACHE_SCHEMA)
+    if path.exists() or cache_sidecar_path(path).exists():
+        return path
+    return None
+
+
+def _incompatible_cache_error(spec: MappedHfSpec, legacy: Path) -> CacheValidationError:
+    return CacheValidationError(
+        f"{spec.name}: cached rows for {spec.hf_id} exist only under the "
+        f"pre-rename schema {_PRE_RENAME_CACHE_SCHEMA!r} at {legacy}; they are "
+        f"not read as {NORMALIZED_CACHE_SCHEMA!r} data. Re-run once with "
+        "fetching enabled to rebuild the cache instead of scoring bundled "
+        "fixtures",
+        path=legacy,
+        reason="pre-rename-cache-schema",
+    )
 
 
 def _sidecar_payload(
