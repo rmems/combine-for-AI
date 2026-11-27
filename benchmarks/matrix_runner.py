@@ -68,11 +68,9 @@ def run_matrix(
     hooks = hooks or MatrixHooks()
     matrix_dir = output_dir / definition.name
     journal_path = matrix_dir / "journal.jsonl"
-    if fresh:
-        journal_path.unlink(missing_ok=True)
     aggregate_path = matrix_dir / "aggregate.json"
     journal = ResumeJournal(journal_path)
-    replay = journal.open()
+    replay = journal.open(reset=fresh)
     try:
         statuses, aggregate = execute_session(
             SessionContext(

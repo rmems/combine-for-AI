@@ -696,6 +696,36 @@ def test_journal_lock_rejects_a_second_writer(tmp_path: Path) -> None:
     released.close()
 
 
+def test_fresh_open_leaves_journal_intact_when_locked(tmp_path: Path) -> None:
+    from benchmarks.journal import ResumeJournal, encode_record
+
+    path = tmp_path / "journal.jsonl"
+    path.write_bytes(encode_record({"kind": "header", "schema": "peira.matrix.journal.v1"}))
+    original = path.read_bytes()
+    held = ResumeJournal(path)
+    held.open()
+    try:
+        with pytest.raises(JournalError, match="locked"):
+            ResumeJournal(path).open(reset=True)
+        assert path.read_bytes() == original
+    finally:
+        held.close()
+
+
+def test_open_reset_clears_journal_after_lock(tmp_path: Path) -> None:
+    from benchmarks.journal import ResumeJournal, encode_record
+
+    path = tmp_path / "journal.jsonl"
+    path.write_bytes(encode_record({"kind": "header", "schema": "peira.matrix.journal.v1"}))
+    journal = ResumeJournal(path)
+    replay = journal.open(reset=True)
+    try:
+        assert replay.records == ()
+        assert not path.exists() or path.stat().st_size == 0
+    finally:
+        journal.close()
+
+
 def test_cli_exits_nonzero_when_journal_cells_fail(tmp_path: Path) -> None:
     config_path = write_matrix_config(tmp_path, quantization=["fp16"])
     definition = load_matrix_config(config_path)

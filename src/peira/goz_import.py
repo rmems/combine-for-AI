@@ -152,19 +152,30 @@ _SUPPORTED_SCHEMA_VERSIONS = frozenset({1, "1", "v1", "1.0"})
 _SUPPORTED_REPORT_FORMATS = frozenset({"json", "csv"})
 _SCALE_RANK = ("pack_v3", "pack_v2", "legacy_oracle")
 
-#: Keys that declare the import schema version, in precedence order.
-#: ``combine_import_schema`` is the pre-rename spelling; it is probed only so a
-#: declared unsupported version is rejected instead of silently read as v1.
-SCHEMA_VERSION_KEYS = ("peira_import_schema", "combine_import_schema", "schema_version")
+#: Canonical keys that select the import schema version, in precedence order.
+#: The pre-rename spelling ``combine_import_schema`` is not a selector (it
+#: must not override ``schema_version``) and is probed only so a declared
+#: unsupported or null version is rejected instead of silently read as v1.
+SCHEMA_VERSION_KEYS = ("peira_import_schema", "schema_version")
+_PRERENAME_SCHEMA_VERSION_KEY = "combine_import_schema"
 
 
 def declared_schema_version(raw: dict[str, Any]) -> Any:
     """Return the first non-null declared version under ``SCHEMA_VERSION_KEYS``.
 
-    Returns ``1`` only when no version key is present at all (unversioned
-    legacy input). A key that is present but ``None`` yields ``None`` so an
-    explicit null is rejected instead of silently treated as v1.
+    Returns ``1`` only when no canonical version key is present at all
+    (unversioned legacy input). A canonical key that is present but ``None``
+    yields ``None`` so an explicit null is rejected instead of silently
+    treated as v1.
+
+    If the pre-rename key is present and is not a supported version (including
+    an explicit ``None``), that value is returned so callers reject it. A
+    supported value under the pre-rename key is ignored for selection.
     """
+    if _PRERENAME_SCHEMA_VERSION_KEY in raw:
+        prerename = raw[_PRERENAME_SCHEMA_VERSION_KEY]
+        if prerename not in _SUPPORTED_SCHEMA_VERSIONS:
+            return prerename
     return next(
         (raw[key] for key in SCHEMA_VERSION_KEYS if raw.get(key) is not None),
         None if any(key in raw for key in SCHEMA_VERSION_KEYS) else 1,

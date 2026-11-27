@@ -138,6 +138,18 @@ def test_reject_unsupported_version_under_prerename_key() -> None:
             import_goz_experiment(_write_experiment(tmp, raw))
 
 
+def test_prerename_version_key_does_not_override_schema_version() -> None:
+    """A supported combine_import_schema value must not hide schema_version."""
+    raw = {
+        "combine_import_schema": 1,
+        "schema_version": 2,
+        "chain": {"per_block": [{"block": 0, "expert_only": {}}]},
+    }
+    with tempfile.TemporaryDirectory() as tmp:
+        with pytest.raises(GozImportError, match="unsupported peira_import_schema"):
+            import_goz_experiment(_write_experiment(tmp, raw))
+
+
 def test_reject_explicit_null_schema_version() -> None:
     """A declared null version is not an unversioned v1 input."""
     raw = {
