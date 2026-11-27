@@ -150,6 +150,18 @@ def test_prerename_version_key_does_not_override_schema_version() -> None:
             import_goz_experiment(_write_experiment(tmp, raw))
 
 
+def test_malformed_prerename_version_is_goz_error_not_typeerror() -> None:
+    """An array under the pre-rename key must not traceback past GozImportError."""
+    raw = {
+        "peira_import_schema": 1,
+        "combine_import_schema": [],
+        "chain": {"per_block": [{"block": 0, "expert_only": {}}]},
+    }
+    with tempfile.TemporaryDirectory() as tmp:
+        with pytest.raises(GozImportError, match="unsupported peira_import_schema"):
+            import_goz_experiment(_write_experiment(tmp, raw))
+
+
 def test_reject_explicit_null_schema_version() -> None:
     """A declared null version is not an unversioned v1 input."""
     raw = {

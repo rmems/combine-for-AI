@@ -148,7 +148,9 @@ def _as_int(value: Any) -> int | None:
         return None
 
 
-_SUPPORTED_SCHEMA_VERSIONS = frozenset({1, "1", "v1", "1.0"})
+# Tuple (not a set): membership must not raise TypeError when a JSON
+# object or array is supplied under a version key.
+_SUPPORTED_SCHEMA_VERSIONS = (1, "1", "v1", "1.0")
 _SUPPORTED_REPORT_FORMATS = frozenset({"json", "csv"})
 _SCALE_RANK = ("pack_v3", "pack_v2", "legacy_oracle")
 
