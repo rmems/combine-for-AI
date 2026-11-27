@@ -310,6 +310,68 @@ def test_invalid_mapped_cache_is_refetched(tmp_path, monkeypatch) -> None:
     assert records[0].answer_index == 1
 
 
+def _legacy_mapped_cache_pair(spec: MappedHfSpec) -> Path:
+    from benchmarks import dataset_mapped_cache as cache
+
+    path = cache._normalized_path_for(spec, cache._PRE_RENAME_CACHE_SCHEMA)
+    cache._persist_mapped_cache(
+        path,
+        [DatasetRecord(prompt="keep", choices=["a", "b"], answer_index=0)],
+        spec,
+        "b" * 40,
+    )
+    return path
+
+
+def test_offline_pre_rename_cache_fails_loud(tmp_path: Path) -> None:
+    """A pre-rename cache pair must not silently become a fixture run."""
+    from benchmarks import dataset_mapped_cache as cache
+    from benchmarks.dataset_cache_models import CacheValidationError
+
+    spec = MappedHfSpec(
+        name="piqa",
+        hf_id="ybisk/piqa",
+        hf_subset=None,
+        split="validation",
+        cache_dir=tmp_path,
+        task=TaskKind.MULTIPLE_CHOICE,
+    )
+    _legacy_mapped_cache_pair(spec)
+
+    with pytest.raises(CacheValidationError, match="pre-rename"):
+        cache.records_from_hf(
+            spec, lambda row: DatasetRecord(prompt=str(row)), allow_fetch=False
+        )
+
+
+def test_named_loader_does_not_substitute_fixtures_for_legacy_cache(
+    tmp_path: Path,
+) -> None:
+    from benchmarks.dataset_cache_models import CacheValidationError
+
+    entry = CATALOG["piqa"]
+    spec = MappedHfSpec(
+        name="piqa",
+        hf_id=entry.hf_id,
+        hf_subset=entry.hf_subset,
+        split="validation",
+        cache_dir=tmp_path,
+        task=TaskKind.MULTIPLE_CHOICE,
+    )
+    _legacy_mapped_cache_pair(spec)
+
+    loader = default_dataset_registry().loader_for("piqa")
+    with pytest.raises(CacheValidationError, match="pre-rename"):
+        loader.load(
+            DatasetSpec(
+                name="piqa",
+                source="piqa",
+                cache_dir=str(tmp_path),
+                cache_mode="offline",
+            )
+        )
+
+
 def test_failed_revision_probe_is_treated_as_unknown(monkeypatch) -> None:
     from benchmarks import dataset_mapped_cache as cache
 

@@ -121,6 +121,49 @@ def test_reject_unsupported_schema_version() -> None:
             import_goz_experiment(path)
 
 
+def _write_experiment(tmp: str, raw: dict) -> Path:
+    path = Path(tmp) / "experiment.json"
+    path.write_text(json.dumps(raw), encoding="utf-8")
+    return path
+
+
+def test_reject_unsupported_version_under_prerename_key() -> None:
+    """combine_import_schema is probed only to reject declared bad versions."""
+    raw = {
+        "combine_import_schema": 2,
+        "chain": {"per_block": [{"block": 0, "expert_only": {}}]},
+    }
+    with tempfile.TemporaryDirectory() as tmp:
+        with pytest.raises(GozImportError, match="unsupported peira_import_schema"):
+            import_goz_experiment(_write_experiment(tmp, raw))
+
+
+def test_reject_explicit_null_schema_version() -> None:
+    """A declared null version is not an unversioned v1 input."""
+    raw = {
+        "schema_version": None,
+        "chain": {"per_block": [{"block": 0, "expert_only": {}}]},
+    }
+    with tempfile.TemporaryDirectory() as tmp:
+        with pytest.raises(GozImportError, match="unsupported peira_import_schema"):
+            import_goz_experiment(_write_experiment(tmp, raw))
+
+
+def test_null_version_falls_back_to_later_key() -> None:
+    raw = {
+        "peira_import_schema": None,
+        "schema_version": 1,
+        "chain": {
+            "per_block": [
+                {"block": 0, "expert_only": {"router_top1_agreement": 0.5}}
+            ]
+        },
+    }
+    with tempfile.TemporaryDirectory() as tmp:
+        result = import_goz_experiment(_write_experiment(tmp, raw), arms=("expert_only",))
+        assert len(result.rows) == 1
+
+
 def test_reject_unsupported_report_format() -> None:
     path = FIXTURES / "goz_route_preservation.sample.json"
     result = import_goz_experiment(path)

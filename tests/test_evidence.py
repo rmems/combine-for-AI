@@ -158,6 +158,13 @@ def test_unknown_or_future_schema_is_rejected() -> None:
         parse_evidence({**payload, "surprise": 1})
 
 
+def test_prerename_schema_id_is_rejected_by_name() -> None:
+    """Pre-rename 'combine_for_ai.evidence' records fail loud, not migrate."""
+    payload = {**mock_record().to_payload(), "schema": "combine_for_ai.evidence"}
+    with pytest.raises(EvidenceError, match="predates the peira rename"):
+        load_evidence(payload)
+
+
 # --- legacy migration -------------------------------------------------------
 
 

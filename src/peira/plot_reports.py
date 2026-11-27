@@ -9,11 +9,16 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import Field, ValidationError
+from pydantic import Field, ValidationError, model_validator
 
 from benchmarks.reporting import write_csv
 from peira.jsonio import ensure_dir, write_json
 from peira.report_evidence import RenderingModel, load_report_evidence, read_json
+
+
+#: Schema identifier written before the combine-for-AI -> peira rename. It is
+#: recognized only to fail loudly; pre-rename configs are never accepted.
+_PRERENAME_CONFIG_SCHEMA = "combine.plot-config.v1"
 
 
 class PlotConfig(RenderingModel):
@@ -21,6 +26,17 @@ class PlotConfig(RenderingModel):
     width_inches: float = Field(default=9, ge=6, le=20)
     height_inches: float = Field(default=5, ge=4, le=20)
     dpi: int = Field(default=120, ge=72, le=300)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_prerename_schema(cls, data: Any) -> Any:
+        if isinstance(data, dict) and data.get("schema_version") == _PRERENAME_CONFIG_SCHEMA:
+            raise ValueError(
+                "schema_version 'combine.plot-config.v1' predates the peira "
+                "rename and is not accepted; write the config as "
+                "'peira.plot-config.v1'"
+            )
+        return data
 
 
 @dataclass(frozen=True)

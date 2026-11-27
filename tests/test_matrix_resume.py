@@ -176,6 +176,39 @@ def test_incompatible_matrix_definition_is_rejected(tmp_path: Path) -> None:
         run_matrix(config_path, output)
 
 
+def _rewrite_header_schema(journal_path: Path, schema: str) -> None:
+    records = [
+        {**record, "schema": schema} if record.get("kind") == "header" else record
+        for record in replay_journal(journal_path).records
+    ]
+    journal_path.write_bytes(b"".join(encode_record(record) for record in records))
+
+
+def test_prerename_journal_is_rejected_with_fresh_hint(tmp_path: Path) -> None:
+    config_path = write_matrix_config(tmp_path, quantization=["fp16"])
+    output = tmp_path / "out"
+    result = run_matrix(config_path, output)
+    _rewrite_header_schema(result.journal_path, "combine.matrix.journal.v1")
+
+    with pytest.raises(IncompatibleMatrixError, match="--fresh"):
+        run_matrix(config_path, output)
+
+    fresh = run_matrix(config_path, output, fresh=True)
+    assert all(status.state is CellState.SUCCEEDED for status in fresh.statuses.values())
+
+
+def test_cli_fresh_discards_prerename_journal(tmp_path: Path) -> None:
+    config_path = write_matrix_config(tmp_path, quantization=["fp16"])
+    output = tmp_path / "out"
+    result = run_matrix(config_path, output)
+    _rewrite_header_schema(result.journal_path, "combine.matrix.journal.v1")
+
+    rc = run_matrix_main(
+        ["--config", str(config_path), "--output-dir", str(output), "--fresh"]
+    )
+    assert rc == 0
+
+
 def test_corrupt_tail_keeps_earlier_records(tmp_path: Path) -> None:
     path = tmp_path / "journal.jsonl"
     first = {"kind": "header", "schema": "peira.matrix.journal.v1"}

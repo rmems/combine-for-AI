@@ -152,19 +152,28 @@ _SUPPORTED_SCHEMA_VERSIONS = frozenset({1, "1", "v1", "1.0"})
 _SUPPORTED_REPORT_FORMATS = frozenset({"json", "csv"})
 _SCALE_RANK = ("pack_v3", "pack_v2", "legacy_oracle")
 
+#: Keys that declare the import schema version, in precedence order.
+#: ``combine_import_schema`` is the pre-rename spelling; it is probed only so a
+#: declared unsupported version is rejected instead of silently read as v1.
+SCHEMA_VERSION_KEYS = ("peira_import_schema", "combine_import_schema", "schema_version")
+
+
+def declared_schema_version(raw: dict[str, Any]) -> Any:
+    """Return the first non-null declared version under ``SCHEMA_VERSION_KEYS``.
+
+    Returns ``1`` only when no version key is present at all (unversioned
+    legacy input). A key that is present but ``None`` yields ``None`` so an
+    explicit null is rejected instead of silently treated as v1.
+    """
+    return next(
+        (raw[key] for key in SCHEMA_VERSION_KEYS if raw.get(key) is not None),
+        None if any(key in raw for key in SCHEMA_VERSION_KEYS) else 1,
+    )
+
 
 def _require_schema_version(raw: dict[str, Any]) -> None:
-    """Accept missing version as v1; reject unknown explicit versions."""
-    ver = next(
-        (
-            raw[key]
-            for key in ("peira_import_schema", "schema_version")
-            if raw.get(key) is not None
-        ),
-        None,
-    )
-    if ver is None:
-        return
+    """Accept missing version as v1; reject unknown or null declared versions."""
+    ver = declared_schema_version(raw)
     if ver not in _SUPPORTED_SCHEMA_VERSIONS:
         raise GozImportError(f"unsupported peira_import_schema version: {ver!r}")
 
@@ -593,10 +602,12 @@ __all__ = [
     "PACK_PROVENANCE_FIELDS",
     "SCHEMA_MULTIBLOCK_V1",
     "SCHEMA_ROUTE_PRESERVATION_V1",
+    "SCHEMA_VERSION_KEYS",
     "GozExperimentKind",
     "GozImportError",
     "ImportedExperimentRow",
     "GozImportResult",
+    "declared_schema_version",
     "detect_experiment_kind",
     "load_experiment_json",
     "import_multiblock_metrics",

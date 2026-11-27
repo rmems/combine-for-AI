@@ -191,7 +191,12 @@ def _ensure_journal_header(
         ctx.hooks.on_commit(CommitPoint.JOURNAL_WRITE, None)
         return
     if header.get("schema") != JOURNAL_SCHEMA:
-        raise IncompatibleMatrixError(f"unsupported journal schema {header.get('schema')!r}")
+        raise IncompatibleMatrixError(
+            f"unsupported journal schema {header.get('schema')!r}: expected "
+            f"{JOURNAL_SCHEMA!r}; the peira rename changed cell identities, so "
+            "a journal written under an older schema cannot be resumed — "
+            "rerun with --fresh"
+        )
     assert_compatible(str(header["definition_fingerprint"]), ctx.definition)
 
 

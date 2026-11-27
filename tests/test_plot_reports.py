@@ -206,6 +206,51 @@ def test_missing_unknown_or_malformed_input_is_actionable(tmp_path):
         report(path, tmp_path)
 
 
+def _normalized_archive(**extra):
+    return {
+        "run": {"schema": "grok_ozempic.multiblock_metrics.v1"},
+        "results": [
+            {"arm": "expert_only", "block_index": 0, "route_top1_agreement": 0.5}
+        ],
+        "certification": {},
+        "summary": [],
+        **extra,
+    }
+
+
+def test_normalized_archive_null_or_bad_declared_versions_are_rejected(tmp_path):
+    path = tmp_path / "archive.json"
+    for extra in (
+        {"schema_version": None},
+        {"peira_import_schema": None},
+        {"combine_import_schema": 2},
+        {"combine_import_schema": None},
+    ):
+        path.write_text(json.dumps(_normalized_archive(**extra)))
+        with pytest.raises(ValueError, match="version"):
+            report(path, tmp_path)
+
+
+def test_normalized_archive_valid_version_fallback_is_accepted(tmp_path):
+    path = tmp_path / "archive.json"
+    path.write_text(
+        json.dumps(
+            _normalized_archive(schema_version=None, peira_import_schema=1)
+        )
+    )
+    _, payload = report(path, tmp_path)
+    assert payload["cohorts"]
+
+
+def test_prerename_plot_evidence_schema_is_named_in_error(tmp_path):
+    path = tmp_path / "archive.json"
+    path.write_text(
+        json.dumps({"schema_version": "combine.plot-evidence.v1", "records": []})
+    )
+    with pytest.raises(ValueError, match="predates the peira rename"):
+        report(path, tmp_path)
+
+
 def test_legacy_results_without_run_fail_without_traceback(tmp_path):
     for payload in ({"results": [{"arm": "a"}]}, {"results": []}):
         path = tmp_path / "no-run.json"

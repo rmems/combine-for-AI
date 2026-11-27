@@ -41,6 +41,9 @@ EVIDENCE_SCHEMA = "peira.evidence"
 EVIDENCE_SCHEMA_VERSION = 1
 #: Pre-envelope payloads (artifact-smoke rows, matrix cells) carry no version.
 LEGACY_SCHEMA_VERSION = 0
+#: Identifier written before the combine-for-AI -> peira rename. It is
+#: recognized only to fail loudly; pre-rename evidence is never accepted.
+_PRERENAME_EVIDENCE_SCHEMA = "combine_for_ai.evidence"
 
 _SHA256_RE = re.compile(r"[0-9a-f]{64}")
 
@@ -255,6 +258,11 @@ class EvidenceRecord(BaseModel):
     @field_validator("schema_id")
     @classmethod
     def _schema_name(cls, value: str) -> str:
+        if value == _PRERENAME_EVIDENCE_SCHEMA:
+            raise ValueError(
+                f"evidence schema '{value}' predates the peira rename and is "
+                f"not accepted; regenerate the record as '{EVIDENCE_SCHEMA}'"
+            )
         if value != EVIDENCE_SCHEMA:
             raise ValueError(f"unknown evidence schema '{value}'")
         return value

@@ -6,7 +6,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, ValidationError, model_validator
 
 
 # Little-endian ASCII "GOZ1" — format SoT: rmems/grok-ozempic/docs/goz1-format.md
@@ -101,6 +101,19 @@ class SAAQMetadata(BaseModel):
     resid_in_drift: float | None = None
 
 
+#: Linkage keys written before the combine-for-AI -> peira rename. They are
+#: never read as peira fields; a linkage that carries only them is rejected so
+#: the run id and config path cannot be silently dropped.
+_PRERENAME_LINKAGE_KEYS = frozenset(
+    {
+        "combine_run_id",
+        "nfl_combine_run_id",
+        "combine_config_path",
+        "nfl_combine_config_path",
+    }
+)
+
+
 class BenchmarkLinkage(BaseModel):
     """Links a model manifest to a peira run."""
 
@@ -108,6 +121,20 @@ class BenchmarkLinkage(BaseModel):
     peira_config_path: str | None = None
     grok_ozempic_report_path: str | None = None
     grok_ozempic_experiment_id: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_prerename_keys(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        legacy = sorted(key for key in data if key in _PRERENAME_LINKAGE_KEYS)
+        if legacy and not (data.get("peira_run_id") or data.get("peira_config_path")):
+            raise ValueError(
+                f"benchmark_linkage declares run linkage only through "
+                f"pre-rename keys {legacy}; rename them to 'peira_run_id' / "
+                "'peira_config_path' (combine_* keys are not read)"
+            )
+        return data
 
 
 class ModelManifest(BaseModel):

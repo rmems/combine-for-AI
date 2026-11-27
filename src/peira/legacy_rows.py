@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from peira.goz_import import declared_schema_version
 from peira.legacy_schema import GOZ_METRICS, GOZ_SCHEMAS, SUPPORTED_VERSIONS
 from peira.legacy_values import is_nonnegative_int, require_finite_metric
 
@@ -27,16 +28,9 @@ def require_legacy_metadata(raw: dict[str, Any]) -> None:
 
 
 def _require_normalized_schema(raw: dict[str, Any], path: Path) -> None:
-    version = next(
-        (
-            raw[key]
-            for key in ("peira_import_schema", "schema_version")
-            if raw.get(key) is not None
-        ),
-        1,
-    )
+    version = declared_schema_version(raw)
     if version not in SUPPORTED_VERSIONS:
-        raise ValueError("unsupported legacy schema_version")
+        raise ValueError(f"{path}: unsupported legacy schema_version {version!r}")
     run = raw.get("run") or {}
     if not isinstance(run, dict) or run.get("schema") not in GOZ_SCHEMAS:
         raise ValueError(

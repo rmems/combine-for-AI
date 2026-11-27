@@ -15,6 +15,7 @@ if str(_REPO_ROOT / "src") not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT / "src"))
 
 from benchmarks.journal import replay_journal  # noqa: E402
+from benchmarks.matrix import MatrixError as JournalMatrixError  # noqa: E402
 from benchmarks.matrix import RetryPolicy  # noqa: E402
 from benchmarks.matrix_runner import load_matrix_config, run_matrix  # noqa: E402
 from peira.matrix import (  # noqa: E402
@@ -145,7 +146,13 @@ def _journal_retry(args: argparse.Namespace) -> RetryPolicy | None:
 
 
 def _run_journal_cli(args: argparse.Namespace) -> int:
-    result = run_matrix(args.config, args.output_dir, retry=_journal_retry(args))
+    try:
+        result = run_matrix(
+            args.config, args.output_dir, retry=_journal_retry(args), fresh=args.fresh
+        )
+    except JournalMatrixError as exc:
+        print(f"matrix failed: {exc}", file=sys.stderr)
+        return 1
     replay = replay_journal(result.journal_path)
     print(f"matrix={result.definition.name}")
     print(f"journal={result.journal_path}")

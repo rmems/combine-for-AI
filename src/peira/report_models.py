@@ -6,6 +6,10 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, model_validator
 
+#: Schema identifier written before the combine-for-AI -> peira rename. It is
+#: recognized only to fail loudly; pre-rename archives are never accepted.
+_PRERENAME_ARCHIVE_SCHEMA = "combine.plot-evidence.v1"
+
 
 Text = Annotated[str, Field(min_length=1)]
 Count = Annotated[int, Field(ge=0)]
@@ -103,6 +107,17 @@ class EvidenceArchive(RenderingModel):
     schema_version: Literal["peira.plot-evidence.v1"]
     run: dict[str, Any] = Field(default_factory=dict)
     records: list[EvidenceRecord]
+
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_prerename_schema(cls, data: Any) -> Any:
+        if isinstance(data, dict) and data.get("schema_version") == _PRERENAME_ARCHIVE_SCHEMA:
+            raise ValueError(
+                "schema_version 'combine.plot-evidence.v1' predates the peira "
+                "rename and is not accepted; regenerate the archive as "
+                "'peira.plot-evidence.v1'"
+            )
+        return data
 
 
 def _reject_untruthful_provenance(record: EvidenceRecord) -> None:
