@@ -455,19 +455,22 @@ def test_aggregate_exposes_retry_count_and_disposition(tmp_path: Path) -> None:
     assert "disposition" in resumed.aggregate["cells"][0]
 
 
-def test_cli_rejects_zero_max_attempts(tmp_path: Path) -> None:
+def test_cli_rejects_zero_max_attempts(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     config_path = write_matrix_config(tmp_path, quantization=["fp16"])
-    with pytest.raises(MatrixError, match="max_attempts"):
-        run_matrix_main(
-            [
-                "--config",
-                str(config_path),
-                "--output-dir",
-                str(tmp_path / "out"),
-                "--max-attempts",
-                "0",
-            ]
-        )
+    # The journal CLI catches MatrixError so the message reaches stderr
+    # without a traceback (see _run_journal_cli).
+    code = run_matrix_main(
+        [
+            "--config",
+            str(config_path),
+            "--output-dir",
+            str(tmp_path / "out"),
+            "--max-attempts",
+            "0",
+        ]
+    )
+    assert code == 1
+    assert "max_attempts" in capsys.readouterr().err
 
 
 def test_matrix_name_rejects_dot_and_dotdot_path_components() -> None:

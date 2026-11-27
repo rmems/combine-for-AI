@@ -183,6 +183,27 @@ def test_prerename_schema_id_is_rejected_without_schema_version() -> None:
         load_evidence(payload)
 
 
+
+def test_prerename_schema_id_in_result_wrapper_is_rejected() -> None:
+    """A pre-rename identifier nested under result must not be migrated."""
+    payload = {
+        "result": {
+            "schema": "combine_for_ai.evidence",
+            "cell_id": "c",
+            "metrics": {
+                "accuracy": 0.5,
+                "perplexity": 2.0,
+                "throughput": 1.0,
+                "latency_ms": 1.0,
+                "vram_gb": 1.0,
+                "routing_entropy": 0.1,
+            },
+        }
+    }
+    with pytest.raises(EvidenceError, match="predates the peira rename"):
+        load_evidence(payload)
+
+
 # --- legacy migration -------------------------------------------------------
 
 

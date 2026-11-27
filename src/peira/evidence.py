@@ -442,6 +442,7 @@ def _migrate_v0(payload: Mapping[str, Any]) -> dict[str, Any]:
     """
     if isinstance(payload.get("result"), Mapping):
         payload = payload["result"]
+        _reject_prerename_schema(payload)
     if isinstance(payload.get("metrics"), Mapping):
         return _migrate_matrix_cell(payload)
     if "run_id" in payload and "status" in payload:
@@ -452,6 +453,14 @@ def _migrate_v0(payload: Mapping[str, Any]) -> dict[str, Any]:
 _MIGRATIONS: dict[int, Callable[[Mapping[str, Any]], dict[str, Any]]] = {
     LEGACY_SCHEMA_VERSION: _migrate_v0,
 }
+
+
+def _reject_prerename_schema(payload: Mapping[str, Any]) -> None:
+    if payload.get("schema") == _PRERENAME_EVIDENCE_SCHEMA:
+        raise EvidenceError(
+            f"evidence schema '{_PRERENAME_EVIDENCE_SCHEMA}' predates the peira rename and is "
+            f"not accepted; regenerate the record as '{EVIDENCE_SCHEMA}'"
+        )
 
 
 def _payload_version(payload: Mapping[str, Any]) -> int:
@@ -472,11 +481,7 @@ def load_evidence(payload: Mapping[str, Any]) -> EvidenceRecord:
     embedded = payload.get("evidence")
     if "schema_version" not in payload and isinstance(embedded, Mapping):
         return load_evidence(embedded)
-    if payload.get("schema") == _PRERENAME_EVIDENCE_SCHEMA:
-        raise EvidenceError(
-            f"evidence schema '{_PRERENAME_EVIDENCE_SCHEMA}' predates the peira rename and is "
-            f"not accepted; regenerate the record as '{EVIDENCE_SCHEMA}'"
-        )
+    _reject_prerename_schema(payload)
     version = _payload_version(payload)
     current: Mapping[str, Any] = payload
     while version < EVIDENCE_SCHEMA_VERSION:
